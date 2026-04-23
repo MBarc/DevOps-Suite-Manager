@@ -15,6 +15,33 @@ DEFAULT_CONFIG: dict = {
     "secrets": {
         "backend": "local",
         "local_key_file": "config/secrets.key",
+        "vault_addr": None,
+        "vault_token_env": "VAULT_TOKEN",
+        "vault_mount": "secret",
+        "vault_prefix": "dosm",
+    },
+    "auth": {
+        "session_secret_file": "config/session.key",
+        "session_cookie": "dosm_session",
+        "session_max_age_seconds": 43200,
+    },
+    "ssh_command_policy": {
+        "require_confirmation_off_list": True,
+        "confirmation_field": "host_name",
+        "allow_list": [
+            "uptime",
+            "whoami",
+            "hostname",
+            "df -h",
+            "df -h *",
+            "free -h",
+            "ps -ef",
+            "ls *",
+            "cat /etc/os-release",
+            "tail -n [0-9]* *",
+            "journalctl --since * --no-pager",
+            "systemctl status *",
+        ],
     },
     "enabled_modules": [],
 }

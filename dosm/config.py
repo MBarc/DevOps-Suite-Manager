@@ -24,7 +24,51 @@ class SecretsConfig(BaseModel):
     backend: str = "local"  # "local" | "vault"
     local_key_file: str = "config/secrets.key"
     vault_addr: str | None = None
-    vault_mount: str | None = None
+    vault_token_env: str = "VAULT_TOKEN"
+    vault_mount: str = "secret"
+    vault_prefix: str = "dosm"
+
+
+class AuthConfig(BaseModel):
+    session_secret_file: str = "config/session.key"
+    session_cookie: str = "dosm_session"
+    session_max_age_seconds: int = 60 * 60 * 12  # 12h
+
+
+class SSHPolicyConfig(BaseModel):
+    """Governs what `ssh_exec` actions can run without elevated confirmation.
+
+    Patterns are shell globs matched against the full command string. Off-list
+    commands are still allowed in agent mode, but require a typed confirmation
+    (the host name) in the plan card.
+    """
+
+    allow_list: list[str] = Field(
+        default_factory=lambda: [
+            "uptime",
+            "whoami",
+            "hostname",
+            "id",
+            "date",
+            "df -h",
+            "df -h *",
+            "free -m",
+            "free -h",
+            "ps auxf",
+            "ps -ef",
+            "ls *",
+            "cat /etc/os-release",
+            "cat /proc/cpuinfo",
+            "cat /proc/meminfo",
+            "tail -n [0-9]* *",
+            "journalctl --since * --no-pager",
+            "journalctl -u * --no-pager",
+            "systemctl status *",
+            "systemctl is-active *",
+        ]
+    )
+    require_confirmation_off_list: bool = True
+    confirmation_field: str = "host_name"  # what the user types to confirm
 
 
 class Config(BaseModel):
@@ -32,6 +76,8 @@ class Config(BaseModel):
     server: ServerConfig = ServerConfig()
     llm: LLMConfig = LLMConfig()
     secrets: SecretsConfig = SecretsConfig()
+    auth: AuthConfig = AuthConfig()
+    ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     enabled_modules: list[str] = Field(default_factory=list)
 
     @property

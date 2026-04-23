@@ -6,17 +6,37 @@ from pathlib import Path
 import typer
 import uvicorn
 from rich.console import Console
+from rich.table import Table
+from sqlalchemy import select
 
 from dosm import __version__
+from dosm.auth.passwords import hash_password
 from dosm.bootstrap import initialize_home
 from dosm.config import load_config
+from dosm.db import create_all, init_engine, session_scope
+from dosm.models import Credential, User
+from dosm.secrets import SecretNotFound, get_backend
 
-app = typer.Typer(
-    help="DevOps Operations Suite Manager.",
-    no_args_is_help=True,
-    add_completion=False,
-)
+app = typer.Typer(help="DevOps Operations Suite Manager.", no_args_is_help=True, add_completion=False)
+db_app = typer.Typer(help="Database admin commands.", no_args_is_help=True)
+user_app = typer.Typer(help="Local user management.", no_args_is_help=True)
+secret_app = typer.Typer(help="Manage secrets via the configured backend.", no_args_is_help=True)
+cred_app = typer.Typer(help="Manage credential records (references into the secrets backend).", no_args_is_help=True)
+app.add_typer(db_app, name="db")
+app.add_typer(user_app, name="user")
+app.add_typer(secret_app, name="secret")
+app.add_typer(cred_app, name="credential")
+
 console = Console()
+
+
+def _load() -> None:
+    """Load config + init DB engine so CLI subcommands can use session_scope."""
+    cfg = load_config()
+    init_engine(cfg)
+
+
+# ---- top-level ------------------------------------------------------------
 
 
 @app.command()
@@ -32,15 +52,16 @@ def init(
 ) -> None:
     """Create a new DOSM_HOME directory with the standard layout and default config."""
     created = initialize_home(home, force=force)
+    home_resolved = home.resolve()
     if created:
-        console.print(f"[green]Initialized[/green] {home.resolve()}")
+        console.print(f"[green]Initialized[/green] {home_resolved}")
         for p in created:
-            console.print(f"  + {p.relative_to(home.resolve()) if p != home.resolve() else p}")
+            rel = p.relative_to(home_resolved) if p != home_resolved else p
+            console.print(f"  + {rel}")
     else:
-        console.print(f"[yellow]Nothing to do[/yellow] at {home.resolve()} (already initialized)")
+        console.print(f"[yellow]Nothing to do[/yellow] at {home_resolved} (already initialized)")
     console.print(
-        "\nNext: export DOSM_HOME="
-        f"{home.resolve()} and run `dosm serve`."
+        f"\nNext:\n  export DOSM_HOME={home_resolved}\n  dosm db init\n  dosm user create admin\n  dosm serve"
     )
 
 
@@ -59,13 +80,146 @@ def serve(
     bind_port = port or cfg.server.port
     console.print(f"[green]Starting DOSM[/green] on http://{bind_host}:{bind_port}")
     console.print(f"  DOSM_HOME = {cfg.home}")
-    uvicorn.run(
-        "dosm.main:create_app",
-        factory=True,
-        host=bind_host,
-        port=bind_port,
-        reload=reload,
-    )
+    uvicorn.run("dosm.main:create_app", factory=True, host=bind_host, port=bind_port, reload=reload)
+
+
+# ---- db -------------------------------------------------------------------
+
+
+@db_app.command("init")
+def db_init() -> None:
+    """Create all tables in SQLite. Safe to re-run."""
+    cfg = load_config()
+    create_all(cfg)
+    console.print(f"[green]Schema ready[/green] at {cfg.db_path}")
+
+
+# ---- user -----------------------------------------------------------------
+
+
+@user_app.command("create")
+def user_create(
+    username: str = typer.Argument(...),
+    role: str = typer.Option("admin", "--role", help="admin | operator | viewer"),
+    password: str | None = typer.Option(
+        None, "--password", help="Password (will prompt if omitted).", show_default=False
+    ),
+) -> None:
+    """Create a local user. First user created should be admin."""
+    _load()
+    if password is None:
+        password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
+    with session_scope() as s:
+        existing = s.execute(select(User).where(User.username == username)).scalar_one_or_none()
+        if existing is not None:
+            console.print(f"[red]User {username!r} already exists.[/red]")
+            raise typer.Exit(1)
+        s.add(User(username=username, password_hash=hash_password(password), role=role))
+    console.print(f"[green]Created user[/green] {username} (role={role})")
+
+
+@user_app.command("list")
+def user_list() -> None:
+    _load()
+    with session_scope() as s:
+        rows = [
+            (u.id, u.username, u.role, u.is_active, u.created_at)
+            for u in s.execute(select(User).order_by(User.username)).scalars().all()
+        ]
+    table = Table("ID", "Username", "Role", "Active", "Created")
+    for uid, uname, role, active, created in rows:
+        table.add_row(str(uid), uname, role, "yes" if active else "no", created.isoformat(timespec="seconds"))
+    console.print(table)
+
+
+@user_app.command("passwd")
+def user_passwd(username: str = typer.Argument(...)) -> None:
+    """Reset a user's password."""
+    _load()
+    password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+    with session_scope() as s:
+        u = s.execute(select(User).where(User.username == username)).scalar_one_or_none()
+        if u is None:
+            console.print(f"[red]No such user: {username}[/red]")
+            raise typer.Exit(1)
+        u.password_hash = hash_password(password)
+    console.print(f"[green]Password updated[/green] for {username}")
+
+
+# ---- secret ---------------------------------------------------------------
+
+
+@secret_app.command("set")
+def secret_set(
+    path: str = typer.Argument(..., help="e.g. ssh/prod/admin"),
+    value: str | None = typer.Option(None, "--value", help="Value (will prompt if omitted)."),
+) -> None:
+    _load()
+    if value is None:
+        value = typer.prompt("Value", hide_input=True, confirmation_prompt=True)
+    get_backend().set_str(path, value)
+    console.print(f"[green]Wrote[/green] {path}")
+
+
+@secret_app.command("get")
+def secret_get(path: str = typer.Argument(...)) -> None:
+    _load()
+    try:
+        console.print(get_backend().get_str(path))
+    except SecretNotFound:
+        console.print(f"[red]Not found: {path}[/red]")
+        raise typer.Exit(1)
+
+
+@secret_app.command("list")
+def secret_list(prefix: str = typer.Argument("")) -> None:
+    _load()
+    for path in get_backend().list(prefix):
+        console.print(path)
+
+
+@secret_app.command("delete")
+def secret_delete(path: str = typer.Argument(...)) -> None:
+    _load()
+    try:
+        get_backend().delete(path)
+    except SecretNotFound:
+        console.print(f"[red]Not found: {path}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]Deleted[/green] {path}")
+
+
+# ---- credential -----------------------------------------------------------
+
+
+@cred_app.command("add")
+def credential_add(
+    name: str = typer.Argument(..., help="Unique friendly name, e.g. 'prod-admin'"),
+    kind: str = typer.Option(..., "--kind", help="ssh_password | ssh_key | rdp_password | api_token"),
+    username: str | None = typer.Option(None, "--username"),
+    secret_ref: str = typer.Option(..., "--secret-ref", help="Path in the secrets backend."),
+) -> None:
+    _load()
+    with session_scope() as s:
+        if s.execute(select(Credential).where(Credential.name == name)).scalar_one_or_none():
+            console.print(f"[red]Credential {name!r} already exists.[/red]")
+            raise typer.Exit(1)
+        s.add(Credential(name=name, kind=kind, username=username, secret_ref=secret_ref))
+    console.print(f"[green]Created credential[/green] {name}")
+
+
+@cred_app.command("list")
+def credential_list() -> None:
+    _load()
+    with session_scope() as s:
+        rows = [
+            (c.id, c.name, c.kind, c.username, c.secret_ref)
+            for c in s.execute(select(Credential).order_by(Credential.name)).scalars().all()
+        ]
+    table = Table("ID", "Name", "Kind", "Username", "Secret ref")
+    for cid, name, kind, username, secret_ref in rows:
+        table.add_row(str(cid), name, kind, username or "", secret_ref)
+    console.print(table)
 
 
 if __name__ == "__main__":

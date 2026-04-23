@@ -11,8 +11,15 @@
     <a href="/" class="brand">DOSM</a>
     <nav>
       <a href="/">Dashboard</a>
+      <a href="/hosts">Hosts</a>
       <a href="/health">Health</a>
     </nav>
+    <div class="spacer"></div>
+    {% if request.session.get('user_id') %}
+    <form method="post" action="/logout" class="inline">
+      <button type="submit" class="btn btn-ghost">Sign out</button>
+    </form>
+    {% endif %}
   </header>
   <main>
     {% block content %}{% endblock %}

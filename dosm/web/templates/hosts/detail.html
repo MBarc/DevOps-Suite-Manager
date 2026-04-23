@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ host.name }} - DOSM{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="row-between">
+    <h1>{{ host.name }}</h1>
+    <div>
+      <a class="btn" href="/hosts/{{ host.id }}/edit">Edit</a>
+      <form method="post" action="/hosts/{{ host.id }}/delete" style="display:inline"
+            onsubmit="return confirm('Delete {{ host.name }}?');">
+        <button class="btn btn-danger" type="submit">Delete</button>
+      </form>
+    </div>
+  </div>
+
+  <dl class="kv">
+    <dt>Address</dt><dd><code>{{ host.hostname }}:{{ host.port }}</code></dd>
+    <dt>Protocol</dt><dd>{{ host.protocol }}</dd>
+    <dt>Credential</dt>
+    <dd>
+      {% if host.credential %}
+        <code>{{ host.credential.name }}</code>
+        <span class="muted">({{ host.credential.kind }}{% if host.credential.username %}, {{ host.credential.username }}{% endif %})</span>
+      {% else %}
+        <em class="muted">none</em>
+      {% endif %}
+    </dd>
+    <dt>Tags</dt>
+    <dd>
+      {% if host.tags %}
+        {% for t in host.tags %}<span class="tag">{{ t.name }}</span>{% endfor %}
+      {% else %}<em class="muted">none</em>{% endif %}
+    </dd>
+    <dt>Source</dt><dd>{{ host.source_module or "manual" }}</dd>
+    <dt>Description</dt><dd>{{ host.description or "" }}</dd>
+  </dl>
+
+  <p class="muted">Connect (Guacamole) arrives in Phase 7.</p>
+</section>
+{% endblock %}
