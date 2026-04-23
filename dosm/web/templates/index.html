@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}DOSM Dashboard{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>DevOps Operations Suite Manager</h1>
+  <p class="muted">v{{ version }}</p>
+  <dl class="kv">
+    <dt>DOSM_HOME</dt><dd><code>{{ home }}</code></dd>
+    <dt>LLM model</dt><dd><code>{{ llm_model }}</code></dd>
+    <dt>Enabled modules</dt>
+    <dd>
+      {% if enabled_modules %}
+        <ul>
+        {% for m in enabled_modules %}<li><code>{{ m }}</code></li>{% endfor %}
+        </ul>
+      {% else %}
+        <em>none yet</em>
+      {% endif %}
+    </dd>
+  </dl>
+</section>
+<section class="panel">
+  <h2>Next steps</h2>
+  <ol>
+    <li>Drop documentation into <code>{{ home }}/docs/</code>.</li>
+    <li>Install a module into <code>{{ home }}/modules/</code> and enable it in <code>config.yaml</code>.</li>
+    <li>Point the LLM config at a running Ollama instance.</li>
+  </ol>
+</section>
+{% endblock %}

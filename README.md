@@ -1,1 +1,79 @@
-# DevOps-Operations-Suite-Manager
+# DevOps Operations Suite Manager (DOSM)
+
+A self-hosted, modular operations console for managing on-prem infrastructure —
+Service Fabric, Dynatrace ActiveGates, SAS Linux servers, and whatever else
+you bolt on via modules — with an embedded, CPU-friendly LLM that reads your
+local documentation and can run in either chat or agent (propose-and-approve)
+mode.
+
+> Status: early scaffold. Phase 1 ships the app skeleton, `$DOSM_HOME`
+> bootstrap, config loader, and a minimal dashboard. LLM, modules, and agent
+> mode land in later phases.
+
+## Design at a glance
+
+- **Cross-platform app** (Windows + Linux). Individual modules may declare OS
+  constraints — e.g. the Service Fabric module requires Windows/pwsh.
+- **Modular integrations.** Each integration (Service Fabric, Dynatrace, SAS,
+  ...) is a module dropped into `$DOSM_HOME/modules/` with its own
+  `module.yaml`, routes, and agent-callable actions.
+- **Local-first LLM.** Ollama by default (CPU-friendly model like
+  `qwen2.5:7b-instruct`), with optional GPU. Retrieval is grounded in your
+  local `docs/` directory — no outbound traffic required.
+- **Two interaction modes.**
+  - *LLM mode*: RAG chat with citations, read-only.
+  - *Agent mode*: every action is a plan card (summary, command preview,
+    expected effect, rollback). User approves / edits / rejects before
+    execution. Approved actions feed an audit log that can be drafted into new
+    runbooks.
+- **Pluggable secrets.** Local age-encrypted file for solo setups; HashiCorp
+  Vault for shared deployments. Same interface.
+- **SQLite** for state (with `sqlite-vec` for embeddings) — one file under
+  `$DOSM_HOME/data/`.
+
+## `$DOSM_HOME` layout
+
+```
+$DOSM_HOME/
+  config.yaml
+  config/        secrets key, per-host config
+  docs/          your documentation (indexed into the LLM)
+    drafts/      LLM-authored runbook drafts pending review
+  scripts/       scripts the agent can propose to run
+  modules/       installed integration modules
+  resources/     anything else
+  data/
+    app.db       SQLite (state + vector index)
+    action_log/  audit trail of approved agent actions
+  logs/
+```
+
+## Quick start (Phase 1)
+
+```bash
+# 1. Install in editable mode
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e .
+
+# 2. Create your DOSM_HOME
+dosm init ./.dosm-home
+
+# 3. Start the app
+export DOSM_HOME=$(pwd)/.dosm-home   # Windows: set DOSM_HOME=...
+dosm serve
+```
+
+Then open <http://127.0.0.1:8765>.
+
+## Roadmap
+
+1. ✅ Phase 1 — scaffold, bootstrap, minimal dashboard
+2. ⏭ Phase 2 — SQLite + auth + secrets backend (local + Vault)
+3. ⏭ Phase 3 — module loader contract + trivial example module
+4. ⏭ Phase 4 — docs ingestion + RAG search
+5. ⏭ Phase 5 — Ollama wiring + LLM chat mode
+6. ⏭ Phase 6 — Agent mode: plan cards with Approve / Edit / Reject
+7. ⏭ Phase 7 — Script runner with approval
+8. ⏭ Phase 8 — Service Fabric module (PowerShell, Windows)
+9. ⏭ Phase 9 — Observer: draft runbooks from approved action logs
