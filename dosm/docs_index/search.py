@@ -118,11 +118,16 @@ def _vector_search(
 
 
 def search(db: Session, cfg: Config, query: str, *, limit: int = 10) -> list[SearchHit]:
-    """Vector search if we have an embedder + embedded chunks; else LIKE."""
+    """Vector search if we have an embedder + embedded chunks; else LIKE.
+
+    Never blocks a request on first-time embedder initialization — uses
+    block=False so cold requests get LIKE results immediately while a
+    background warmer (or CLI `docs reindex`) primes the embedder.
+    """
     query = (query or "").strip()
     if not query:
         return []
-    embedder = _get_embedder(cfg)
+    embedder = _get_embedder(cfg, block=False)
     if isinstance(embedder, NoEmbedder):
         return _like_search(db, query, limit)
     try:

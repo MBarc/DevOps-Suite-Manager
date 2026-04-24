@@ -18,7 +18,8 @@ from dosm.auth.session import install_session_middleware
 from dosm.config import Config, load_config
 from dosm.db import init_engine
 from dosm.docs_index import docs_router
-from dosm.docs_index.indexer import reindex_async
+from dosm.docs_index.indexer import reindex_async, warm_embedder_async
+from dosm.llm import chat_router
 from dosm.hosts import hosts_router
 from dosm.metrics import metrics_router
 from dosm.models import User
@@ -58,6 +59,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(hosts_router)
     app.include_router(docs_router)
+    app.include_router(chat_router)
     app.include_router(modules_router)
     app.include_router(metrics_router)
     if cfg.terminals.enabled:
@@ -65,9 +67,12 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     load_enabled_modules(app, cfg)
 
-    if cfg.docs_index.auto_index_on_startup:
-        @app.on_event("startup")
-        async def _schedule_initial_reindex() -> None:
+    @app.on_event("startup")
+    async def _warm_and_index() -> None:
+        # Warm the embedder in a background thread so no request ever pays the
+        # first-time init cost (HF download, ONNX load).
+        warm_embedder_async(cfg)
+        if cfg.docs_index.auto_index_on_startup:
             reindex_async(cfg, force=False)
 
     @app.get("/", response_class=HTMLResponse)

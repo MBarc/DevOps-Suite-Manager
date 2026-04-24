@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Chat — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Chat</h1>
+    <div class="subtitle">Ask questions grounded in your local documentation. Model: <code>{{ request.app.state.config.llm.model }}</code></div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/chat/new" class="inline">
+      <button type="submit">+ New chat</button>
+    </form>
+  </div>
+</header>
+
+<section class="card">
+  {% if conversations %}
+  <table class="data">
+    <thead><tr><th>Title</th><th>Updated</th><th>Model</th><th style="width:1%"></th></tr></thead>
+    <tbody>
+    {% for c in conversations %}
+      <tr>
+        <td><a href="/chat/{{ c.id }}" style="color:var(--fg-strong); font-weight:500">{{ c.title }}</a></td>
+        <td class="muted" style="font-size:12.5px">{{ c.updated_at.isoformat(timespec='seconds') }}</td>
+        <td class="muted"><code>{{ c.model or '—' }}</code></td>
+        <td>
+          <form method="post" action="/chat/{{ c.id }}/delete" class="inline"
+                onsubmit="return confirm('Delete this conversation?');">
+            <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state">
+      No conversations yet.
+      <form method="post" action="/chat/new" class="inline" style="margin-left:8px">
+        <button type="submit">Start one</button>
+      </form>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

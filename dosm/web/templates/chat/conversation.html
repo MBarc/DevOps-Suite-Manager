@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}{{ conversation.title }} — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1 style="font-size:18px">{{ conversation.title }}</h1>
+    <div class="subtitle">Model <code>{{ ollama_model }}</code> · answers grounded in <code>{{ request.app.state.config.docs_dir }}</code></div>
+  </div>
+  <div class="actions">
+    <a href="/chat" class="btn btn-ghost">All chats</a>
+    <form method="post" action="/chat/{{ conversation.id }}/delete" class="inline"
+          onsubmit="return confirm('Delete this conversation?');">
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+  </div>
+</header>
+
+<section class="card chat-panel">
+  <div class="chat-transcript" id="transcript">
+    {% for entry in messages %}
+      <article class="chat-msg chat-msg-{{ entry.m.role }}">
+        <header class="chat-msg-head">
+          <span class="chat-role">{{ entry.m.role }}</span>
+          <span class="muted" style="font-size:11.5px">{{ entry.m.created_at.isoformat(timespec='seconds') }}</span>
+        </header>
+        <div class="chat-body">{{ entry.m.content }}</div>
+        {% if entry.m.error %}<div class="error" style="margin-top:6px">{{ entry.m.error }}</div>{% endif %}
+        {% if entry.citations %}
+        <ol class="citations">
+          {% for c in entry.citations %}
+            <li>
+              <span class="cite-n">[{{ c.n }}]</span>
+              <a href="/docs/view?path={{ c.rel_path|urlencode }}"><code>{{ c.rel_path }}</code></a>
+              <span class="muted">· chunk #{{ c.ord }} · score {{ "%.3f"|format(c.score) }}</span>
+            </li>
+          {% endfor %}
+        </ol>
+        {% endif %}
+      </article>
+    {% endfor %}
+    {# pending-reply placeholder populated from SSE #}
+    <article class="chat-msg chat-msg-assistant hidden" id="pending">
+      <header class="chat-msg-head">
+        <span class="chat-role">assistant</span>
+        <span class="muted" style="font-size:11.5px" id="pending-status">thinking…</span>
+      </header>
+      <div class="chat-body" id="pending-body"></div>
+      <ol class="citations" id="pending-citations"></ol>
+    </article>
+  </div>
+
+  <form method="post" action="/chat/{{ conversation.id }}/message" class="chat-compose" id="compose">
+    <textarea name="content" id="content" placeholder="Ask about a runbook, command, or failure mode…" rows="2" required></textarea>
+    <div class="chat-compose-row">
+      <span class="muted" style="font-size:12px">Enter to send · Shift+Enter for newline</span>
+      <button type="submit">Send</button>
+    </div>
+  </form>
+</section>
+
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const replyTo = params.get('reply_to');
+  const transcript = document.getElementById('transcript');
+  const pending = document.getElementById('pending');
+  const pendingBody = document.getElementById('pending-body');
+  const pendingStatus = document.getElementById('pending-status');
+  const pendingCites = document.getElementById('pending-citations');
+
+  // Textarea behavior: Enter submits, Shift+Enter is newline.
+  const ta = document.getElementById('content');
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('compose').requestSubmit();
+    }
+  });
+
+  // Scroll to bottom on load.
+  requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
+
+  if (!replyTo) return;
+
+  pending.classList.remove('hidden');
+  const es = new EventSource(`/chat/{{ conversation.id }}/stream?reply_to=${encodeURIComponent(replyTo)}`);
+  let started = false;
+
+  es.addEventListener('citations', (e) => {
+    try {
+      const arr = JSON.parse(e.data);
+      pendingCites.innerHTML = '';
+      arr.forEach(c => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="cite-n">[${c.n}]</span> <a href="/docs/view?path=${encodeURIComponent(c.rel_path)}"><code>${c.rel_path}</code></a> <span class="muted">· chunk #${c.ord} · score ${c.score.toFixed(3)}</span>`;
+        pendingCites.appendChild(li);
+      });
+    } catch {}
+  });
+
+  es.addEventListener('token', (e) => {
+    if (!started) { started = true; pendingStatus.textContent = 'replying…'; }
+    pendingBody.textContent += e.data.replace(/\\n/g, '\n');
+    transcript.scrollTop = transcript.scrollHeight;
+  });
+
+  es.addEventListener('error', (e) => {
+    pendingStatus.textContent = 'error';
+    const errLine = document.createElement('div');
+    errLine.className = 'error';
+    errLine.style.marginTop = '6px';
+    errLine.textContent = e.data || 'stream error';
+    pending.appendChild(errLine);
+  });
+
+  es.addEventListener('done', () => {
+    es.close();
+    // Strip reply_to from the URL so a refresh doesn't re-generate.
+    const url = new URL(location.href);
+    url.searchParams.delete('reply_to');
+    history.replaceState(null, '', url.pathname + url.search);
+    pendingStatus.textContent = 'sent';
+  });
+
+  es.onerror = () => {
+    pendingStatus.textContent = 'disconnected';
+  };
+})();
+</script>
+
+<style>
+  .chat-panel { padding: 0; overflow: hidden; }
+  .chat-transcript {
+    padding: var(--sp-5) var(--sp-6);
+    max-height: calc(100vh - 280px);
+    min-height: 360px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: var(--sp-4);
+  }
+  .chat-msg { max-width: 820px; }
+  .chat-msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .chat-role {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10.5px;
+    color: var(--fg-muted);
+    background: var(--bg-elev-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: 1px 8px;
+  }
+  .chat-msg-user .chat-role { color: var(--accent); border-color: rgba(116,168,255,0.3); background: rgba(116,168,255,0.08); }
+  .chat-msg-assistant .chat-role { color: var(--success); border-color: rgba(95,209,154,0.3); background: rgba(95,209,154,0.08); }
+  .chat-body {
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: var(--fg-strong);
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-sm);
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .chat-msg-user .chat-body { background: rgba(116,168,255,0.05); }
+  .citations { margin: 8px 0 0 0; padding-left: 22px; font-size: 12.5px; color: var(--fg-muted); }
+  .citations li { margin-bottom: 2px; }
+  .cite-n { color: var(--accent); font-family: var(--font-mono); font-weight: 600; margin-right: 4px; }
+
+  .chat-compose {
+    border-top: 1px solid var(--divider);
+    padding: var(--sp-4) var(--sp-6);
+    background: var(--bg-elev-1);
+  }
+  .chat-compose textarea {
+    width: 100%;
+    min-height: 44px;
+    resize: vertical;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    background: var(--bg-elev-2);
+  }
+  .chat-compose-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 8px;
+  }
+</style>
+{% endblock %}

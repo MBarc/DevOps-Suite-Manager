@@ -37,6 +37,7 @@ class IndexStats:
 _status = IndexStats()
 _status_lock = threading.Lock()
 _embedder: Embedder | None = None
+_embedder_lock = threading.Lock()
 
 
 def get_index_status() -> IndexStats:
@@ -68,15 +69,38 @@ def _log(msg: str) -> None:
         _status.messages.append(f"{time.strftime('%H:%M:%S')} {msg}")
 
 
-def _get_embedder(cfg: Config) -> Embedder:
+def _get_embedder(cfg: Config, *, block: bool = True) -> Embedder:
+    """Return the cached embedder.
+
+    `block=False` callers (e.g. an HTTP request) skip the slow first-time init
+    and get a temporary NoEmbedder so the request can fall back to LIKE search
+    immediately. The first blocking caller (startup warmer or `dosm docs
+    reindex`) primes the cache for everyone.
+    """
     global _embedder
-    if _embedder is None:
+    if _embedder is not None:
+        return _embedder
+    if not block:
+        return NoEmbedder()
+    with _embedder_lock:
+        if _embedder is not None:
+            return _embedder
         _embedder = make_embedder(
             cfg.docs_index.embedder,
             cfg.docs_index.embedder_model,
             cfg.docs_index.embedding_dim,
         )
     return _embedder
+
+
+def warm_embedder_async(cfg: Config) -> None:
+    """Trigger embedder initialization in a daemon thread so the cost is paid
+    once at startup rather than on the first user request."""
+    if _embedder is not None:
+        return
+    threading.Thread(
+        target=_get_embedder, args=(cfg,), kwargs={"block": True}, daemon=True
+    ).start()
 
 
 def _matches_any(rel: str, patterns: list[str]) -> bool:

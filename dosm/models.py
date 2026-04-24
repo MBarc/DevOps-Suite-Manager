@@ -134,6 +134,40 @@ class DocChunk(Base):
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
 
+# ---- LLM chat -------------------------------------------------------------
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="New chat")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)  # user | assistant | system
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # JSON-encoded list[{rel_path, chunk_id, ord, score, snippet}]. Null for user msgs.
+    citations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    ord: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 # ---- Secrets storage (local backend) --------------------------------------
 
 
@@ -182,6 +216,8 @@ __all__ = [
     "AuditLog",
     "Document",
     "DocChunk",
+    "Conversation",
+    "ChatMessage",
 ]
 
 

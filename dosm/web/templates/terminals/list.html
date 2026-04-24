@@ -12,7 +12,7 @@
 <section class="card">
   {% if shells %}
   <table class="data">
-    <thead><tr><th>Name</th><th>Command</th><th>Source</th><th>Record</th><th style="width:1%"></th></tr></thead>
+    <thead><tr><th>Name</th><th>Command</th><th>Source</th><th>Record</th><th style="width:1%"></th><th style="width:1%"></th></tr></thead>
     <tbody>
     {% for s in shells %}
       <tr>
@@ -32,6 +32,26 @@
             <button type="submit" class="btn btn-sm">Open</button>
           </form>
         </td>
+        <td>
+          <button type="button" class="btn btn-ghost btn-sm" data-runas="{{ s.id }}">Run as…</button>
+        </td>
+      </tr>
+      <tr class="runas-row hidden" id="runas-{{ s.id }}">
+        <td colspan="6">
+          <form method="post" action="/terminals/runas" class="row" style="gap:12px; align-items:flex-end">
+            <input type="hidden" name="shell_id" value="{{ s.id }}" />
+            <label style="flex:1">Target user
+              <input type="text" name="target_user" placeholder="appuser{{ ' or DOMAIN\\\\username' if loop.first else '' }}" required />
+              <span class="field-hint">Linux: wraps with <code>sudo -u USER -i</code>. Windows: wraps with <code>runas /user:USER</code>.</span>
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" name="record" value="1" {% if record_by_default %}checked{% endif %} />
+              record
+            </label>
+            <button type="submit" class="btn btn-sm">Open</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-runas-cancel="{{ s.id }}">Cancel</button>
+          </form>
+        </td>
       </tr>
     {% endfor %}
     </tbody>
@@ -40,4 +60,23 @@
     <div class="empty-state">No shells detected. Add entries under <code>terminals.custom</code> in <code>config.yaml</code>.</div>
   {% endif %}
 </section>
+
+<script>
+  document.querySelectorAll('[data-runas]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-runas');
+      const row = document.getElementById('runas-' + id);
+      row.classList.toggle('hidden');
+      if (!row.classList.contains('hidden')) {
+        row.querySelector('input[name="target_user"]').focus();
+      }
+    });
+  });
+  document.querySelectorAll('[data-runas-cancel]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-runas-cancel');
+      document.getElementById('runas-' + id).classList.add('hidden');
+    });
+  });
+</script>
 {% endblock %}

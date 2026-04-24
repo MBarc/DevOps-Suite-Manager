@@ -91,4 +91,10 @@ def find_shell(shells: list[Shell], shell_id: str) -> Shell | None:
     for s in shells:
         if s.id == shell_id:
             return s
+    # Ephemeral run-as shells live in a separate registry keyed by a token
+    # that starts with `ra-`. Importing inside the function avoids a circular
+    # import at module load.
+    if shell_id.startswith("ra-"):
+        from dosm.terminals.runas import get as _runas_get
+        return _runas_get(shell_id)
     return None

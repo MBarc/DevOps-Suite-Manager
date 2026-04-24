@@ -5,8 +5,8 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import _NotAuthenticated, get_current_user, require_user
@@ -15,6 +15,7 @@ from dosm.models import AuditLog, User
 from dosm.terminals.discover import discover_shells, find_shell
 from dosm.terminals.pty_bridge import open_pty
 from dosm.terminals.recorder import AsciinemaRecorder, recording_path
+from dosm.terminals.runas import make_runas_shell, register as register_runas
 
 router = APIRouter(prefix="/terminals")
 
@@ -44,6 +45,38 @@ async def terminals_index(request: Request, user: User = Depends(_require_admin)
             "user": user,
         },
     )
+
+
+@router.post("/runas", include_in_schema=False)
+async def terminals_runas(
+    request: Request,
+    shell_id: str = Form(...),
+    target_user: str = Form(...),
+    record: int = Form(1),
+    db: Session = Depends(get_session),
+    user: User = Depends(_require_admin),
+):
+    """Construct an ephemeral wrapped shell and redirect to its session page."""
+    cfg = request.app.state.config
+    if not cfg.terminals.enabled:
+        raise HTTPException(404)
+    target_user = target_user.strip()
+    if not target_user or not all(c.isalnum() or c in "-_.\\@" for c in target_user):
+        raise HTTPException(400, "invalid target user")
+    base = find_shell(discover_shells(cfg.terminals), shell_id)
+    if base is None:
+        raise HTTPException(404, "unknown base shell")
+    wrapped = make_runas_shell(base, target_user)
+    token = register_runas(wrapped)
+    db.add(
+        AuditLog(
+            actor_id=user.id,
+            action="terminal.runas",
+            target=f"shell:{shell_id}",
+            details=f"target_user={target_user} token={token}",
+        )
+    )
+    return RedirectResponse(f"/terminals/{token}?record={int(bool(record))}", status_code=303)
 
 
 @router.get("/{shell_id}", response_class=HTMLResponse, include_in_schema=False)
