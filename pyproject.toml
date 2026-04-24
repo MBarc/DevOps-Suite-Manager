@@ -25,6 +25,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "cryptography>=43",
     "hvac>=2.3",
+    "psutil>=6.1",
 ]
 
 [project.optional-dependencies]

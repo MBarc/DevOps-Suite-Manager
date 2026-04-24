@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}System Info - DOSM{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>System info <span class="muted" style="font-weight:normal">({{ snap.hostname }})</span></h1>
+  <dl class="kv">
+    <dt>OS</dt><dd>{{ snap.os }} {{ snap.os_release }}</dd>
+    <dt>Python</dt><dd>{{ snap.python }}</dd>
+    <dt>Uptime</dt>
+    <dd>
+      {% set days = (snap.uptime_seconds // 86400) %}
+      {% set hours = ((snap.uptime_seconds % 86400) // 3600) %}
+      {% set mins = ((snap.uptime_seconds % 3600) // 60) %}
+      {{ days }}d {{ hours }}h {{ mins }}m
+    </dd>
+    <dt>CPU</dt>
+    <dd>{{ snap.cpu_count_logical }} logical · {{ "%.1f"|format(snap.cpu_percent) }}% busy
+      {% if snap.load_avg_1m is not none %}· load1 {{ snap.load_avg_1m }}{% endif %}
+    </dd>
+    <dt>Memory</dt>
+    <dd>{{ snap.memory_used_gb }} / {{ snap.memory_total_gb }} GB ({{ snap.memory_percent }}%)</dd>
+  </dl>
+</section>
+
+<section class="panel">
+  <h2>Disks</h2>
+  {% if snap.disks %}
+  <table class="data">
+    <thead><tr><th>Mount</th><th>Device</th><th>FS</th><th>Used</th><th>Total</th><th>%</th></tr></thead>
+    <tbody>
+    {% for d in snap.disks %}
+      <tr>
+        <td><code>{{ d.mountpoint }}</code></td>
+        <td class="muted">{{ d.device }}</td>
+        <td class="muted">{{ d.fstype }}</td>
+        <td>{{ d.used_gb }} GB</td>
+        <td>{{ d.total_gb }} GB</td>
+        <td>{{ d.percent }}%</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No readable disk partitions.</p>
+  {% endif %}
+</section>
+
+<p class="muted">JSON: <a href="/modules/system_info/api/snapshot">/modules/system_info/api/snapshot</a></p>
+{% endblock %}

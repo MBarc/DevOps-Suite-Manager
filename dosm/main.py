@@ -19,6 +19,9 @@ from dosm.config import Config, load_config
 from dosm.db import init_engine
 from dosm.hosts import hosts_router
 from dosm.models import User
+from dosm.modules.loader import load_enabled_modules
+from dosm.modules.registry import get_registry
+from dosm.modules.routes import router as modules_router
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 TEMPLATES_DIR = PACKAGE_ROOT / "web" / "templates"
@@ -43,12 +46,16 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(hosts_router)
+    app.include_router(modules_router)
+
+    load_enabled_modules(app, cfg)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(
         request: Request,
         user: User = Depends(require_user),
     ) -> HTMLResponse:
+        reg = get_registry()
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -56,6 +63,8 @@ def create_app(config: Config | None = None) -> FastAPI:
                 "version": __version__,
                 "home": str(cfg.home),
                 "enabled_modules": cfg.enabled_modules,
+                "loaded_modules": reg.loaded(),
+                "module_errors": reg.errors(),
                 "llm_model": cfg.llm.model,
                 "user": user,
                 "secrets_backend": cfg.secrets.backend,

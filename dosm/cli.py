@@ -15,6 +15,7 @@ from dosm.bootstrap import initialize_home
 from dosm.config import load_config
 from dosm.db import create_all, init_engine, session_scope
 from dosm.models import Credential, User
+from dosm.modules.loader import discover_modules
 from dosm.secrets import SecretNotFound, get_backend
 
 app = typer.Typer(help="DevOps Operations Suite Manager.", no_args_is_help=True, add_completion=False)
@@ -22,10 +23,12 @@ db_app = typer.Typer(help="Database admin commands.", no_args_is_help=True)
 user_app = typer.Typer(help="Local user management.", no_args_is_help=True)
 secret_app = typer.Typer(help="Manage secrets via the configured backend.", no_args_is_help=True)
 cred_app = typer.Typer(help="Manage credential records (references into the secrets backend).", no_args_is_help=True)
+module_app = typer.Typer(help="Inspect discovered DOSM modules.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
 app.add_typer(cred_app, name="credential")
+app.add_typer(module_app, name="module")
 
 console = Console()
 
@@ -219,6 +222,29 @@ def credential_list() -> None:
     table = Table("ID", "Name", "Kind", "Username", "Secret ref")
     for cid, name, kind, username, secret_ref in rows:
         table.add_row(str(cid), name, kind, username or "", secret_ref)
+    console.print(table)
+
+
+# ---- module ---------------------------------------------------------------
+
+
+@module_app.command("list")
+def module_list() -> None:
+    """List discovered modules (bundled + user-installed)."""
+    cfg = load_config()
+    discovered = discover_modules(cfg)
+    enabled = set(cfg.enabled_modules)
+    table = Table("Name", "Version", "Source", "Enabled", "OS", "Capabilities", "Description")
+    for d in discovered:
+        table.add_row(
+            d.spec.name,
+            d.spec.version,
+            d.source,
+            "yes" if d.spec.name in enabled else "",
+            ",".join(d.spec.os_constraints) or "any",
+            ",".join(d.spec.capabilities),
+            d.spec.description,
+        )
     console.print(table)
 
 

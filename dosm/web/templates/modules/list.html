@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Modules - DOSM{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Modules</h1>
+  <p class="muted">Enable a discovered module by adding its name to <code>enabled_modules</code> in <code>config.yaml</code> and restarting DOSM.</p>
+  {% if rows %}
+    {% for r in rows %}
+    <article class="module-row">
+      <header class="row-between">
+        <div>
+          <h2 style="margin:0">
+            {% if r.loaded %}<a href="/modules/{{ r.spec.name }}">{{ r.spec.name }}</a>
+            {% else %}{{ r.spec.name }}{% endif %}
+            <span class="muted" style="font-weight:normal">v{{ r.spec.version }}</span>
+          </h2>
+          <p class="muted" style="margin:0.15rem 0 0 0">{{ r.spec.description }}</p>
+        </div>
+        <div>
+          {% if r.error %}<span class="error">error</span>
+          {% elif r.loaded %}<span style="color: var(--accent)">loaded</span>
+          {% elif r.enabled %}<span class="muted">enabled (not loaded)</span>
+          {% else %}<span class="muted">available</span>{% endif %}
+        </div>
+      </header>
+      <dl class="kv" style="margin-top:0.75rem">
+        <dt>Source</dt><dd>{{ r.source }}</dd>
+        <dt>Root</dt><dd><code>{{ r.root }}</code></dd>
+        <dt>OS</dt>
+        <dd>
+          {% if r.spec.os_constraints %}
+            {% for os in r.spec.os_constraints %}<span class="tag">{{ os }}</span>{% endfor %}
+          {% else %}<em class="muted">any</em>{% endif %}
+        </dd>
+        <dt>Capabilities</dt>
+        <dd>
+          {% if r.spec.capabilities %}
+            {% for c in r.spec.capabilities %}<span class="tag">{{ c }}</span>{% endfor %}
+          {% else %}<em class="muted">none</em>{% endif %}
+        </dd>
+        {% if r.spec.python_deps %}
+        <dt>Python deps</dt>
+        <dd>{% for d in r.spec.python_deps %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+        {% endif %}
+        {% if r.error %}
+        <dt>Error</dt>
+        <dd><span class="error">{{ r.error }}</span></dd>
+        {% endif %}
+      </dl>
+    </article>
+    {% endfor %}
+  {% else %}
+    <p class="muted">No modules discovered.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -3,28 +3,34 @@
 {% block content %}
 <section class="panel">
   <h1>DevOps Operations Suite Manager</h1>
-  <p class="muted">v{{ version }}</p>
+  <p class="muted">v{{ version }} · signed in as <code>{{ user.username }}</code> ({{ user.role }})</p>
   <dl class="kv">
     <dt>DOSM_HOME</dt><dd><code>{{ home }}</code></dd>
     <dt>LLM model</dt><dd><code>{{ llm_model }}</code></dd>
-    <dt>Enabled modules</dt>
-    <dd>
-      {% if enabled_modules %}
-        <ul>
-        {% for m in enabled_modules %}<li><code>{{ m }}</code></li>{% endfor %}
-        </ul>
-      {% else %}
-        <em>none yet</em>
-      {% endif %}
-    </dd>
+    <dt>Secrets backend</dt><dd><code>{{ secrets_backend }}</code></dd>
   </dl>
 </section>
+
 <section class="panel">
-  <h2>Next steps</h2>
-  <ol>
-    <li>Drop documentation into <code>{{ home }}/docs/</code>.</li>
-    <li>Install a module into <code>{{ home }}/modules/</code> and enable it in <code>config.yaml</code>.</li>
-    <li>Point the LLM config at a running Ollama instance.</li>
-  </ol>
+  <h2>Modules</h2>
+  {% if loaded_modules %}
+    <ul>
+    {% for m in loaded_modules %}
+      <li><a href="/modules/{{ m.spec.name }}">{{ m.spec.name }}</a>
+        <span class="muted">v{{ m.spec.version }} — {{ m.spec.description }}</span>
+      </li>
+    {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No modules loaded. <a href="/modules">Browse available modules</a>.</p>
+  {% endif %}
+  {% if module_errors %}
+    <h3 class="error">Module errors</h3>
+    <ul>
+    {% for name, err in module_errors.items() %}
+      <li><code>{{ name }}</code>: <span class="error">{{ err }}</span></li>
+    {% endfor %}
+    </ul>
+  {% endif %}
 </section>
 {% endblock %}

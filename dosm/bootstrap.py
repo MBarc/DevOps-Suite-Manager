@@ -43,7 +43,7 @@ DEFAULT_CONFIG: dict = {
             "systemctl status *",
         ],
     },
-    "enabled_modules": [],
+    "enabled_modules": ["system_info"],
 }
 
 SUBDIRS = [
