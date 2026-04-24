@@ -14,6 +14,7 @@ from dosm.auth.passwords import hash_password
 from dosm.bootstrap import initialize_home
 from dosm.config import load_config
 from dosm.db import create_all, init_engine, session_scope
+from dosm.docs_index.indexer import get_index_status, reindex
 from dosm.models import Credential, User
 from dosm.modules.loader import discover_modules
 from dosm.secrets import SecretNotFound, get_backend
@@ -24,11 +25,13 @@ user_app = typer.Typer(help="Local user management.", no_args_is_help=True)
 secret_app = typer.Typer(help="Manage secrets via the configured backend.", no_args_is_help=True)
 cred_app = typer.Typer(help="Manage credential records (references into the secrets backend).", no_args_is_help=True)
 module_app = typer.Typer(help="Inspect discovered DOSM modules.", no_args_is_help=True)
+docs_app = typer.Typer(help="Documentation index commands.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
 app.add_typer(cred_app, name="credential")
 app.add_typer(module_app, name="module")
+app.add_typer(docs_app, name="docs")
 
 console = Console()
 
@@ -246,6 +249,44 @@ def module_list() -> None:
             d.spec.description,
         )
     console.print(table)
+
+
+# ---- docs -----------------------------------------------------------------
+
+
+@docs_app.command("reindex")
+def docs_reindex(
+    force: bool = typer.Option(False, "--force", help="Re-embed every file even if unchanged."),
+) -> None:
+    """Scan $DOSM_HOME/docs, chunk + embed, update the index. Runs synchronously."""
+    _load()
+    cfg = load_config()
+    console.print(f"[green]Reindexing[/green] {cfg.docs_dir} (force={force})")
+    stats = reindex(cfg, force=force)
+    console.print(
+        f"done · {stats.indexed} indexed · {stats.skipped_unchanged} unchanged · "
+        f"{stats.errors} errors · embedder={stats.embedder_name}"
+    )
+    if stats.last_error:
+        console.print(f"[red]Last error:[/red] {stats.last_error}")
+
+
+@docs_app.command("status")
+def docs_status() -> None:
+    _load()
+    s = get_index_status()
+    console.print(f"running: {s.running}")
+    console.print(f"embedder: {s.embedder_name}")
+    console.print(
+        f"files={s.total_files} processed={s.processed} indexed={s.indexed} "
+        f"unchanged={s.skipped_unchanged} errors={s.errors}"
+    )
+    if s.started_at:
+        console.print(f"started_at: {s.started_at.isoformat(timespec='seconds')}")
+    if s.finished_at:
+        console.print(f"finished_at: {s.finished_at.isoformat(timespec='seconds')}")
+    if s.last_error:
+        console.print(f"[red]last_error:[/red] {s.last_error}")
 
 
 if __name__ == "__main__":

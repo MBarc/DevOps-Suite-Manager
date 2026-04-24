@@ -101,6 +101,39 @@ class Host(Base):
     )
 
 
+# ---- Docs index -----------------------------------------------------------
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rel_path: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    modified_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending | indexed | error
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class DocChunk(Base):
+    __tablename__ = "doc_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    doc_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ord: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    start_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    # float32 bytes, length = embedding_dim * 4. Null if embedder=none or errored.
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+
+
 # ---- Secrets storage (local backend) --------------------------------------
 
 
@@ -147,6 +180,8 @@ __all__ = [
     "Host",
     "SecretBlob",
     "AuditLog",
+    "Document",
+    "DocChunk",
 ]
 
 

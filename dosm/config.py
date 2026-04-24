@@ -35,6 +35,21 @@ class AuthConfig(BaseModel):
     session_max_age_seconds: int = 60 * 60 * 12  # 12h
 
 
+class DocsIndexConfig(BaseModel):
+    """Local docs ingestion: scan $DOSM_HOME/docs, chunk, embed, store."""
+
+    chunk_size_chars: int = 1800
+    chunk_overlap_chars: int = 200
+    include_globs: list[str] = Field(
+        default_factory=lambda: ["**/*.md", "**/*.markdown", "**/*.txt", "**/*.pdf"]
+    )
+    exclude_globs: list[str] = Field(default_factory=lambda: ["drafts/**"])
+    embedder: str = "fastembed"  # "fastembed" | "none"
+    embedder_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dim: int = 384
+    auto_index_on_startup: bool = True
+
+
 class CustomTerminal(BaseModel):
     name: str
     command: list[str]
@@ -96,6 +111,7 @@ class Config(BaseModel):
     secrets: SecretsConfig = SecretsConfig()
     auth: AuthConfig = AuthConfig()
     terminals: TerminalsConfig = TerminalsConfig()
+    docs_index: DocsIndexConfig = DocsIndexConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     enabled_modules: list[str] = Field(default_factory=list)
 

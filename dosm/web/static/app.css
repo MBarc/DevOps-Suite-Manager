@@ -129,6 +129,21 @@ table.data th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-
   text-transform: uppercase;
 }
 .badge-red { background: rgba(255,107,107,0.15); color: var(--danger); border: 1px solid rgba(255,107,107,0.4); }
+.badge-blue { background: rgba(106,166,255,0.15); color: var(--accent); border: 1px solid rgba(106,166,255,0.4); }
+
+.status-row { margin-top: 0.75rem; }
+.hit {
+  border-top: 1px solid var(--border);
+  padding: 0.9rem 0;
+}
+.hit:first-of-type { border-top: 0; padding-top: 0; }
+.hit .snippet {
+  margin: 0.35rem 0 0 0;
+  color: #c5cad5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
 
 .terminal-wrap { padding-bottom: 0; }
 .terminal-meta { display: flex; gap: 0.5rem; align-items: center; }

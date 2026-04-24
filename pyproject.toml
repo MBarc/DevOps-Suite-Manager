@@ -28,6 +28,9 @@ dependencies = [
     "psutil>=6.1",
     "websockets>=13",
     'pywinpty>=2.0; sys_platform == "win32"',
+    "numpy>=1.26",
+    "pypdf>=4.3",
+    "fastembed>=0.4",
 ]
 
 [project.optional-dependencies]

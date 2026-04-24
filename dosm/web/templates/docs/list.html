@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Docs - DOSM{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="row-between">
+    <h1 style="margin:0">Documentation index</h1>
+    <form method="post" action="/docs/reindex" class="inline">
+      <button class="btn btn-ghost" type="submit" name="force" value="0">Reindex changed</button>
+      <button class="btn" type="submit" name="force" value="1">Reindex all</button>
+    </form>
+  </div>
+
+  <form method="get" action="/docs/search" class="stack" style="margin: 1rem 0">
+    <label>Search documents
+      <input type="text" name="q" placeholder="e.g. service fabric restart node" autofocus />
+    </label>
+  </form>
+
+  <div class="status-row">
+    {% if status.running %}
+      <span class="badge badge-blue">Indexing {{ status.processed }} / {{ status.total_files }}</span>
+    {% else %}
+      <span class="muted">
+        Embedder: <code>{{ status.embedder_name }}</code>
+        {% if status.finished_at %}
+          · last run finished {{ status.finished_at.isoformat(timespec='seconds') }}
+        {% endif %}
+        · {{ status.indexed }} indexed, {{ status.skipped_unchanged }} unchanged, {{ status.errors }} errors
+      </span>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Documents</h2>
+  {% if docs %}
+  <table class="data">
+    <thead><tr><th>Path</th><th>Title</th><th>Chunks</th><th>Status</th><th>Indexed</th></tr></thead>
+    <tbody>
+    {% for d in docs %}
+      <tr>
+        <td><a href="/docs/view?path={{ d.rel_path|urlencode }}"><code>{{ d.rel_path }}</code></a></td>
+        <td>{{ d.title or "" }}</td>
+        <td>{{ d.chunk_count }}</td>
+        <td>
+          {% if d.status == 'indexed' %}<span style="color: var(--accent)">indexed</span>
+          {% elif d.status == 'error' %}<span class="error" title="{{ d.error }}">error</span>
+          {% else %}<span class="muted">{{ d.status }}</span>{% endif %}
+        </td>
+        <td class="muted">{{ d.indexed_at.isoformat(timespec='seconds') if d.indexed_at else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">No documents yet. Drop markdown, text, or PDF files into
+      <code>{{ request.app.state.config.docs_dir }}</code> and click <em>Reindex all</em>.</p>
+  {% endif %}
+</section>
+{% endblock %}

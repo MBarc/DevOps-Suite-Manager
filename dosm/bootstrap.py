@@ -32,6 +32,16 @@ DEFAULT_CONFIG: dict = {
         "recordings_dir": "data/terminal_recordings",
         "custom": [],
     },
+    "docs_index": {
+        "chunk_size_chars": 1800,
+        "chunk_overlap_chars": 200,
+        "include_globs": ["**/*.md", "**/*.markdown", "**/*.txt", "**/*.pdf"],
+        "exclude_globs": ["drafts/**"],
+        "embedder": "fastembed",
+        "embedder_model": "BAAI/bge-small-en-v1.5",
+        "embedding_dim": 384,
+        "auto_index_on_startup": True,
+    },
     "ssh_command_policy": {
         "require_confirmation_off_list": True,
         "confirmation_field": "host_name",
