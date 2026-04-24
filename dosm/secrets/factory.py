@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-from functools import lru_cache
-
 from dosm.config import Config, get_config
 from dosm.db import init_engine
 from dosm.secrets.base import SecretsBackend
 from dosm.secrets.local import LocalEncryptedBackend
 from dosm.secrets.vault import VaultBackend
 
+# Module-level cache. Keyed by ($DOSM_HOME, backend kind) so a different
+# DOSM_HOME (tests, multi-instance) gets its own backend.
+_backends: dict[tuple[str, str], SecretsBackend] = {}
 
-@lru_cache(maxsize=1)
+
 def get_backend(cfg: Config | None = None) -> SecretsBackend:
     cfg = cfg or get_config()
+    key = (str(cfg.home), cfg.secrets.backend.lower())
+    cached = _backends.get(key)
+    if cached is not None:
+        return cached
     kind = cfg.secrets.backend.lower()
     if kind == "local":
         init_engine(cfg)
@@ -21,14 +26,17 @@ def get_backend(cfg: Config | None = None) -> SecretsBackend:
 
         Session = sessionmaker(bind=get_engine(), future=True)
         key_file = cfg.home / cfg.secrets.local_key_file
-        return LocalEncryptedBackend(key_file=key_file, session_factory=Session)
-    if kind == "vault":
+        backend: SecretsBackend = LocalEncryptedBackend(key_file=key_file, session_factory=Session)
+    elif kind == "vault":
         if not cfg.secrets.vault_addr:
             raise RuntimeError("secrets.backend=vault requires secrets.vault_addr in config.yaml")
-        return VaultBackend(
+        backend = VaultBackend(
             addr=cfg.secrets.vault_addr,
             token_env=cfg.secrets.vault_token_env,
             mount=cfg.secrets.vault_mount,
             prefix=cfg.secrets.vault_prefix,
         )
-    raise ValueError(f"Unknown secrets backend: {cfg.secrets.backend!r}")
+    else:
+        raise ValueError(f"Unknown secrets backend: {cfg.secrets.backend!r}")
+    _backends[key] = backend
+    return backend

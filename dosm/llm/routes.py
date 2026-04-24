@@ -8,6 +8,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dosm.agent.actions import classify_command, get_action
+from dosm.agent.prompt import agent_system_prompt, parse_plan_blocks, strip_plan_blocks
 from dosm.auth.deps import require_user
 from dosm.db import get_session, session_scope
 from dosm.llm.ollama import OllamaClient, OllamaError, OllamaUnreachable
@@ -18,7 +20,7 @@ from dosm.llm.retrieval import (
     compose_system_prompt,
     retrieve,
 )
-from dosm.models import AuditLog, ChatMessage, Conversation, User
+from dosm.models import AuditLog, ChatMessage, Conversation, PlanCard, User
 
 router = APIRouter(prefix="/chat")
 
@@ -69,10 +71,13 @@ async def chat_home(
 
 @router.post("/new", include_in_schema=False)
 async def chat_new(
+    mode: str = Form("llm"),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
-    conv = Conversation(user_id=user.id, title="New chat")
+    if mode not in ("llm", "agent"):
+        mode = "llm"
+    conv = Conversation(user_id=user.id, title="New chat", mode=mode)
     db.add(conv)
     db.flush()
     cid = conv.id
@@ -115,7 +120,27 @@ async def chat_view(
         ).scalars()
     )
     messages = _latest_messages(db, cid)
-    # parse citations JSON once for the template
+
+    # All plan cards for this conversation, grouped by message_id.
+    plan_rows = list(
+        db.execute(
+            select(PlanCard).where(PlanCard.conversation_id == cid).order_by(PlanCard.id)
+        ).scalars()
+    )
+    cards_by_msg: dict[int, list[dict]] = {}
+    for c in plan_rows:
+        try:
+            args = json.loads(c.effective_args or c.args or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        try:
+            result = json.loads(c.result) if c.result else None
+        except json.JSONDecodeError:
+            result = None
+        cards_by_msg.setdefault(c.message_id or 0, []).append(
+            {"card": c, "args": args, "result": result}
+        )
+
     hydrated = []
     for m in messages:
         cits = []
@@ -124,7 +149,8 @@ async def chat_view(
                 cits = json.loads(m.citations)
             except json.JSONDecodeError:
                 cits = []
-        hydrated.append({"m": m, "citations": cits})
+        hydrated.append({"m": m, "citations": cits, "cards": cards_by_msg.get(m.id, [])})
+
     return _templates(request).TemplateResponse(
         request,
         "chat/conversation.html",
@@ -135,6 +161,8 @@ async def chat_view(
             "messages": hydrated,
             "active_id": cid,
             "ollama_model": request.app.state.config.llm.model,
+            "is_agent": conv.mode == "agent",
+            "elevated_card_id": int(request.query_params.get("elevated_card", "0")) or None,
         },
     )
 
@@ -211,9 +239,11 @@ async def chat_stream(
         citations: list[Citation] = retrieve(s, cfg, query, k=5)
         citations_payload = citations_to_json(citations)
 
-        # Build chat-style messages for Ollama, with RAG context injected
-        # into the system prompt.
-        sys_prompt = compose_system_prompt(user.username)
+        # System prompt depends on the conversation mode.
+        if conv.mode == "agent":
+            sys_prompt = agent_system_prompt(user.username)
+        else:
+            sys_prompt = compose_system_prompt(user.username)
         ctx_block = compose_context_block(citations)
         history_for_llm = [{"role": "system", "content": f"{sys_prompt}\n\n{ctx_block}"}]
         for m in messages[-MAX_HISTORY_TURNS:]:
@@ -222,6 +252,7 @@ async def chat_stream(
         next_ord = (messages[-1].ord + 1) if messages else 0
         actor_id = user.id
         conv_id = conv.id
+        is_agent_mode = conv.mode == "agent"
 
     client = OllamaClient(base_url=cfg.llm.base_url, model=cfg.llm.model)
 
@@ -250,17 +281,56 @@ async def chat_stream(
             yield _sse("error", error_text)
 
         final_text = "".join(collected)
+        plan_card_payloads: list[dict] = []
         with session_scope() as s:
-            s.add(
-                ChatMessage(
-                    conversation_id=conv_id,
-                    role="assistant",
-                    content=final_text,
-                    citations=json.dumps(citations_payload),
-                    error=error_text,
-                    ord=next_ord,
-                )
+            visible_text = final_text
+            if is_agent_mode and final_text and not error_text:
+                plans = parse_plan_blocks(final_text)
+                if plans:
+                    visible_text = strip_plan_blocks(final_text)
+            assistant_msg = ChatMessage(
+                conversation_id=conv_id,
+                role="assistant",
+                content=visible_text,
+                citations=json.dumps(citations_payload),
+                error=error_text,
+                ord=next_ord,
             )
+            s.add(assistant_msg)
+            s.flush()
+
+            if is_agent_mode and final_text and not error_text:
+                for plan in parse_plan_blocks(final_text):
+                    spec = get_action(plan.tool)
+                    if spec is None:
+                        continue
+                    # Pre-classify ssh_exec commands so the UI knows whether
+                    # to render the elevated-confirmation form.
+                    tier = "safe"
+                    if plan.tool == "ssh_exec":
+                        tier = classify_command(cfg, plan.args.get("command", ""))
+                    card = PlanCard(
+                        conversation_id=conv_id,
+                        message_id=assistant_msg.id,
+                        tool=plan.tool,
+                        args=json.dumps(plan.args),
+                        rationale=plan.rationale,
+                        rollback=plan.rollback,
+                        tier=tier,
+                    )
+                    s.add(card)
+                    s.flush()
+                    plan_card_payloads.append(
+                        {
+                            "id": card.id,
+                            "tool": card.tool,
+                            "args": plan.args,
+                            "rationale": plan.rationale,
+                            "rollback": plan.rollback,
+                            "tier": tier,
+                        }
+                    )
+
             conv = s.get(Conversation, conv_id)
             if conv is not None:
                 conv.updated_at = datetime.utcnow()
@@ -271,10 +341,15 @@ async def chat_stream(
                     actor_id=actor_id,
                     action="chat.reply",
                     target=f"conversation:{conv_id}",
-                    details=f"citations={len(citations_payload)}"
-                    + (f" error={error_text[:80]}" if error_text else ""),
+                    details=(
+                        f"citations={len(citations_payload)} plans={len(plan_card_payloads)}"
+                        + (f" error={error_text[:80]}" if error_text else "")
+                    ),
                 )
             )
+
+        for payload in plan_card_payloads:
+            yield _sse("plan", json.dumps(payload))
         yield _sse("done", "")
 
     return StreamingResponse(

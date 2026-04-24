@@ -4,7 +4,11 @@
 <header class="page-header">
   <div>
     <h1 style="font-size:18px">{{ conversation.title }}</h1>
-    <div class="subtitle">Model <code>{{ ollama_model }}</code> · answers grounded in <code>{{ request.app.state.config.docs_dir }}</code></div>
+    <div class="subtitle">
+      Mode <span class="badge {% if is_agent %}badge-amber{% else %}badge-blue{% endif %}">{{ conversation.mode }}</span>
+      · Model <code>{{ ollama_model }}</code>
+      · grounded in <code>{{ request.app.state.config.docs_dir }}</code>
+    </div>
   </div>
   <div class="actions">
     <a href="/chat" class="btn btn-ghost">All chats</a>
@@ -25,6 +29,56 @@
         </header>
         <div class="chat-body">{{ entry.m.content }}</div>
         {% if entry.m.error %}<div class="error" style="margin-top:6px">{{ entry.m.error }}</div>{% endif %}
+        {% if entry.cards %}
+          {% for c in entry.cards %}
+          <article class="plan-card plan-{{ c.card.status }} plan-{{ c.card.tier }}">
+            <header class="plan-head">
+              <span class="badge {% if c.card.tier == 'elevated' %}badge-red{% else %}badge-green{% endif %}">
+                <span class="dot {% if c.card.tier == 'elevated' %}err{% else %}ok{% endif %}"></span>
+                {{ c.card.tier }}
+              </span>
+              <span class="plan-tool"><code>{{ c.card.tool }}</code></span>
+              <span class="plan-status muted">{{ c.card.status }}</span>
+            </header>
+            {% if c.card.rationale %}<p class="plan-rationale">{{ c.card.rationale }}</p>{% endif %}
+            <pre class="plan-args">{{ c.args | tojson(indent=2) }}</pre>
+            {% if c.card.rollback %}<p class="muted plan-rollback"><strong>Rollback:</strong> {{ c.card.rollback }}</p>{% endif %}
+
+            {% if c.card.status == 'pending' %}
+              <form method="post" action="/chat/{{ conversation.id }}/plan/{{ c.card.id }}/approve" class="plan-form">
+                {% if c.card.tool == 'ssh_exec' %}
+                  <label>Command (you can edit before approving)
+                    <input type="text" name="edited_command" value="{{ c.args.get('command', '') }}" />
+                  </label>
+                {% endif %}
+                {% if c.card.tier == 'elevated' or elevated_card_id == c.card.id %}
+                  <label class="elevated-confirm">
+                    Off allow-list. Type the host name <code>{{ c.args.get('host', '') }}</code> to confirm:
+                    <input type="text" name="confirmation" autocomplete="off" autofocus />
+                  </label>
+                {% endif %}
+                <div class="plan-actions">
+                  <button type="submit" class="btn">Approve & run</button>
+                  <button type="submit" class="btn btn-danger" formaction="/chat/{{ conversation.id }}/plan/{{ c.card.id }}/reject">Reject</button>
+                </div>
+              </form>
+            {% elif c.result %}
+              <div class="plan-result">
+                <div class="plan-result-head">
+                  <span class="badge {% if c.result.ok %}badge-green{% else %}badge-red{% endif %}">
+                    {{ 'OK' if c.result.ok else 'failed' }}
+                  </span>
+                  <span class="muted" style="font-size:12px">{{ c.result.summary }}</span>
+                </div>
+                {% if c.result.stdout %}<pre class="plan-stream">stdout:
+{{ c.result.stdout[:2000] }}{% if c.result.stdout|length > 2000 %}…{% endif %}</pre>{% endif %}
+                {% if c.result.stderr %}<pre class="plan-stream plan-stderr">stderr:
+{{ c.result.stderr[:1000] }}{% if c.result.stderr|length > 1000 %}…{% endif %}</pre>{% endif %}
+              </div>
+            {% endif %}
+          </article>
+          {% endfor %}
+        {% endif %}
         {% if entry.citations %}
         <ol class="citations">
           {% for c in entry.citations %}
@@ -45,12 +99,13 @@
         <span class="muted" style="font-size:11.5px" id="pending-status">thinking…</span>
       </header>
       <div class="chat-body" id="pending-body"></div>
+      <div id="pending-plans"></div>
       <ol class="citations" id="pending-citations"></ol>
     </article>
   </div>
 
   <form method="post" action="/chat/{{ conversation.id }}/message" class="chat-compose" id="compose">
-    <textarea name="content" id="content" placeholder="Ask about a runbook, command, or failure mode…" rows="2" required></textarea>
+    <textarea name="content" id="content" placeholder="{{ 'Ask the agent to investigate or change something…' if is_agent else 'Ask about a runbook, command, or failure mode…' }}" rows="2" required></textarea>
     <div class="chat-compose-row">
       <span class="muted" style="font-size:12px">Enter to send · Shift+Enter for newline</span>
       <button type="submit">Send</button>
@@ -68,7 +123,6 @@
   const pendingStatus = document.getElementById('pending-status');
   const pendingCites = document.getElementById('pending-citations');
 
-  // Textarea behavior: Enter submits, Shift+Enter is newline.
   const ta = document.getElementById('content');
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -77,7 +131,6 @@
     }
   });
 
-  // Scroll to bottom on load.
   requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
 
   if (!replyTo) return;
@@ -104,6 +157,12 @@
     transcript.scrollTop = transcript.scrollHeight;
   });
 
+  es.addEventListener('plan', () => {
+    // Plan cards are persisted server-side; reload to render them with full
+    // approve/edit/reject controls instead of trying to mirror state in JS.
+    pendingStatus.textContent = 'plan ready';
+  });
+
   es.addEventListener('error', (e) => {
     pendingStatus.textContent = 'error';
     const errLine = document.createElement('div');
@@ -115,16 +174,14 @@
 
   es.addEventListener('done', () => {
     es.close();
-    // Strip reply_to from the URL so a refresh doesn't re-generate.
     const url = new URL(location.href);
     url.searchParams.delete('reply_to');
     history.replaceState(null, '', url.pathname + url.search);
-    pendingStatus.textContent = 'sent';
+    // Reload to pick up persisted plan cards / final state.
+    setTimeout(() => location.reload(), 400);
   });
 
-  es.onerror = () => {
-    pendingStatus.textContent = 'disconnected';
-  };
+  es.onerror = () => { pendingStatus.textContent = 'disconnected'; };
 })();
 </script>
 
@@ -140,26 +197,16 @@
   .chat-msg { max-width: 820px; }
   .chat-msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .chat-role {
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 10.5px;
-    color: var(--fg-muted);
-    background: var(--bg-elev-3);
-    border: 1px solid var(--border);
-    border-radius: var(--r-pill);
-    padding: 1px 8px;
+    text-transform: uppercase; letter-spacing: 0.08em; font-size: 10.5px;
+    color: var(--fg-muted); background: var(--bg-elev-3);
+    border: 1px solid var(--border); border-radius: var(--r-pill); padding: 1px 8px;
   }
   .chat-msg-user .chat-role { color: var(--accent); border-color: rgba(116,168,255,0.3); background: rgba(116,168,255,0.08); }
   .chat-msg-assistant .chat-role { color: var(--success); border-color: rgba(95,209,154,0.3); background: rgba(95,209,154,0.08); }
   .chat-body {
-    font-size: 14px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    color: var(--fg-strong);
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--r-sm);
-    padding: var(--sp-3) var(--sp-4);
+    font-size: 14px; line-height: 1.6; white-space: pre-wrap; color: var(--fg-strong);
+    background: var(--bg-elev-1); border: 1px solid var(--border-soft);
+    border-radius: var(--r-sm); padding: var(--sp-3) var(--sp-4);
   }
   .chat-msg-user .chat-body { background: rgba(116,168,255,0.05); }
   .citations { margin: 8px 0 0 0; padding-left: 22px; font-size: 12.5px; color: var(--fg-muted); }
@@ -168,20 +215,50 @@
 
   .chat-compose {
     border-top: 1px solid var(--divider);
-    padding: var(--sp-4) var(--sp-6);
-    background: var(--bg-elev-1);
+    padding: var(--sp-4) var(--sp-6); background: var(--bg-elev-1);
   }
   .chat-compose textarea {
-    width: 100%;
-    min-height: 44px;
-    resize: vertical;
-    font-family: var(--font-sans);
-    font-size: 14px;
+    width: 100%; min-height: 44px; resize: vertical;
+    font-family: var(--font-sans); font-size: 14px; background: var(--bg-elev-2);
+  }
+  .chat-compose-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+
+  /* Plan cards */
+  .plan-card {
+    margin-top: 10px;
     background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--r-sm);
+    padding: var(--sp-3) var(--sp-4);
   }
-  .chat-compose-row {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-top: 8px;
+  .plan-card.plan-elevated { border-left-color: var(--danger); }
+  .plan-card.plan-rejected { opacity: 0.6; border-left-color: var(--fg-dim); }
+  .plan-card.plan-executed { border-left-color: var(--success); }
+  .plan-card.plan-failed { border-left-color: var(--warn); }
+  .plan-head { display: flex; align-items: center; gap: 10px; }
+  .plan-tool { color: var(--fg-strong); font-weight: 500; }
+  .plan-status { text-transform: uppercase; letter-spacing: 0.07em; font-size: 11px; }
+  .plan-rationale { margin: 8px 0 6px 0; color: var(--fg); font-size: 13.5px; }
+  .plan-args {
+    margin: 6px 0; padding: 8px 10px; background: var(--bg-elev-1);
+    border: 1px solid var(--border-soft); border-radius: var(--r-xs);
+    font-family: var(--font-mono); font-size: 12px;
   }
+  .plan-rollback { font-size: 12.5px; }
+  .plan-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .plan-form label { font-size: 12.5px; }
+  .plan-form input { width: 100%; }
+  .plan-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .elevated-confirm { color: var(--danger) !important; }
+  .elevated-confirm code { color: var(--danger); border-color: rgba(255,122,138,0.4); }
+  .plan-result { margin-top: 10px; }
+  .plan-result-head { display: flex; align-items: center; gap: 8px; }
+  .plan-stream {
+    margin: 6px 0 0 0; padding: 8px 10px; background: var(--bg-elev-1);
+    border: 1px solid var(--border-soft); border-radius: var(--r-xs);
+    font-family: var(--font-mono); font-size: 12px; max-height: 220px; overflow: auto;
+  }
+  .plan-stderr { color: var(--warn); }
 </style>
 {% endblock %}

@@ -17,6 +17,7 @@ from dosm.auth.routes import router as auth_router
 from dosm.auth.session import install_session_middleware
 from dosm.config import Config, load_config
 from dosm.db import init_engine
+from dosm.agent import agent_router
 from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
 from dosm.llm import chat_router
@@ -59,6 +60,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(hosts_router)
     app.include_router(docs_router)
+    # Agent plan card routes share the /chat prefix and must register before
+    # the broader chat_router so /chat/{cid}/plan/... matches before any
+    # generic /chat/{cid}/... handler that doesn't exist (defensive).
+    app.include_router(agent_router)
     app.include_router(chat_router)
     app.include_router(modules_router)
     app.include_router(metrics_router)

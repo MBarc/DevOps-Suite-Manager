@@ -4,11 +4,16 @@
 <header class="page-header">
   <div>
     <h1>Chat</h1>
-    <div class="subtitle">Ask questions grounded in your local documentation. Model: <code>{{ request.app.state.config.llm.model }}</code></div>
+    <div class="subtitle">Ask questions or, in agent mode, propose actions to run on your hosts. Model: <code>{{ request.app.state.config.llm.model }}</code></div>
   </div>
   <div class="actions">
     <form method="post" action="/chat/new" class="inline">
-      <button type="submit">+ New chat</button>
+      <input type="hidden" name="mode" value="llm" />
+      <button type="submit" class="btn btn-subtle">+ New LLM chat</button>
+    </form>
+    <form method="post" action="/chat/new" class="inline">
+      <input type="hidden" name="mode" value="agent" />
+      <button type="submit">+ New agent chat</button>
     </form>
   </div>
 </header>
@@ -16,11 +21,12 @@
 <section class="card">
   {% if conversations %}
   <table class="data">
-    <thead><tr><th>Title</th><th>Updated</th><th>Model</th><th style="width:1%"></th></tr></thead>
+    <thead><tr><th>Title</th><th>Mode</th><th>Updated</th><th>Model</th><th style="width:1%"></th></tr></thead>
     <tbody>
     {% for c in conversations %}
       <tr>
         <td><a href="/chat/{{ c.id }}" style="color:var(--fg-strong); font-weight:500">{{ c.title }}</a></td>
+        <td><span class="badge {% if c.mode == 'agent' %}badge-amber{% else %}badge-blue{% endif %}">{{ c.mode }}</span></td>
         <td class="muted" style="font-size:12.5px">{{ c.updated_at.isoformat(timespec='seconds') }}</td>
         <td class="muted"><code>{{ c.model or '—' }}</code></td>
         <td>
@@ -35,10 +41,8 @@
   </table>
   {% else %}
     <div class="empty-state">
-      No conversations yet.
-      <form method="post" action="/chat/new" class="inline" style="margin-left:8px">
-        <button type="submit">Start one</button>
-      </form>
+      No conversations yet. Start one in <strong>LLM mode</strong> for read-only Q&amp;A grounded in your docs,
+      or <strong>agent mode</strong> to let the model propose actions you can approve.
     </div>
   {% endif %}
 </section>

@@ -150,6 +150,7 @@ class Conversation(Base):
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="llm")  # llm | agent
 
 
 class ChatMessage(Base):
@@ -166,6 +167,40 @@ class ChatMessage(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
     ord: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class PlanCard(Base):
+    """A proposed agent-mode action awaiting human review.
+
+    Each agent assistant message can produce one or more plan cards. A card
+    moves through pending -> approved/rejected -> executed/failed. The
+    `effective_args` column holds the JSON args actually executed (which
+    differ from `args` if the user used Edit before approving).
+    """
+
+    __tablename__ = "plan_cards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True
+    )
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    args: Mapped[str] = mapped_column(Text, nullable=False)              # JSON proposed by LLM
+    effective_args: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rollback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tier: Mapped[str] = mapped_column(String(16), nullable=False, default="safe")   # safe | elevated
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    # ^ pending | approved | rejected | executed | failed
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)       # JSON: stdout/stderr/exit/duration
+    approver_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
 
 
 # ---- Secrets storage (local backend) --------------------------------------
@@ -218,6 +253,7 @@ __all__ = [
     "DocChunk",
     "Conversation",
     "ChatMessage",
+    "PlanCard",
 ]
 
 
