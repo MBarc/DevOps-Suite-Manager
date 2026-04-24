@@ -1,33 +1,67 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% block title %}DOSM{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css" />
-</head>
-<body>
-  <header class="topbar">
-    <a href="/" class="brand">DOSM</a>
-    <nav>
-      <a href="/">Dashboard</a>
-      <a href="/hosts">Hosts</a>
-      <a href="/docs">Docs</a>
-      {% if request.session.get('user_id') and request.app.state.config.terminals.enabled %}
-        <a href="/terminals">Terminals</a>
+{% extends "_shell.html" %}
+{% set path = request.url.path %}
+
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <a href="/" class="brand" title="DevOps Operations Suite Manager">
+      <span class="brand-mark">DO</span>
+      <span class="brand-name">DOSM</span>
+    </a>
+
+    <nav class="sidebar-nav" aria-label="Primary">
+      <div class="sidebar-section-label">Workspace</div>
+
+      <a href="/" class="{% if path == '/' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        Dashboard
+      </a>
+      <a href="/hosts" class="{% if path.startswith('/hosts') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="0.9"/><circle cx="7" cy="17" r="0.9"/></svg>
+        Hosts
+      </a>
+      <a href="/docs" class="{% if path.startswith('/docs') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M15 3v4h4"/><path d="M9 13h6M9 17h6M9 9h3"/></svg>
+        Docs
+      </a>
+      {% if request.app.state.config.terminals.enabled %}
+      <a href="/terminals" class="{% if path.startswith('/terminals') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
+        Terminals
+      </a>
       {% endif %}
-      <a href="/modules">Modules</a>
-      <a href="/health">Health</a>
+
+      <div class="sidebar-section-label">Platform</div>
+      <a href="/modules" class="{% if path.startswith('/modules') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5 12 3 3 7.5v9L12 21l9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 21V12"/></svg>
+        Modules
+      </a>
+      <a href="/health" class="{% if path == '/health' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 8-6-16-3 8H2"/></svg>
+        Health
+      </a>
     </nav>
-    <div class="spacer"></div>
-    {% if request.session.get('user_id') %}
-    <form method="post" action="/logout" class="inline">
-      <button type="submit" class="btn btn-ghost">Sign out</button>
-    </form>
+
+    {% if user is defined and user %}
+    <div class="user-chip">
+      <div class="avatar">{{ (user.username[:2]) | upper }}</div>
+      <div class="who">
+        <div>{{ user.username }}</div>
+        <div class="role">{{ user.role }}</div>
+      </div>
+      <form method="post" action="/logout" class="inline">
+        <button type="submit" class="btn btn-ghost btn-sm" title="Sign out">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+        </button>
+      </form>
+    </div>
     {% endif %}
-  </header>
-  <main>
-    {% block content %}{% endblock %}
+  </aside>
+
+  <main class="main">
+    <div class="container">
+      {% block content %}{% endblock %}
+    </div>
   </main>
-</body>
-</html>
+</div>
+{% endblock %}

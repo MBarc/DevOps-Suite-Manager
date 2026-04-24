@@ -1,21 +1,23 @@
 {% extends "base.html" %}
-{% block title %}{{ host.name }} - DOSM{% endblock %}
+{% block title %}{{ host.name }} — DOSM{% endblock %}
 {% block content %}
-<section class="panel">
-  <div class="row-between">
+<header class="page-header">
+  <div>
     <h1>{{ host.name }}</h1>
-    <div>
-      <a class="btn" href="/hosts/{{ host.id }}/edit">Edit</a>
-      <form method="post" action="/hosts/{{ host.id }}/delete" style="display:inline"
-            onsubmit="return confirm('Delete {{ host.name }}?');">
-        <button class="btn btn-danger" type="submit">Delete</button>
-      </form>
-    </div>
+    <div class="subtitle"><code>{{ host.hostname }}:{{ host.port }}</code> · {{ host.protocol }}</div>
   </div>
+  <div class="actions">
+    <a class="btn btn-subtle" href="/hosts/{{ host.id }}/edit">Edit</a>
+    <form method="post" action="/hosts/{{ host.id }}/delete" class="inline"
+          onsubmit="return confirm('Delete {{ host.name }}?');">
+      <button class="btn btn-danger" type="submit">Delete</button>
+    </form>
+    <a class="btn btn-ghost" href="/hosts">Back</a>
+  </div>
+</header>
 
+<section class="card">
   <dl class="kv">
-    <dt>Address</dt><dd><code>{{ host.hostname }}:{{ host.port }}</code></dd>
-    <dt>Protocol</dt><dd>{{ host.protocol }}</dd>
     <dt>Credential</dt>
     <dd>
       {% if host.credential %}
@@ -34,7 +36,10 @@
     <dt>Source</dt><dd>{{ host.source_module or "manual" }}</dd>
     <dt>Description</dt><dd>{{ host.description or "" }}</dd>
   </dl>
+</section>
 
-  <p class="muted">Connect (Guacamole) arrives in Phase 7.</p>
+<section class="card">
+  <h2>Remote access</h2>
+  <p class="muted">Connect (Guacamole SSH/RDP/VNC) arrives in Phase 7. Resource sidebar will attach to the connection screen automatically.</p>
 </section>
 {% endblock %}

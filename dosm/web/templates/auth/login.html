@@ -1,18 +1,25 @@
-{% extends "base.html" %}
-{% block title %}Sign in - DOSM{% endblock %}
+{% extends "auth_base.html" %}
+{% block title %}Sign in — DOSM{% endblock %}
 {% block content %}
-<section class="panel panel-narrow">
-  <h1>Sign in</h1>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+<section class="card auth-card">
+  <a href="/" class="brand">
+    <span class="brand-mark">DO</span>
+    <span class="brand-name">DOSM</span>
+  </a>
+  <h1 style="font-size:20px; margin: 0 0 var(--sp-4) 0">Sign in</h1>
+  {% if error %}
+    <div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ error }}</div>
+  {% endif %}
   <form method="post" action="/login" class="stack">
     <input type="hidden" name="next" value="{{ next }}" />
     <label>Username
-      <input type="text" name="username" value="{{ username }}" autofocus required />
+      <input type="text" name="username" value="{{ username }}" autofocus required autocomplete="username" />
     </label>
     <label>Password
-      <input type="password" name="password" required />
+      <input type="password" name="password" required autocomplete="current-password" />
     </label>
-    <button type="submit">Sign in</button>
+    <button type="submit" style="margin-top:var(--sp-2)">Sign in</button>
   </form>
+  <p class="muted" style="margin-top:var(--sp-4); font-size:12.5px">Local accounts are managed with <code>dosm user</code>.</p>
 </section>
 {% endblock %}

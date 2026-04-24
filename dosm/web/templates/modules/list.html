@@ -1,30 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Modules - DOSM{% endblock %}
+{% block title %}Modules — DOSM{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>Modules</h1>
-  <p class="muted">Enable a discovered module by adding its name to <code>enabled_modules</code> in <code>config.yaml</code> and restarting DOSM.</p>
+<header class="page-header">
+  <div>
+    <h1>Modules</h1>
+    <div class="subtitle">Enable a module by adding its name to <code>enabled_modules</code> in <code>config.yaml</code> and restarting DOSM.</div>
+  </div>
+</header>
+
+<section class="card">
   {% if rows %}
     {% for r in rows %}
     <article class="module-row">
-      <header class="row-between">
+      <div class="row-between">
         <div>
-          <h2 style="margin:0">
-            {% if r.loaded %}<a href="/modules/{{ r.spec.name }}">{{ r.spec.name }}</a>
-            {% else %}{{ r.spec.name }}{% endif %}
-            <span class="muted" style="font-weight:normal">v{{ r.spec.version }}</span>
-          </h2>
-          <p class="muted" style="margin:0.15rem 0 0 0">{{ r.spec.description }}</p>
+          <div style="display:flex; align-items:center; gap:10px">
+            {% if r.loaded %}
+              <a href="/modules/{{ r.spec.name }}" style="color:var(--fg-strong); font-weight:600; font-size:15px">{{ r.spec.name }}</a>
+            {% else %}
+              <span style="color:var(--fg-strong); font-weight:600; font-size:15px">{{ r.spec.name }}</span>
+            {% endif %}
+            <span class="muted">v{{ r.spec.version }}</span>
+            {% if r.error %}<span class="badge badge-red"><span class="dot err"></span> error</span>
+            {% elif r.loaded %}<span class="badge badge-green"><span class="dot ok"></span> loaded</span>
+            {% elif r.enabled %}<span class="badge badge-amber"><span class="dot warn"></span> enabled</span>
+            {% else %}<span class="badge badge-gray"><span class="dot"></span> available</span>{% endif %}
+          </div>
+          <p class="muted" style="margin:4px 0 0 0">{{ r.spec.description }}</p>
         </div>
-        <div>
-          {% if r.error %}<span class="error">error</span>
-          {% elif r.loaded %}<span style="color: var(--accent)">loaded</span>
-          {% elif r.enabled %}<span class="muted">enabled (not loaded)</span>
-          {% else %}<span class="muted">available</span>{% endif %}
-        </div>
-      </header>
-      <dl class="kv" style="margin-top:0.75rem">
-        <dt>Source</dt><dd>{{ r.source }}</dd>
+        <div class="muted" style="font-size:12.5px">{{ r.source }}</div>
+      </div>
+      <dl class="kv" style="margin-top:var(--sp-3)">
         <dt>Root</dt><dd><code>{{ r.root }}</code></dd>
         <dt>OS</dt>
         <dd>
@@ -39,7 +45,7 @@
           {% else %}<em class="muted">none</em>{% endif %}
         </dd>
         {% if r.spec.python_deps %}
-        <dt>Python deps</dt>
+        <dt>Deps</dt>
         <dd>{% for d in r.spec.python_deps %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
         {% endif %}
         {% if r.error %}
@@ -50,7 +56,7 @@
     </article>
     {% endfor %}
   {% else %}
-    <p class="muted">No modules discovered.</p>
+    <div class="empty-state">No modules discovered.</div>
   {% endif %}
 </section>
 {% endblock %}

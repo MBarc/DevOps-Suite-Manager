@@ -1,11 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Hosts - DOSM{% endblock %}
+{% block title %}Hosts — DOSM{% endblock %}
 {% block content %}
-<section class="panel">
-  <div class="row-between">
+<header class="page-header">
+  <div>
     <h1>Hosts</h1>
-    <a class="btn" href="/hosts/new">Add host</a>
+    <div class="subtitle">Managed servers across your on-prem fleet.</div>
   </div>
+  <div class="actions">
+    <a class="btn" href="/hosts/new">+ Add host</a>
+  </div>
+</header>
+
+<section class="card">
   {% if hosts %}
   <table class="data">
     <thead>
@@ -14,9 +20,9 @@
     <tbody>
     {% for h in hosts %}
       <tr>
-        <td><a href="/hosts/{{ h.id }}">{{ h.name }}</a></td>
+        <td><a href="/hosts/{{ h.id }}" style="color:var(--fg-strong); font-weight:500">{{ h.name }}</a></td>
         <td><code>{{ h.hostname }}:{{ h.port }}</code></td>
-        <td>{{ h.protocol }}</td>
+        <td><span class="tag">{{ h.protocol }}</span></td>
         <td>
           {% for t in h.tags %}<span class="tag">{{ t.name }}</span>{% endfor %}
         </td>
@@ -26,7 +32,7 @@
     </tbody>
   </table>
   {% else %}
-    <p class="muted">No hosts yet. <a href="/hosts/new">Add one</a>.</p>
+    <div class="empty-state">No hosts yet. <a href="/hosts/new">Add one</a>.</div>
   {% endif %}
 </section>
 {% endblock %}

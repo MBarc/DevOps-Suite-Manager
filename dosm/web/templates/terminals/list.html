@@ -1,29 +1,35 @@
 {% extends "base.html" %}
-{% block title %}Terminals - DOSM{% endblock %}
+{% block title %}Terminals — DOSM{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>Terminals</h1>
-  <p class="muted">Local shells on the DOSM host. Admin-only. Sessions are recorded to <code>{{ request.app.state.config.terminals.recordings_dir }}</code> by default.</p>
+<header class="page-header">
+  <div>
+    <h1>Terminals</h1>
+    <div class="subtitle">Local shells on the DOSM host. Admin-only. Sessions record to
+      <code>{{ request.app.state.config.terminals.recordings_dir }}</code>.</div>
+  </div>
+</header>
+
+<section class="card">
   {% if shells %}
   <table class="data">
-    <thead><tr><th>Name</th><th>Command</th><th>Source</th><th>Record</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Command</th><th>Source</th><th>Record</th><th style="width:1%"></th></tr></thead>
     <tbody>
     {% for s in shells %}
       <tr>
-        <td>{{ s.name }}</td>
+        <td style="font-weight:500">{{ s.name }}</td>
         <td><code>{{ s.command|join(' ') }}</code>
-          {% if s.cwd %}<div class="muted">cwd: <code>{{ s.cwd }}</code></div>{% endif %}
+          {% if s.cwd %}<div class="muted" style="font-size:12px">cwd: <code>{{ s.cwd }}</code></div>{% endif %}
         </td>
-        <td>{{ s.source }}</td>
+        <td><span class="tag">{{ s.source }}</span></td>
         <td>
-          <form action="/terminals/{{ s.id }}" method="get" class="inline">
+          <form action="/terminals/{{ s.id }}" method="get" class="inline" style="display:flex; align-items:center; gap:8px">
             <label class="inline-check">
               <input type="checkbox" name="record" value="1" {% if record_by_default %}checked{% endif %} />
               record
             </label>
         </td>
         <td>
-            <button type="submit">Open</button>
+            <button type="submit" class="btn btn-sm">Open</button>
           </form>
         </td>
       </tr>
@@ -31,7 +37,7 @@
     </tbody>
   </table>
   {% else %}
-  <p class="muted">No shells detected. Add entries under <code>terminals.custom</code> in <code>config.yaml</code>.</p>
+    <div class="empty-state">No shells detected. Add entries under <code>terminals.custom</code> in <code>config.yaml</code>.</div>
   {% endif %}
 </section>
 {% endblock %}

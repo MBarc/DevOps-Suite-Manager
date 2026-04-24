@@ -1,28 +1,39 @@
 {% extends "base.html" %}
-{% block title %}System Info - DOSM{% endblock %}
+{% block title %}System info — DOSM{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>System info <span class="muted" style="font-weight:normal">({{ snap.hostname }})</span></h1>
-  <dl class="kv">
-    <dt>OS</dt><dd>{{ snap.os }} {{ snap.os_release }}</dd>
-    <dt>Python</dt><dd>{{ snap.python }}</dd>
-    <dt>Uptime</dt>
-    <dd>
-      {% set days = (snap.uptime_seconds // 86400) %}
-      {% set hours = ((snap.uptime_seconds % 86400) // 3600) %}
-      {% set mins = ((snap.uptime_seconds % 3600) // 60) %}
-      {{ days }}d {{ hours }}h {{ mins }}m
-    </dd>
-    <dt>CPU</dt>
-    <dd>{{ snap.cpu_count_logical }} logical · {{ "%.1f"|format(snap.cpu_percent) }}% busy
-      {% if snap.load_avg_1m is not none %}· load1 {{ snap.load_avg_1m }}{% endif %}
-    </dd>
-    <dt>Memory</dt>
-    <dd>{{ snap.memory_used_gb }} / {{ snap.memory_total_gb }} GB ({{ snap.memory_percent }}%)</dd>
-  </dl>
-</section>
+<header class="page-header">
+  <div>
+    <h1>System info</h1>
+    <div class="subtitle">Snapshot of the DOSM host · <code>{{ snap.hostname }}</code></div>
+  </div>
+  <div class="actions">
+    <a href="/modules/system_info/api/snapshot" class="btn btn-ghost">JSON</a>
+    <a href="/modules" class="btn btn-ghost">All modules</a>
+  </div>
+</header>
 
-<section class="panel">
+<div class="stat-grid">
+  <div class="stat">
+    <div class="label">CPU</div>
+    <div class="value">{{ "%.1f"|format(snap.cpu_percent) }}<span style="font-size:14px; color:var(--fg-muted)">%</span></div>
+    <div class="note">{{ snap.cpu_count_logical }} logical{% if snap.load_avg_1m is not none %} · load1 {{ snap.load_avg_1m }}{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Memory</div>
+    <div class="value">{{ snap.memory_percent }}<span style="font-size:14px; color:var(--fg-muted)">%</span></div>
+    <div class="note">{{ snap.memory_used_gb }} / {{ snap.memory_total_gb }} GB</div>
+  </div>
+  <div class="stat">
+    <div class="label">Uptime</div>
+    {% set days = (snap.uptime_seconds // 86400) %}
+    {% set hours = ((snap.uptime_seconds % 86400) // 3600) %}
+    {% set mins = ((snap.uptime_seconds % 3600) // 60) %}
+    <div class="value">{{ days }}<span style="font-size:14px; color:var(--fg-muted)">d</span> {{ hours }}<span style="font-size:14px; color:var(--fg-muted)">h</span> {{ mins }}<span style="font-size:14px; color:var(--fg-muted)">m</span></div>
+    <div class="note">{{ snap.os }} {{ snap.os_release }} · Python {{ snap.python }}</div>
+  </div>
+</div>
+
+<section class="card">
   <h2>Disks</h2>
   {% if snap.disks %}
   <table class="data">
@@ -41,9 +52,7 @@
     </tbody>
   </table>
   {% else %}
-  <p class="muted">No readable disk partitions.</p>
+  <div class="empty-state">No readable disk partitions.</div>
   {% endif %}
 </section>
-
-<p class="muted">JSON: <a href="/modules/system_info/api/snapshot">/modules/system_info/api/snapshot</a></p>
 {% endblock %}
