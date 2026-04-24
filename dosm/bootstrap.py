@@ -25,6 +25,13 @@ DEFAULT_CONFIG: dict = {
         "session_cookie": "dosm_session",
         "session_max_age_seconds": 43200,
     },
+    "terminals": {
+        "enabled": True,
+        "auto_detect": True,
+        "record_by_default": True,
+        "recordings_dir": "data/terminal_recordings",
+        "custom": [],
+    },
     "ssh_command_policy": {
         "require_confirmation_off_list": True,
         "confirmation_field": "host_name",
@@ -56,6 +63,7 @@ SUBDIRS = [
     "data",
     "data/index",
     "data/action_log",
+    "data/terminal_recordings",
     "logs",
 ]
 

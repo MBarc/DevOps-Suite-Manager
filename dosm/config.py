@@ -35,6 +35,24 @@ class AuthConfig(BaseModel):
     session_max_age_seconds: int = 60 * 60 * 12  # 12h
 
 
+class CustomTerminal(BaseModel):
+    name: str
+    command: list[str]
+    env: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+    description: str | None = None
+
+
+class TerminalsConfig(BaseModel):
+    """Local shells launchable from the Terminals page (admin-only)."""
+
+    enabled: bool = True
+    auto_detect: bool = True
+    record_by_default: bool = True
+    recordings_dir: str = "data/terminal_recordings"
+    custom: list[CustomTerminal] = Field(default_factory=list)
+
+
 class SSHPolicyConfig(BaseModel):
     """Governs what `ssh_exec` actions can run without elevated confirmation.
 
@@ -77,6 +95,7 @@ class Config(BaseModel):
     llm: LLMConfig = LLMConfig()
     secrets: SecretsConfig = SecretsConfig()
     auth: AuthConfig = AuthConfig()
+    terminals: TerminalsConfig = TerminalsConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     enabled_modules: list[str] = Field(default_factory=list)
 

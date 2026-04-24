@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ shell.name }} - DOSM{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+
+<section class="panel terminal-wrap">
+  <div class="row-between">
+    <h1 style="margin:0">{{ shell.name }}</h1>
+    <div class="terminal-meta">
+      {% if record %}<span class="badge badge-red">Recording</span>{% else %}<span class="muted">Not recording</span>{% endif %}
+      <button id="panel-toggle" class="btn btn-ghost" type="button">Resources ▸</button>
+      <a href="/terminals" class="btn btn-ghost">Back</a>
+    </div>
+  </div>
+  <div class="terminal-layout">
+    <div id="term" class="xterm-host"></div>
+    <aside id="panel" class="resource-panel hidden">
+      <h3>Host resources</h3>
+      <dl class="kv">
+        <dt>CPU</dt><dd><span id="m-cpu">—</span>%</dd>
+        <dt>Load 1m</dt><dd id="m-load">—</dd>
+        <dt>Memory</dt><dd><span id="m-mem">—</span></dd>
+        <dt>Uptime</dt><dd id="m-up">—</dd>
+      </dl>
+      <h4>Disks</h4>
+      <table class="data compact"><thead><tr><th>Mount</th><th>Used</th><th>%</th></tr></thead>
+        <tbody id="m-disks"></tbody>
+      </table>
+    </aside>
+  </div>
+</section>
+
+<script>
+(function () {
+  const term = new Terminal({
+    convertEol: false,
+    fontSize: 13,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    theme: { background: '#0b0d12', foreground: '#e6e8ee' },
+    cursorBlink: true,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('term'));
+  fit.fit();
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const record = {{ 1 if record else 0 }};
+  const wsUrl = `${proto}://${location.host}/terminals/ws/{{ shell.id }}?record=${record}&cols=${term.cols}&rows=${term.rows}`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    term.onData(d => ws.send(JSON.stringify({type: 'input', data: d})));
+    term.onResize(size => ws.send(JSON.stringify({type: 'resize', rows: size.rows, cols: size.cols})));
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'output') term.write(msg.data);
+    else if (msg.type === 'exit') term.write('\r\n\x1b[33m[session ended]\x1b[0m\r\n');
+    else if (msg.type === 'error') term.write(`\r\n\x1b[31m[error: ${msg.data}]\x1b[0m\r\n`);
+  };
+  ws.onclose = () => term.write('\r\n\x1b[90m[connection closed]\x1b[0m\r\n');
+
+  window.addEventListener('resize', () => fit.fit());
+
+  // ---- Resource panel ----
+  const panel = document.getElementById('panel');
+  const toggle = document.getElementById('panel-toggle');
+  const stored = localStorage.getItem('dosm.resource_panel');
+  if (stored === 'open') panel.classList.remove('hidden');
+  toggle.addEventListener('click', () => {
+    panel.classList.toggle('hidden');
+    localStorage.setItem('dosm.resource_panel', panel.classList.contains('hidden') ? 'closed' : 'open');
+    setTimeout(() => fit.fit(), 50);
+  });
+
+  function fmtUptime(sec) {
+    const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+    return `${d}d ${h}h ${m}m`;
+  }
+
+  const metricsWs = new WebSocket(`${proto}://${location.host}/metrics/ws`);
+  metricsWs.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    document.getElementById('m-cpu').textContent = d.cpu_percent.toFixed(1);
+    document.getElementById('m-load').textContent = d.load_avg_1m === null ? 'n/a' : d.load_avg_1m.toFixed(2);
+    document.getElementById('m-mem').textContent = `${d.memory_used_gb} / ${d.memory_total_gb} GB (${d.memory_percent}%)`;
+    document.getElementById('m-up').textContent = fmtUptime(d.uptime_seconds);
+    const body = document.getElementById('m-disks');
+    body.innerHTML = '';
+    d.disks.forEach(x => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><code>${x.mountpoint}</code></td><td>${x.used_gb}/${x.total_gb}</td><td>${x.percent}%</td>`;
+      body.appendChild(tr);
+    });
+  };
+})();
+</script>
+{% endblock %}

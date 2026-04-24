@@ -26,6 +26,8 @@ dependencies = [
     "cryptography>=43",
     "hvac>=2.3",
     "psutil>=6.1",
+    "websockets>=13",
+    'pywinpty>=2.0; sys_platform == "win32"',
 ]
 
 [project.optional-dependencies]

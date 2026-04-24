@@ -12,6 +12,9 @@
     <nav>
       <a href="/">Dashboard</a>
       <a href="/hosts">Hosts</a>
+      {% if request.session.get('user_id') and request.app.state.config.terminals.enabled %}
+        <a href="/terminals">Terminals</a>
+      {% endif %}
       <a href="/modules">Modules</a>
       <a href="/health">Health</a>
     </nav>

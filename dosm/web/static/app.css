@@ -116,3 +116,49 @@ table.data th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-
   padding: 1rem 0;
 }
 .module-row:first-of-type { border-top: 0; padding-top: 0; }
+
+.inline-check { color: var(--muted); font-size: 0.9em; }
+.inline-check input { vertical-align: middle; margin-right: 0.25rem; }
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.badge-red { background: rgba(255,107,107,0.15); color: var(--danger); border: 1px solid rgba(255,107,107,0.4); }
+
+.terminal-wrap { padding-bottom: 0; }
+.terminal-meta { display: flex; gap: 0.5rem; align-items: center; }
+
+.terminal-layout {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  align-items: stretch;
+  min-height: 60vh;
+}
+.xterm-host {
+  flex: 1;
+  min-width: 0;
+  background: #0b0d12;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
+.resource-panel {
+  width: 320px;
+  flex: 0 0 320px;
+  background: #0b0d12;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  overflow: auto;
+}
+.resource-panel.hidden { display: none; }
+.resource-panel h3 { margin-top: 0; font-size: 1rem; }
+.resource-panel h4 { margin-bottom: 0.3rem; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+table.data.compact th, table.data.compact td { padding: 0.3rem 0.4rem; font-size: 0.85em; }
