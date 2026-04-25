@@ -34,11 +34,10 @@
               referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
     </div>
     <aside id="panel" class="resource-panel hidden">
-      <h3>Host resources</h3>
-      <p class="muted" style="font-size:12px; margin:0 0 8px 0">
-        Showing the DOSM host. Per-host SSH/WinRM data sources land in a follow-up.
-      </p>
+      <h3>Host resources <span id="m-scope" class="badge badge-gray" style="margin-left:6px">—</span></h3>
+      <div id="m-error" class="error" style="font-size:12px; margin-bottom:8px; display:none"></div>
       <dl class="kv">
+        <dt>Host</dt><dd id="m-host">—</dd>
         <dt>CPU</dt><dd><span id="m-cpu">—</span>%</dd>
         <dt>Load 1m</dt><dd id="m-load">—</dd>
         <dt>Memory</dt><dd><span id="m-mem">—</span></dd>
@@ -66,16 +65,29 @@
     return `${d}d ${h}h ${m}m`;
   }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/metrics/ws`);
+  const ws = new WebSocket(`${proto}://${location.host}/metrics/ws?host_id={{ host.id }}`);
+  const errEl = document.getElementById('m-error');
+  const scopeEl = document.getElementById('m-scope');
   ws.onmessage = (e) => {
     const d = JSON.parse(e.data);
-    document.getElementById('m-cpu').textContent = d.cpu_percent.toFixed(1);
+    if (d._error) {
+      errEl.style.display = 'block';
+      errEl.textContent = d._error;
+      scopeEl.textContent = 'unreachable';
+      scopeEl.className = 'badge badge-red';
+      return;
+    }
+    errEl.style.display = 'none';
+    scopeEl.textContent = d._label || (d._scope === 'local' ? 'DOSM host' : 'remote');
+    scopeEl.className = 'badge ' + (d._scope === 'remote' ? 'badge-blue' : 'badge-gray');
+    document.getElementById('m-host').textContent = d.hostname || '—';
+    document.getElementById('m-cpu').textContent = (d.cpu_percent ?? 0).toFixed(1);
     document.getElementById('m-load').textContent = d.load_avg_1m === null ? 'n/a' : d.load_avg_1m.toFixed(2);
     document.getElementById('m-mem').textContent = `${d.memory_used_gb} / ${d.memory_total_gb} GB (${d.memory_percent}%)`;
     document.getElementById('m-up').textContent = fmtUptime(d.uptime_seconds);
     const body = document.getElementById('m-disks');
     body.innerHTML = '';
-    d.disks.forEach(x => {
+    (d.disks || []).forEach(x => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td><code>${x.mountpoint}</code></td><td>${x.used_gb}/${x.total_gb}</td><td>${x.percent}%</td>`;
       body.appendChild(tr);
