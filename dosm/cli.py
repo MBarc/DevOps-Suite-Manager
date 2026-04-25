@@ -15,6 +15,7 @@ from dosm.bootstrap import initialize_home
 from dosm.config import load_config
 from dosm.db import create_all, init_engine, session_scope
 from dosm.docs_index.indexer import get_index_status, reindex
+from dosm.guacamole.auth_json import KEY_BYTES, load_secret_key
 from dosm.models import Credential, User
 from dosm.modules.loader import discover_modules
 from dosm.secrets import SecretNotFound, get_backend
@@ -26,12 +27,14 @@ secret_app = typer.Typer(help="Manage secrets via the configured backend.", no_a
 cred_app = typer.Typer(help="Manage credential records (references into the secrets backend).", no_args_is_help=True)
 module_app = typer.Typer(help="Inspect discovered DOSM modules.", no_args_is_help=True)
 docs_app = typer.Typer(help="Documentation index commands.", no_args_is_help=True)
+guac_app = typer.Typer(help="Guacamole integration helpers.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
 app.add_typer(cred_app, name="credential")
 app.add_typer(module_app, name="module")
 app.add_typer(docs_app, name="docs")
+app.add_typer(guac_app, name="guacamole")
 
 console = Console()
 
@@ -287,6 +290,36 @@ def docs_status() -> None:
         console.print(f"finished_at: {s.finished_at.isoformat(timespec='seconds')}")
     if s.last_error:
         console.print(f"[red]last_error:[/red] {s.last_error}")
+
+
+# ---- guacamole ------------------------------------------------------------
+
+
+@guac_app.command("keygen")
+def guac_keygen(
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing key file."),
+) -> None:
+    """Generate the 128-bit shared secret used by guacamole-auth-json.
+
+    Writes hex-encoded bytes to $DOSM_HOME/<guacamole.secret_key_file>. Paste
+    the same hex value into Guacamole's `guacamole.properties` as
+    `json-secret-key`.
+    """
+    cfg = load_config()
+    path = cfg.home / cfg.guacamole.secret_key_file
+    if path.exists() and not force:
+        console.print(f"[yellow]Already exists[/yellow]: {path}")
+        console.print(f"hex: {path.read_text().strip()}")
+        raise typer.Exit(0)
+    if path.exists():
+        path.unlink()
+    key = load_secret_key(path, create_if_missing=True)
+    console.print(f"[green]Wrote[/green] {path}")
+    console.print(f"hex ({KEY_BYTES} bytes): {key.hex()}")
+    console.print(
+        "\nPaste this hex value into Guacamole's guacamole.properties as:"
+    )
+    console.print(f"  json-secret-key: {key.hex()}")
 
 
 if __name__ == "__main__":

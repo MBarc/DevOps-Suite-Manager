@@ -35,6 +35,23 @@ class AuthConfig(BaseModel):
     session_max_age_seconds: int = 60 * 60 * 12  # 12h
 
 
+class GuacamoleConfig(BaseModel):
+    """Apache Guacamole HTML5 SSH/RDP/VNC integration.
+
+    DOSM signs short-lived JSON connection blobs with a 128-bit shared key
+    (auth-json extension). The Guacamole webapp accepts the blob, returns a
+    session token, and DOSM iframes the resulting client URL.
+    """
+
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:8080/guacamole"
+    secret_key_file: str = "config/guacamole.key"
+    session_ttl_seconds: int = 1800
+    recordings_dir: str = "data/guacamole_recordings"
+    # Forwarded to Guacamole as recording-related connection parameters.
+    record_sessions: bool = True
+
+
 class DocsIndexConfig(BaseModel):
     """Local docs ingestion: scan $DOSM_HOME/docs, chunk, embed, store."""
 
@@ -112,6 +129,7 @@ class Config(BaseModel):
     auth: AuthConfig = AuthConfig()
     terminals: TerminalsConfig = TerminalsConfig()
     docs_index: DocsIndexConfig = DocsIndexConfig()
+    guacamole: GuacamoleConfig = GuacamoleConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     enabled_modules: list[str] = Field(default_factory=list)
 

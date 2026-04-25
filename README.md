@@ -66,6 +66,36 @@ dosm serve
 
 Then open <http://127.0.0.1:8765>.
 
+## Optional: Guacamole stack for browser SSH/RDP/VNC
+
+DOSM signs short-lived JSON connection envelopes that Guacamole's
+`guacamole-auth-json` extension consumes — your hosts and credentials stay in
+DOSM, Guacamole is a dumb renderer.
+
+```bash
+# 1. Generate the shared 128-bit secret (writes to $DOSM_HOME/config/guacamole.key)
+dosm guacamole keygen
+
+# 2. Copy the env template and fill in the secret + a Postgres password
+cp .env.example .env
+# edit .env: GUACAMOLE_JSON_SECRET_KEY = the hex from `dosm guacamole keygen`
+
+# 3. Generate the Guacamole DB schema (one-time)
+mkdir -p guacamole/initdb
+docker run --rm guacamole/guacamole:1.5.5 /opt/guacamole/bin/initdb.sh --postgres \
+  > guacamole/initdb/001-initdb.sql
+
+# 4. Bring the stack up
+docker compose up -d
+
+# 5. Enable the integration in DOSM
+# In $DOSM_HOME/config.yaml set:
+#   guacamole:
+#     enabled: true
+#     base_url: "http://127.0.0.1:8080/guacamole"
+# Restart DOSM. Each Host detail page now has a "Connect via Guacamole" button.
+```
+
 ## Roadmap
 
 1. ✅ Phase 1 — scaffold, bootstrap, minimal dashboard

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}{{ host.name }} — Connect — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>{{ host.name }}</h1>
+    <div class="subtitle">
+      <span class="badge badge-blue">{{ host.protocol }}</span>
+      <code>{{ host.hostname }}:{{ host.port }}</code>
+      {% if host.credential %}· using <code>{{ host.credential.name }}</code>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <button id="panel-toggle" class="btn btn-subtle" type="button">Resources</button>
+    <a href="/hosts/{{ host.id }}" class="btn btn-ghost">Back to host</a>
+  </div>
+</header>
+
+{% if error %}
+<section class="card">
+  <h2>Connection unavailable</h2>
+  <p class="error">{{ error }}</p>
+  <p class="muted" style="font-size:13px">
+    Verify the Guacamole stack is running, that <code>guacamole.base_url</code> in
+    <code>config.yaml</code> points at it, and that the JSON auth extension is enabled with
+    the matching <code>guacamole.key</code> shared secret.
+  </p>
+</section>
+{% else %}
+<section class="card connect-panel">
+  <div class="connect-layout">
+    <div class="iframe-host">
+      <iframe id="guac-frame" src="{{ iframe_url }}" allow="clipboard-read; clipboard-write; fullscreen"
+              referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
+    </div>
+    <aside id="panel" class="resource-panel hidden">
+      <h3>Host resources</h3>
+      <p class="muted" style="font-size:12px; margin:0 0 8px 0">
+        Showing the DOSM host. Per-host SSH/WinRM data sources land in a follow-up.
+      </p>
+      <dl class="kv">
+        <dt>CPU</dt><dd><span id="m-cpu">—</span>%</dd>
+        <dt>Load 1m</dt><dd id="m-load">—</dd>
+        <dt>Memory</dt><dd><span id="m-mem">—</span></dd>
+        <dt>Uptime</dt><dd id="m-up">—</dd>
+      </dl>
+      <h4>Disks</h4>
+      <table class="data compact"><thead><tr><th>Mount</th><th>Used</th><th>%</th></tr></thead>
+        <tbody id="m-disks"></tbody>
+      </table>
+    </aside>
+  </div>
+</section>
+<script>
+(function () {
+  const panel = document.getElementById('panel');
+  const toggle = document.getElementById('panel-toggle');
+  if (localStorage.getItem('dosm.resource_panel') === 'open') panel.classList.remove('hidden');
+  toggle.addEventListener('click', () => {
+    panel.classList.toggle('hidden');
+    localStorage.setItem('dosm.resource_panel', panel.classList.contains('hidden') ? 'closed' : 'open');
+  });
+
+  function fmtUptime(sec) {
+    const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+    return `${d}d ${h}h ${m}m`;
+  }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/metrics/ws`);
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    document.getElementById('m-cpu').textContent = d.cpu_percent.toFixed(1);
+    document.getElementById('m-load').textContent = d.load_avg_1m === null ? 'n/a' : d.load_avg_1m.toFixed(2);
+    document.getElementById('m-mem').textContent = `${d.memory_used_gb} / ${d.memory_total_gb} GB (${d.memory_percent}%)`;
+    document.getElementById('m-up').textContent = fmtUptime(d.uptime_seconds);
+    const body = document.getElementById('m-disks');
+    body.innerHTML = '';
+    d.disks.forEach(x => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><code>${x.mountpoint}</code></td><td>${x.used_gb}/${x.total_gb}</td><td>${x.percent}%</td>`;
+      body.appendChild(tr);
+    });
+  };
+})();
+</script>
+
+<style>
+  .connect-panel { padding: 0; overflow: hidden; }
+  .connect-layout {
+    display: flex;
+    gap: 0;
+    min-height: calc(100vh - 200px);
+  }
+  .iframe-host {
+    flex: 1;
+    min-width: 0;
+    background: #000;
+    border-radius: 0 0 0 var(--r-md);
+  }
+  .iframe-host iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+  }
+  .resource-panel { border-left: 1px solid var(--border); border-radius: 0 0 var(--r-md) 0; }
+</style>
+{% endif %}
+{% endblock %}

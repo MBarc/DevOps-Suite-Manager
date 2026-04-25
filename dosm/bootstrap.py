@@ -42,6 +42,14 @@ DEFAULT_CONFIG: dict = {
         "embedding_dim": 384,
         "auto_index_on_startup": True,
     },
+    "guacamole": {
+        "enabled": False,
+        "base_url": "http://127.0.0.1:8080/guacamole",
+        "secret_key_file": "config/guacamole.key",
+        "session_ttl_seconds": 1800,
+        "recordings_dir": "data/guacamole_recordings",
+        "record_sessions": True,
+    },
     "ssh_command_policy": {
         "require_confirmation_off_list": True,
         "confirmation_field": "host_name",
@@ -74,6 +82,7 @@ SUBDIRS = [
     "data/index",
     "data/action_log",
     "data/terminal_recordings",
+    "data/guacamole_recordings",
     "logs",
 ]
 
