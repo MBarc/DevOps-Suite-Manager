@@ -18,6 +18,7 @@ from dosm.auth.session import install_session_middleware
 from dosm.config import Config, load_config
 from dosm.db import init_engine
 from dosm.agent import agent_router
+from dosm.credentials import credentials_router
 from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
 from dosm.guacamole import guacamole_router
@@ -37,7 +38,11 @@ STATIC_DIR = PACKAGE_ROOT / "web" / "static"
 
 def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or load_config()
-    init_engine(cfg)
+    engine = init_engine(cfg)
+    # Apply idempotent column-add migrations so an older DOSM_HOME upgrades
+    # without requiring a manual `dosm db init`.
+    from dosm.migrations import run_migrations
+    run_migrations(engine)
 
     app = FastAPI(
         title="DOSM",
@@ -59,6 +64,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.add_exception_handler(_NotAuthenticated, not_authenticated_exception_handler)
 
     app.include_router(auth_router)
+    app.include_router(credentials_router)
     app.include_router(hosts_router)
     if cfg.guacamole.enabled:
         # Mounts /hosts/{id}/connect — must register after hosts_router so the

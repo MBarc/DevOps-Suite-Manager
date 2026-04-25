@@ -49,6 +49,8 @@ DEFAULT_CONFIG: dict = {
         "session_ttl_seconds": 1800,
         "recordings_dir": "data/guacamole_recordings",
         "record_sessions": True,
+        "dosm_reachable_host": "host.docker.internal",
+        "tunnel_bind_host": "0.0.0.0",
     },
     "ssh_command_policy": {
         "require_confirmation_off_list": True,

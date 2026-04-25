@@ -50,6 +50,13 @@ class GuacamoleConfig(BaseModel):
     recordings_dir: str = "data/guacamole_recordings"
     # Forwarded to Guacamole as recording-related connection parameters.
     record_sessions: bool = True
+    # Hostname Guacamole's container uses to reach DOSM's local-port forwards
+    # (jump-host tunnels). Defaults to docker's host gateway. Set to a
+    # specific IP / DNS name in production.
+    dosm_reachable_host: str = "host.docker.internal"
+    # Address DOSM binds tunnel listeners to. 0.0.0.0 lets the Guacamole
+    # container reach them; lock this down to a private interface in prod.
+    tunnel_bind_host: str = "0.0.0.0"
 
 
 class DocsIndexConfig(BaseModel):

@@ -91,11 +91,24 @@ def _resolve_credential(cfg: Config, cred: Credential | None) -> tuple[str | Non
     return cred.username, secret_text, None
 
 
-def build_connection(cfg: Config, host: Host) -> BuiltConnection:
+def build_connection(
+    cfg: Config,
+    host: Host,
+    *,
+    endpoint_override: tuple[str, int] | None = None,
+) -> BuiltConnection:
+    """Build a Guacamole connection blob for ``host``.
+
+    If ``endpoint_override`` is given (host, port), it replaces the host's
+    real address — used by the jump-tunnel path so Guacamole connects to
+    DOSM's local port forward instead of trying to reach the target directly.
+    """
     if not host.protocol or host.protocol not in {"ssh", "rdp", "vnc"}:
         raise GuacamoleBuildError(f"unsupported protocol: {host.protocol!r}")
     username, password, ssh_key = _resolve_credential(cfg, host.credential)
     params: dict = {}
+    # Stash the real address so the per-protocol helpers don't need to know
+    # about the override; we patch hostname/port at the end.
     if host.protocol == "ssh":
         if username:
             params["username"] = username
@@ -114,5 +127,9 @@ def build_connection(cfg: Config, host: Host) -> BuiltConnection:
         if password:
             params["password"] = password
         _common_for_vnc(host, params)
+    if endpoint_override is not None:
+        ep_host, ep_port = endpoint_override
+        params["hostname"] = ep_host
+        params["port"] = str(ep_port)
     params.update(_recording_params(cfg.guacamole, host.name))
     return BuiltConnection(name=host.name, protocol=host.protocol, parameters=params)

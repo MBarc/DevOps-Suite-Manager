@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from dosm.auth.deps import require_user
 from dosm.db import get_session
 from dosm.hosts import repo
+from dosm.hosts.repo import HostValidationError
 from dosm.models import AuditLog, User
 
 router = APIRouter(prefix="/hosts")
@@ -17,6 +18,20 @@ PROTOCOL_DEFAULT_PORTS = {"ssh": 22, "rdp": 3389, "vnc": 5900}
 
 def _templates(request: Request):
     return request.app.state.templates
+
+
+def _form_context(db: Session, user: User, host=None, error: str | None = None) -> dict:
+    return {
+        "host": host,
+        "credentials": repo.list_credentials(db),
+        "jump_candidates": repo.list_jump_candidates(
+            db, exclude_host_id=host.id if host else None
+        ),
+        "protocols": list(repo.SUPPORTED_PROTOCOLS),
+        "default_ports": PROTOCOL_DEFAULT_PORTS,
+        "user": user,
+        "error": error,
+    }
 
 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
@@ -38,17 +53,12 @@ async def hosts_new(
     user: User = Depends(require_user),
 ):
     return _templates(request).TemplateResponse(
-        request,
-        "hosts/form.html",
-        {
-            "host": None,
-            "credentials": repo.list_credentials(db),
-            "protocols": list(repo.SUPPORTED_PROTOCOLS),
-            "default_ports": PROTOCOL_DEFAULT_PORTS,
-            "user": user,
-            "error": None,
-        },
+        request, "hosts/form.html", _form_context(db, user)
     )
+
+
+def _parse_int_or_none(v: str) -> int | None:
+    return int(v) if v.strip() else None
 
 
 @router.post("/new", include_in_schema=False)
@@ -60,11 +70,13 @@ async def hosts_create(
     protocol: str = Form("ssh"),
     description: str = Form(""),
     credential_id: str = Form(""),
+    jump_host_id: str = Form(""),
     tags: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
-    cred_id = int(credential_id) if credential_id else None
+    cred_id = _parse_int_or_none(credential_id)
+    jump_id = _parse_int_or_none(jump_host_id)
     try:
         host = repo.create_host(
             db,
@@ -74,21 +86,15 @@ async def hosts_create(
             protocol=protocol,
             description=description.strip() or None,
             credential_id=cred_id,
+            jump_host_id=jump_id,
             tags_csv=tags,
         )
-    except (IntegrityError, ValueError) as e:
+    except (IntegrityError, HostValidationError) as e:
         db.rollback()
         return _templates(request).TemplateResponse(
             request,
             "hosts/form.html",
-            {
-                "host": None,
-                "credentials": repo.list_credentials(db),
-                "protocols": list(repo.SUPPORTED_PROTOCOLS),
-                "default_ports": PROTOCOL_DEFAULT_PORTS,
-                "user": user,
-                "error": str(e.__cause__ or e),
-            },
+            _form_context(db, user, host=None, error=str(e.__cause__ or e)),
             status_code=400,
         )
     db.add(
@@ -96,7 +102,10 @@ async def hosts_create(
             actor_id=user.id,
             action="host.create",
             target=f"host:{host.id}",
-            details=f"name={host.name} protocol={host.protocol}",
+            details=(
+                f"name={host.name} protocol={host.protocol}"
+                + (f" jump={jump_id}" if jump_id else "")
+            ),
         )
     )
     return RedirectResponse(f"/hosts/{host.id}", status_code=303)
@@ -112,8 +121,9 @@ async def hosts_detail(
     host = repo.get_host(db, host_id)
     if host is None:
         raise HTTPException(404)
+    chain = repo.resolve_jump_chain(db, host)
     return _templates(request).TemplateResponse(
-        request, "hosts/detail.html", {"host": host, "user": user}
+        request, "hosts/detail.html", {"host": host, "jump_chain": chain, "user": user}
     )
 
 
@@ -128,16 +138,7 @@ async def hosts_edit(
     if host is None:
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
-        request,
-        "hosts/form.html",
-        {
-            "host": host,
-            "credentials": repo.list_credentials(db),
-            "protocols": list(repo.SUPPORTED_PROTOCOLS),
-            "default_ports": PROTOCOL_DEFAULT_PORTS,
-            "user": user,
-            "error": None,
-        },
+        request, "hosts/form.html", _form_context(db, user, host=host)
     )
 
 
@@ -151,6 +152,7 @@ async def hosts_update(
     protocol: str = Form("ssh"),
     description: str = Form(""),
     credential_id: str = Form(""),
+    jump_host_id: str = Form(""),
     tags: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
@@ -158,7 +160,8 @@ async def hosts_update(
     host = repo.get_host(db, host_id)
     if host is None:
         raise HTTPException(404)
-    cred_id = int(credential_id) if credential_id else None
+    cred_id = _parse_int_or_none(credential_id)
+    jump_id = _parse_int_or_none(jump_host_id)
     try:
         repo.update_host(
             db,
@@ -169,21 +172,15 @@ async def hosts_update(
             protocol=protocol,
             description=description.strip() or None,
             credential_id=cred_id,
+            jump_host_id=jump_id,
             tags_csv=tags,
         )
-    except (IntegrityError, ValueError) as e:
+    except (IntegrityError, HostValidationError) as e:
         db.rollback()
         return _templates(request).TemplateResponse(
             request,
             "hosts/form.html",
-            {
-                "host": host,
-                "credentials": repo.list_credentials(db),
-                "protocols": list(repo.SUPPORTED_PROTOCOLS),
-                "default_ports": PROTOCOL_DEFAULT_PORTS,
-                "user": user,
-                "error": str(e.__cause__ or e),
-            },
+            _form_context(db, user, host=host, error=str(e.__cause__ or e)),
             status_code=400,
         )
     db.add(AuditLog(actor_id=user.id, action="host.update", target=f"host:{host.id}"))

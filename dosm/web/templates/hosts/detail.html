@@ -27,6 +27,21 @@
         <em class="muted">none</em>
       {% endif %}
     </dd>
+    <dt>Path</dt>
+    <dd>
+      {% if jump_chain %}
+        {% for j in jump_chain %}
+          <a href="/hosts/{{ j.id }}"><code>{{ j.name }}</code></a>
+          <span class="muted">→</span>
+        {% endfor %}
+        <code>{{ host.name }}</code>
+        <div class="muted" style="font-size:12px; margin-top:2px">
+          via {{ jump_chain|length }} jump host{{ '' if jump_chain|length == 1 else 's' }}
+        </div>
+      {% else %}
+        <span class="muted">direct (no jump host)</span>
+      {% endif %}
+    </dd>
     <dt>Tags</dt>
     <dd>
       {% if host.tags %}

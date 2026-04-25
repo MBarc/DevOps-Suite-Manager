@@ -86,6 +86,9 @@ class Host(Base):
     credential_id: Mapped[int | None] = mapped_column(
         ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
     )
+    jump_host_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hosts.id", ondelete="SET NULL"), nullable=True
+    )
     source_module: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -93,6 +96,9 @@ class Host(Base):
     )
 
     credential: Mapped[Credential | None] = relationship("Credential")
+    jump_host: Mapped["Host | None"] = relationship(
+        "Host", remote_side=lambda: [Host.id], foreign_keys=lambda: [Host.jump_host_id]
+    )
     tags: Mapped[list[Tag]] = relationship(
         "Tag",
         secondary="host_tags",

@@ -3,7 +3,6 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any
 
 from dosm.config import Config
 
@@ -75,12 +74,11 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
     import asyncio
     import time
 
-    import asyncssh  # type: ignore
     from sqlalchemy import select
 
     from dosm.db import session_scope
-    from dosm.models import Credential, Host
-    from dosm.secrets import SecretNotFound, get_backend
+    from dosm.jumps.connections import build_jump_chain, connect_through_chain
+    from dosm.models import Host
 
     host_id = args.get("host_id")
     host_name = args.get("host")
@@ -90,6 +88,8 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
     if not command:
         return ActionResult(ok=False, summary="empty command")
 
+    # Resolve host + jump chain inside a session, then materialize to plain
+    # values so the rest of the runner can release the DB connection.
     with session_scope() as s:
         host: Host | None = None
         if host_id is not None:
@@ -98,52 +98,30 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
             host = s.execute(select(Host).where(Host.name == host_name)).scalar_one_or_none()
         if host is None:
             return ActionResult(ok=False, summary=f"host not found: {host_id or host_name!r}")
-
         if host.protocol != "ssh":
             return ActionResult(
                 ok=False, summary=f"host {host.name!r} protocol is {host.protocol}, not ssh"
             )
-
-        cred: Credential | None = host.credential
-        target_user = (cred.username if cred else None) or "root"
-        password: str | None = None
-        client_key: str | None = None
-        if cred is not None:
-            try:
-                secret_bytes = get_backend(cfg).get(cred.secret_ref)
-            except SecretNotFound:
-                return ActionResult(
-                    ok=False, summary=f"credential {cred.name!r} secret_ref {cred.secret_ref!r} missing"
-                )
-            secret_text = secret_bytes.decode("utf-8", errors="replace")
-            if cred.kind == "ssh_key":
-                client_key = secret_text
-            else:
-                password = secret_text
-        host_target = host.hostname
-        host_port = host.port
         host_label = host.name
+        jump_count = 0
+        try:
+            jump_hops, target = build_jump_chain(s, cfg, host)
+            jump_count = len(jump_hops)
+        except RuntimeError as e:
+            return ActionResult(ok=False, summary=str(e))
 
     started = time.monotonic()
+    conn = None
     try:
-        connect_kwargs: dict[str, Any] = {
-            "host": host_target,
-            "port": host_port,
-            "username": target_user,
-            "known_hosts": None,  # caller is expected to manage trust at the network layer
-        }
-        if client_key:
-            connect_kwargs["client_keys"] = [asyncssh.import_private_key(client_key)]
-        if password:
-            connect_kwargs["password"] = password
-        async with asyncssh.connect(**connect_kwargs) as conn:
-            res = await asyncio.wait_for(conn.run(command, check=False), timeout=timeout)
+        conn = await connect_through_chain(jump_hops, target)
+        res = await asyncio.wait_for(conn.run(command, check=False), timeout=timeout)
         duration_ms = int((time.monotonic() - started) * 1000)
         ok = res.exit_status == 0
+        chain_note = f" via {jump_count} jump host{'' if jump_count == 1 else 's'}" if jump_count else ""
         summary = (
-            f"{host_label}: {command} → exit {res.exit_status} in {duration_ms}ms"
+            f"{host_label}: {command}{chain_note} → exit {res.exit_status} in {duration_ms}ms"
             if ok
-            else f"{host_label}: {command} FAILED (exit {res.exit_status})"
+            else f"{host_label}: {command}{chain_note} FAILED (exit {res.exit_status})"
         )
         return ActionResult(
             ok=ok,
@@ -152,14 +130,14 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
             stderr=str(res.stderr or ""),
             exit_code=int(res.exit_status) if res.exit_status is not None else None,
             duration_ms=duration_ms,
-            extra={"host": host_label, "command": command},
+            extra={"host": host_label, "command": command, "jumps": jump_count},
         )
     except asyncio.TimeoutError:
         return ActionResult(
             ok=False,
             summary=f"{host_label}: {command} timed out after {timeout}s",
             duration_ms=int((time.monotonic() - started) * 1000),
-            extra={"host": host_label, "command": command},
+            extra={"host": host_label, "command": command, "jumps": jump_count},
         )
     except Exception as e:
         return ActionResult(
@@ -167,8 +145,14 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
             summary=f"{host_label}: {type(e).__name__}: {e}",
             stderr=str(e),
             duration_ms=int((time.monotonic() - started) * 1000),
-            extra={"host": host_label, "command": command},
+            extra={"host": host_label, "command": command, "jumps": jump_count},
         )
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _ssh_exec_classify(args: dict) -> str:

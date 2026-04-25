@@ -1,0 +1,272 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from dosm.auth.deps import require_user
+from dosm.db import get_session
+from dosm.models import AuditLog, Credential, Host, User
+from dosm.secrets import SecretNotFound, get_backend
+
+router = APIRouter(prefix="/credentials")
+
+CRED_KINDS = ("ssh_password", "ssh_key", "rdp_password", "vnc_password", "api_token")
+
+
+def _templates(request: Request):
+    return request.app.state.templates
+
+
+def _hosts_using(db: Session, cred_id: int) -> int:
+    return int(
+        db.execute(
+            select(func.count()).select_from(Host).where(Host.credential_id == cred_id)
+        ).scalar_one()
+    )
+
+
+@router.get("", response_class=HTMLResponse, include_in_schema=False)
+async def credentials_list(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    rows = list(db.execute(select(Credential).order_by(Credential.name)).scalars())
+    enriched = []
+    for c in rows:
+        enriched.append(
+            {
+                "cred": c,
+                "host_count": _hosts_using(db, c.id),
+            }
+        )
+    return _templates(request).TemplateResponse(
+        request, "credentials/list.html", {"rows": enriched, "user": user}
+    )
+
+
+def _form_context(host=None, error: str | None = None, secret_present: bool = False, **overrides) -> dict:
+    base = {
+        "cred": host,
+        "kinds": list(CRED_KINDS),
+        "error": error,
+        "secret_present": secret_present,
+    }
+    base.update(overrides)
+    return base
+
+
+@router.get("/new", response_class=HTMLResponse, include_in_schema=False)
+async def credentials_new(
+    request: Request,
+    user: User = Depends(require_user),
+):
+    return _templates(request).TemplateResponse(
+        request,
+        "credentials/form.html",
+        _form_context(user=user),
+    )
+
+
+@router.post("/new", include_in_schema=False)
+async def credentials_create(
+    request: Request,
+    name: str = Form(...),
+    kind: str = Form(...),
+    username: str = Form(""),
+    secret_ref: str = Form(...),
+    secret_value: str = Form(""),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    cfg = request.app.state.config
+    name = name.strip()
+    secret_ref = secret_ref.strip()
+    if kind not in CRED_KINDS:
+        return _templates(request).TemplateResponse(
+            request,
+            "credentials/form.html",
+            _form_context(user=user, error=f"unknown kind {kind!r}"),
+            status_code=400,
+        )
+    if not name or not secret_ref:
+        return _templates(request).TemplateResponse(
+            request,
+            "credentials/form.html",
+            _form_context(user=user, error="name and secret_ref are required"),
+            status_code=400,
+        )
+    cred = Credential(
+        name=name,
+        kind=kind,
+        username=username.strip() or None,
+        secret_ref=secret_ref,
+    )
+    db.add(cred)
+    try:
+        db.flush()
+    except IntegrityError as e:
+        db.rollback()
+        return _templates(request).TemplateResponse(
+            request,
+            "credentials/form.html",
+            _form_context(user=user, error=str(e.__cause__ or e)),
+            status_code=400,
+        )
+    cid = cred.id
+    db.add(
+        AuditLog(
+            actor_id=user.id,
+            action="credential.create",
+            target=f"credential:{cid}",
+            details=f"kind={kind} secret_ref={secret_ref} inline_secret={'yes' if secret_value else 'no'}",
+        )
+    )
+    # Commit the credential row + audit before opening a second session for
+    # the secrets backend, so SQLite's single-writer doesn't deadlock with us.
+    db.commit()
+
+    if secret_value:
+        try:
+            get_backend(cfg).set_str(secret_ref, secret_value)
+        except Exception as e:
+            db.add(
+                AuditLog(
+                    actor_id=user.id,
+                    action="credential.create.partial",
+                    target=f"credential:{cid}",
+                    details=f"secret write failed: {e}",
+                )
+            )
+            return RedirectResponse(f"/credentials/{cid}?warn=secret-write-failed", status_code=303)
+
+    return RedirectResponse(f"/credentials/{cid}", status_code=303)
+
+
+@router.get("/{cred_id}", response_class=HTMLResponse, include_in_schema=False)
+async def credentials_detail(
+    cred_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    cred = db.get(Credential, cred_id)
+    if cred is None:
+        raise HTTPException(404)
+    cfg = request.app.state.config
+    secret_present = False
+    try:
+        get_backend(cfg).get(cred.secret_ref)
+        secret_present = True
+    except SecretNotFound:
+        secret_present = False
+    except Exception:
+        secret_present = False
+    hosts = list(
+        db.execute(
+            select(Host).where(Host.credential_id == cred.id).order_by(Host.name)
+        ).scalars()
+    )
+    return _templates(request).TemplateResponse(
+        request,
+        "credentials/detail.html",
+        {"cred": cred, "secret_present": secret_present, "hosts": hosts, "user": user},
+    )
+
+
+@router.get("/{cred_id}/edit", response_class=HTMLResponse, include_in_schema=False)
+async def credentials_edit(
+    cred_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    cred = db.get(Credential, cred_id)
+    if cred is None:
+        raise HTTPException(404)
+    return _templates(request).TemplateResponse(
+        request,
+        "credentials/form.html",
+        _form_context(host=cred, user=user),
+    )
+
+
+@router.post("/{cred_id}/edit", include_in_schema=False)
+async def credentials_update(
+    cred_id: int,
+    request: Request,
+    name: str = Form(...),
+    kind: str = Form(...),
+    username: str = Form(""),
+    secret_ref: str = Form(...),
+    secret_value: str = Form(""),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    cfg = request.app.state.config
+    cred = db.get(Credential, cred_id)
+    if cred is None:
+        raise HTTPException(404)
+    if kind not in CRED_KINDS:
+        return _templates(request).TemplateResponse(
+            request,
+            "credentials/form.html",
+            _form_context(host=cred, user=user, error=f"unknown kind {kind!r}"),
+            status_code=400,
+        )
+    cred.name = name.strip()
+    cred.kind = kind
+    cred.username = username.strip() or None
+    cred.secret_ref = secret_ref.strip()
+    cred.updated_at = datetime.utcnow()
+    try:
+        db.flush()
+    except IntegrityError as e:
+        db.rollback()
+        return _templates(request).TemplateResponse(
+            request,
+            "credentials/form.html",
+            _form_context(host=cred, user=user, error=str(e.__cause__ or e)),
+            status_code=400,
+        )
+    db.add(AuditLog(actor_id=user.id, action="credential.update", target=f"credential:{cred.id}"))
+    cred_id_local = cred.id
+    secret_ref_local = cred.secret_ref
+    db.commit()  # release the writer before talking to the secrets backend
+    if secret_value:
+        try:
+            get_backend(cfg).set_str(secret_ref_local, secret_value)
+        except Exception as e:
+            with __import__("dosm.db", fromlist=["session_scope"]).session_scope() as s2:
+                s2.add(
+                    AuditLog(
+                        actor_id=user.id,
+                        action="credential.update.partial",
+                        target=f"credential:{cred_id_local}",
+                        details=f"secret write failed: {e}",
+                    )
+                )
+    return RedirectResponse(f"/credentials/{cred_id_local}", status_code=303)
+
+
+@router.post("/{cred_id}/delete", include_in_schema=False)
+async def credentials_delete(
+    cred_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    cred = db.get(Credential, cred_id)
+    if cred is None:
+        raise HTTPException(404)
+    if _hosts_using(db, cred.id) > 0:
+        # Refuse rather than orphan host references silently.
+        raise HTTPException(409, "credential is in use by one or more hosts")
+    name = cred.name
+    db.delete(cred)
+    db.add(AuditLog(actor_id=user.id, action="credential.delete", target=f"credential:{cred_id}", details=f"name={name}"))
+    return RedirectResponse("/credentials", status_code=303)
