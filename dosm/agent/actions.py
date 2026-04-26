@@ -173,3 +173,86 @@ SSH_EXEC = ActionSpec(
     classify=_ssh_exec_classify,
 )
 register_action(SSH_EXEC)
+
+
+# ---- run_pipeline --------------------------------------------------------
+
+
+async def _run_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
+    """Trigger a registered pipeline by name and return the resulting run."""
+    import time
+
+    from dosm.db import session_scope
+    from dosm.pipelines import repo as pipelines_repo
+
+    name = (args.get("name") or "").strip()
+    inputs = args.get("inputs") or {}
+    if not name:
+        return ActionResult(ok=False, summary="run_pipeline requires `name`")
+    if not isinstance(inputs, dict):
+        return ActionResult(ok=False, summary="`inputs` must be an object")
+
+    started = time.monotonic()
+    with session_scope() as s:
+        pipeline = pipelines_repo.get_pipeline_by_name(s, name)
+        if pipeline is None:
+            return ActionResult(ok=False, summary=f"pipeline {name!r} not found")
+        try:
+            run = await pipelines_repo.trigger_pipeline(
+                cfg, s, pipeline, inputs=inputs, user_id=None
+            )
+        except Exception as e:
+            return ActionResult(
+                ok=False,
+                summary=f"trigger crashed: {type(e).__name__}: {e}",
+                stderr=repr(e),
+                duration_ms=int((time.monotonic() - started) * 1000),
+                extra={"pipeline": name},
+            )
+        run_id = run.id
+        run_status = run.status
+        run_external = run.external_id
+        run_url = run.html_url
+        run_error = run.error
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    ok = run_status not in ("failed", "cancelled")
+    summary_parts = [f"pipeline {name!r} → {run_status}"]
+    if run_external:
+        summary_parts.append(f"external={run_external}")
+    summary_parts.append(f"in {duration_ms}ms")
+    return ActionResult(
+        ok=ok,
+        summary=" ".join(summary_parts) + (f" (err: {run_error[:80]})" if run_error else ""),
+        stdout=(run_url or ""),
+        stderr=(run_error or ""),
+        duration_ms=duration_ms,
+        extra={
+            "pipeline": name,
+            "run_id": run_id,
+            "external_id": run_external,
+            "html_url": run_url,
+            "dosm_run_url": f"/pipelines/runs/{run_id}",
+        },
+    )
+
+
+def _run_pipeline_classify(args: dict) -> str:
+    # Pipeline runs always state-changing — keep them at safe tier so the
+    # plan card uses the standard Approve flow (no typed confirmation), but
+    # the user still has to approve. Elevated triggers can come later (e.g.
+    # for pipelines tagged `prod`).
+    return "safe"
+
+
+RUN_PIPELINE = ActionSpec(
+    name="run_pipeline",
+    description="Trigger a registered CI/CD pipeline by name with optional inputs. Returns the created run id and provider URL.",
+    args_schema=[
+        {"name": "name", "type": "string", "required": True, "description": "Pipeline name from /pipelines."},
+        {"name": "inputs", "type": "object", "required": False, "description": "Provider-specific inputs map."},
+    ],
+    runner=_run_pipeline_runner,
+    classify=_run_pipeline_classify,
+)
+register_action(RUN_PIPELINE)

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }} — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>{{ p.name }}</h1>
+    <div class="subtitle">
+      <span class="tag">{{ p.provider }}</span>
+      {% if p.provider == 'github_actions' %}
+        · <code>{{ cfg.get('owner','?') }}/{{ cfg.get('repo','?') }}</code>
+        · <code>{{ cfg.get('workflow','?') }}</code>
+        · ref <code>{{ cfg.get('ref','main') }}</code>
+      {% endif %}
+      {% if p.credential %}· using <code>{{ p.credential.name }}</code>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-subtle" href="/pipelines/{{ p.id }}/edit">Edit</a>
+    <form method="post" action="/pipelines/{{ p.id }}/delete" class="inline"
+          onsubmit="return confirm('Delete {{ p.name }}?');">
+      <button class="btn btn-danger" type="submit">Delete</button>
+    </form>
+    <a class="btn btn-ghost" href="/pipelines">Back</a>
+  </div>
+</header>
+
+<section class="card card-narrow">
+  <h2>Trigger run</h2>
+  {% if not p.credential %}
+    <div class="badge badge-amber" style="margin-bottom: var(--sp-3)">no credential bound — provider may reject</div>
+  {% endif %}
+  <form method="post" action="/pipelines/{{ p.id }}/run" class="stack">
+    <label>Inputs
+      <textarea name="inputs_text" rows="6" placeholder="{% if schema %}{% for s in schema %}{{ s.name }}=
+{% endfor %}{% else %}# one key=value per line, or paste a JSON object
+environment=staging
+version=1.2.3{% endif %}">{% if schema %}{% for s in schema %}{{ s.name }}=
+{% endfor %}{% endif %}</textarea>
+      <span class="field-hint">One <code>key=value</code> per line, or paste a JSON object.</span>
+    </label>
+    <div>
+      <button type="submit">Run</button>
+      <span class="muted" style="font-size:12.5px; margin-left:8px">Press Run, then Refresh on the run page to update status.</span>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Recent runs</h2>
+  {% if runs %}
+  <table class="data">
+    <thead><tr><th>ID</th><th>Status</th><th>Triggered</th><th>External</th><th>By</th></tr></thead>
+    <tbody>
+    {% for v in runs %}
+      {% set s = v.r.status %}
+      {% set badge = 'badge-blue' if s in ('queued','running')
+        else 'badge-green' if s == 'success'
+        else 'badge-red' if s in ('failed','cancelled')
+        else 'badge-gray' %}
+      <tr>
+        <td><a href="/pipelines/runs/{{ v.r.id }}">#{{ v.r.id }}</a></td>
+        <td><span class="badge {{ badge }}">{{ s }}</span></td>
+        <td class="muted" style="font-size:12.5px">{{ v.r.triggered_at.isoformat(timespec='seconds') }}</td>
+        <td class="muted">{{ v.r.external_id or '' }}</td>
+        <td class="muted">{{ v.r.triggered_by_user_id or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state">No runs yet.</div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit pipeline' if pipeline else 'New pipeline' }} — DOSM{% endblock %}
+{% block content %}
+{% set cfg = cfg_parsed or {} %}
+{% set schema = schema_parsed or [] %}
+<header class="page-header">
+  <div>
+    <h1>{{ 'Edit pipeline' if pipeline else 'New pipeline' }}</h1>
+    <div class="subtitle">{{ 'Update the registered pipeline.' if pipeline else 'Register a CI/CD pipeline DOSM can trigger.' }}</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="{{ '/pipelines/' + pipeline.id|string if pipeline else '/pipelines' }}">Cancel</a>
+  </div>
+</header>
+
+<section class="card card-narrow">
+  {% if error %}<div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ error }}</div>{% endif %}
+  <form method="post"
+        action="{{ '/pipelines/' + pipeline.id|string + '/edit' if pipeline else '/pipelines/new' }}"
+        class="stack">
+    <label>Name
+      <input type="text" name="name" required value="{{ pipeline.name if pipeline else '' }}" placeholder="deploy-japan-model" />
+    </label>
+    <label>Provider
+      <select name="provider" id="provider-select">
+        {% for prov in providers %}
+        <option value="{{ prov }}" {% if pipeline and pipeline.provider == prov %}selected{% elif not pipeline and prov == 'github_actions' %}selected{% endif %}>{{ prov }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <fieldset id="config-github_actions" style="border:1px solid var(--border); border-radius:6px; padding:12px">
+      <legend class="muted" style="padding: 0 6px; font-size:12px">GitHub Actions configuration</legend>
+      <div class="stack">
+        <label>Owner
+          <input type="text" name="gh_owner" value="{{ cfg.get('owner','') }}" placeholder="my-org" />
+        </label>
+        <label>Repo
+          <input type="text" name="gh_repo" value="{{ cfg.get('repo','') }}" placeholder="my-repo" />
+        </label>
+        <label>Workflow file
+          <input type="text" name="gh_workflow" value="{{ cfg.get('workflow','') }}" placeholder="deploy.yml" />
+          <span class="field-hint">Filename or numeric workflow id.</span>
+        </label>
+        <label>Ref (branch/tag/SHA)
+          <input type="text" name="gh_ref" value="{{ cfg.get('ref','main') }}" placeholder="main" />
+        </label>
+        <label>API base (optional)
+          <input type="text" name="gh_api_base" value="{{ cfg.get('api_base','') or '' }}" placeholder="https://api.github.com" />
+          <span class="field-hint">Override for GitHub Enterprise Server.</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <label>Credential profile
+      <select name="credential_id">
+        <option value="">(none — public/anon)</option>
+        {% for c in credentials %}
+        <option value="{{ c.id }}" {% if pipeline and pipeline.credential_id == c.id %}selected{% endif %}>
+          {{ c.name }} ({{ c.kind }})
+        </option>
+        {% endfor %}
+      </select>
+      <span class="field-hint">Token with <code>repo</code> + <code>workflow</code> scopes for GitHub Actions.</span>
+    </label>
+
+    <label>Description
+      <textarea name="description" rows="2" placeholder="Optional notes for teammates">{{ pipeline.description or '' if pipeline else '' }}</textarea>
+    </label>
+
+    <label>Inputs schema (one input name per line)
+      <textarea name="inputs_schema" rows="3" placeholder="environment&#10;version">{% if schema %}{% for s in schema %}{{ s.name }}
+{% endfor %}{% endif %}</textarea>
+      <span class="field-hint">Free-form list. v1 just hints which keys to fill; type validation lands later.</span>
+    </label>
+
+    <div class="row" style="margin-top:var(--sp-2)">
+      <button type="submit">{{ 'Save changes' if pipeline else 'Create pipeline' }}</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

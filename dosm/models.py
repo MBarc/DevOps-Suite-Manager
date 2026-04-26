@@ -209,6 +209,58 @@ class PlanCard(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
 
 
+# ---- Pipelines (CI/CD) ---------------------------------------------------
+
+
+class Pipeline(Base):
+    """A user-registered CI/CD pipeline that DOSM can trigger.
+
+    `provider` discriminates the adapter (currently only github_actions).
+    `config` is provider-specific JSON: for GitHub Actions
+    {"owner", "repo", "workflow", "ref"}.
+    """
+
+    __tablename__ = "pipelines"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="github_actions")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    config: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    inputs_schema: Mapped[str | None] = mapped_column(Text, nullable=True)
+    credential_id: Mapped[int | None] = mapped_column(
+        ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    credential: Mapped[Credential | None] = relationship("Credential")
+
+
+class PipelineRun(Base):
+    __tablename__ = "pipeline_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pipeline_id: Mapped[int] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    external_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    # queued | running | success | failed | cancelled | skipped | unknown
+    inputs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    html_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    triggered_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    triggered_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 # ---- Secrets storage (local backend) --------------------------------------
 
 
@@ -260,6 +312,8 @@ __all__ = [
     "Conversation",
     "ChatMessage",
     "PlanCard",
+    "Pipeline",
+    "PipelineRun",
 ]
 
 

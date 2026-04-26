@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Pipelines — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Pipelines</h1>
+    <div class="subtitle">Trigger CI/CD runs from DOSM. v1 supports GitHub Actions; more providers in 11b/c/d.</div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/pipelines/new">+ New pipeline</a>
+  </div>
+</header>
+
+<section class="card">
+  {% if rows %}
+  <table class="data">
+    <thead><tr><th>Name</th><th>Provider</th><th>Target</th><th>Latest run</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>
+          <a href="/pipelines/{{ r.p.id }}" style="color:var(--fg-strong); font-weight:500">{{ r.p.name }}</a>
+          {% if r.p.description %}<div class="muted" style="font-size:12px">{{ r.p.description }}</div>{% endif %}
+        </td>
+        <td><span class="tag">{{ r.p.provider }}</span></td>
+        <td>
+          {% if r.p.provider == 'github_actions' %}
+            <code>{{ r.cfg.get('owner','?') }}/{{ r.cfg.get('repo','?') }}</code>
+            <span class="muted">· {{ r.cfg.get('workflow','?') }}</span>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if r.latest %}
+            {% set s = r.latest.status %}
+            {% set badge = 'badge-blue' if s in ('queued','running')
+              else 'badge-green' if s == 'success'
+              else 'badge-red' if s in ('failed','cancelled')
+              else 'badge-gray' %}
+            <span class="badge {{ badge }}">{{ s }}</span>
+            <span class="muted" style="font-size:12px">{{ r.latest.triggered_at.isoformat(timespec='seconds') }}</span>
+          {% else %}
+            <span class="muted">never run</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state">No pipelines yet. <a href="/pipelines/new">Add one</a>.</div>
+  {% endif %}
+</section>
+{% endblock %}

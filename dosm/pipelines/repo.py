@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from dosm.config import Config
+from dosm.models import Credential, Pipeline, PipelineRun
+from dosm.pipelines.adapters import (
+    PipelineProviderError,
+    PipelineUnreachable,
+    PollResult,
+    TriggerResult,
+    get_adapter,
+)
+from dosm.secrets import SecretNotFound, get_backend
+
+
+class PipelineNotFound(LookupError):
+    pass
+
+
+def list_pipelines(db: Session) -> list[Pipeline]:
+    return list(db.execute(select(Pipeline).order_by(Pipeline.name)).scalars())
+
+
+def get_pipeline(db: Session, pid: int) -> Pipeline | None:
+    return db.get(Pipeline, pid)
+
+
+def get_pipeline_by_name(db: Session, name: str) -> Pipeline | None:
+    return db.execute(select(Pipeline).where(Pipeline.name == name)).scalar_one_or_none()
+
+
+def list_runs(db: Session, pipeline_id: int, limit: int = 25) -> list[PipelineRun]:
+    return list(
+        db.execute(
+            select(PipelineRun)
+            .where(PipelineRun.pipeline_id == pipeline_id)
+            .order_by(PipelineRun.id.desc())
+            .limit(limit)
+        ).scalars()
+    )
+
+
+def get_run(db: Session, run_id: int) -> PipelineRun | None:
+    return db.get(PipelineRun, run_id)
+
+
+def create_pipeline(
+    db: Session,
+    *,
+    name: str,
+    provider: str,
+    description: str | None,
+    config: dict,
+    inputs_schema: list[dict] | None,
+    credential_id: int | None,
+) -> Pipeline:
+    adapter = get_adapter(provider)
+    cfg_norm = adapter.validate_config(config)
+    p = Pipeline(
+        name=name.strip(),
+        provider=provider,
+        description=description or None,
+        config=json.dumps(cfg_norm),
+        inputs_schema=json.dumps(inputs_schema) if inputs_schema else None,
+        credential_id=credential_id,
+    )
+    db.add(p)
+    db.flush()
+    return p
+
+
+def update_pipeline(
+    db: Session,
+    pipeline: Pipeline,
+    *,
+    name: str,
+    provider: str,
+    description: str | None,
+    config: dict,
+    inputs_schema: list[dict] | None,
+    credential_id: int | None,
+) -> Pipeline:
+    adapter = get_adapter(provider)
+    cfg_norm = adapter.validate_config(config)
+    pipeline.name = name.strip()
+    pipeline.provider = provider
+    pipeline.description = description or None
+    pipeline.config = json.dumps(cfg_norm)
+    pipeline.inputs_schema = json.dumps(inputs_schema) if inputs_schema else None
+    pipeline.credential_id = credential_id
+    db.flush()
+    return pipeline
+
+
+def delete_pipeline(db: Session, pipeline: Pipeline) -> None:
+    db.delete(pipeline)
+    db.flush()
+
+
+def _resolve_secret(cfg: Config, pipeline: Pipeline) -> str | None:
+    if pipeline.credential is None:
+        return None
+    try:
+        return get_backend(cfg).get_str(pipeline.credential.secret_ref)
+    except SecretNotFound as e:
+        raise PipelineProviderError(
+            f"credential {pipeline.credential.name!r} secret_ref "
+            f"{pipeline.credential.secret_ref!r} missing"
+        ) from e
+
+
+async def trigger_pipeline(
+    cfg: Config,
+    db: Session,
+    pipeline: Pipeline,
+    *,
+    inputs: dict,
+    user_id: int | None,
+) -> PipelineRun:
+    """Trigger a run, persist a PipelineRun row, and return it.
+
+    Provider failures are recorded as PipelineRun rows with status='failed'
+    and an error string so the user can see what went wrong.
+    """
+    adapter = get_adapter(pipeline.provider)
+    config = json.loads(pipeline.config or "{}")
+    inputs = inputs or {}
+
+    run = PipelineRun(
+        pipeline_id=pipeline.id,
+        external_id=None,
+        status="queued",
+        inputs=json.dumps(inputs),
+        triggered_by_user_id=user_id,
+    )
+    db.add(run)
+    db.flush()
+    run_id = run.id
+
+    try:
+        secret = _resolve_secret(cfg, pipeline)
+        result = await adapter.trigger(config=config, secret=secret, inputs=inputs)
+    except (PipelineProviderError, PipelineUnreachable) as e:
+        run.status = "failed"
+        run.error = str(e)
+        run.completed_at = datetime.utcnow()
+        db.flush()
+        return run
+
+    run.external_id = result.external_id
+    run.status = result.status
+    run.html_url = result.html_url
+    run.last_polled_at = datetime.utcnow()
+    db.flush()
+    return run
+
+
+async def refresh_run(cfg: Config, db: Session, run: PipelineRun) -> PipelineRun:
+    """Poll the provider for the run's current status and persist."""
+    if run.status in ("success", "failed", "cancelled", "skipped") and run.completed_at:
+        return run
+    pipeline = run.pipeline if hasattr(run, "pipeline") and run.pipeline else db.get(Pipeline, run.pipeline_id)
+    if pipeline is None:
+        run.status = "failed"
+        run.error = "pipeline deleted"
+        db.flush()
+        return run
+    adapter = get_adapter(pipeline.provider)
+    config = json.loads(pipeline.config or "{}")
+    try:
+        secret = _resolve_secret(cfg, pipeline)
+        result: PollResult = await adapter.poll(
+            config=config, secret=secret, external_id=run.external_id
+        )
+    except (PipelineProviderError, PipelineUnreachable) as e:
+        run.error = str(e)
+        run.last_polled_at = datetime.utcnow()
+        db.flush()
+        return run
+
+    run.status = result.status
+    run.last_polled_at = datetime.utcnow()
+    if result.started_at and not run.started_at:
+        run.started_at = result.started_at
+    if result.completed_at and run.status in ("success", "failed", "cancelled", "skipped"):
+        run.completed_at = result.completed_at
+    if result.html_url:
+        run.html_url = result.html_url
+    if result.status not in ("queued", "running", "unknown"):
+        # Terminal status — clear stale error so the row reads cleanly if a
+        # later poll succeeds after a transient failure.
+        run.error = None
+    db.flush()
+    return run

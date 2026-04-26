@@ -23,6 +23,7 @@ from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
 from dosm.guacamole import guacamole_router
 from dosm.llm import chat_router
+from dosm.pipelines import pipelines_router
 from dosm.settings import settings_router
 from dosm.hosts import hosts_router
 from dosm.metrics import metrics_router
@@ -72,6 +73,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         # other /hosts/* routes still take precedence over a broader match.
         app.include_router(guacamole_router)
     app.include_router(docs_router)
+    app.include_router(pipelines_router)
     # Agent plan card routes share the /chat prefix and must register before
     # the broader chat_router so /chat/{cid}/plan/... matches before any
     # generic /chat/{cid}/... handler that doesn't exist (defensive).
