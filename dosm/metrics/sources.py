@@ -284,6 +284,171 @@ class SSHSource(MetricsSource):
             self._conn = None
 
 
+# ---- WinRM (remote Windows host) -----------------------------------------
+
+
+_WINRM_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$os = Get-CimInstance Win32_OperatingSystem
+try {
+  $cpu = [math]::Round((Get-Counter '\Processor(_Total)\% Processor Time' -SampleInterval 1 -MaxSamples 1).CounterSamples[0].CookedValue, 1)
+} catch { $cpu = 0.0 }
+$disks = Get-CimInstance Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
+$payload = @{
+  hostname = [System.Net.Dns]::GetHostName()
+  os = $os.Caption
+  os_release = $os.Version
+  uptime_seconds = [int]([math]::Floor((New-TimeSpan -Start $os.LastBootUpTime -End (Get-Date)).TotalSeconds))
+  cpu_count_logical = [int]$os.NumberOfLogicalProcessors
+  cpu_percent = $cpu
+  load_avg_1m = $null
+  memory_total_bytes = [int64]($os.TotalVisibleMemorySize) * 1024
+  memory_free_bytes = [int64]($os.FreePhysicalMemory) * 1024
+  disks = @()
+}
+foreach ($d in $disks) {
+  $total = [int64]$d.Size
+  if ($total -le 0) { continue }
+  $free = [int64]$d.FreeSpace
+  $used = $total - $free
+  $payload.disks += @{
+    mountpoint = $d.DeviceID
+    device = $d.DeviceID
+    fstype = $d.FileSystem
+    total_bytes = $total
+    used_bytes = $used
+  }
+}
+$payload | ConvertTo-Json -Depth 5 -Compress
+"""
+
+
+def _winrm_payload_to_snapshot(payload: dict) -> dict:
+    total_b = int(payload.get("memory_total_bytes") or 0)
+    free_b = int(payload.get("memory_free_bytes") or 0)
+    used_b = max(0, total_b - free_b)
+    mem_percent = round((used_b / total_b * 100.0) if total_b else 0.0, 1)
+    disks = []
+    for d in payload.get("disks") or []:
+        try:
+            tot = int(d.get("total_bytes") or 0)
+            used = int(d.get("used_bytes") or 0)
+        except (TypeError, ValueError):
+            continue
+        if tot <= 0:
+            continue
+        disks.append(
+            {
+                "mountpoint": d.get("mountpoint") or "",
+                "device": d.get("device") or "",
+                "fstype": d.get("fstype") or "",
+                "total_gb": _to_gb(tot),
+                "used_gb": _to_gb(used),
+                "percent": round((used / tot * 100.0), 1),
+            }
+        )
+    return {
+        "hostname": payload.get("hostname") or "windows",
+        "os": "Windows",
+        "os_release": str(payload.get("os") or ""),
+        "python": "",
+        "uptime_seconds": int(payload.get("uptime_seconds") or 0),
+        "cpu_count_logical": int(payload.get("cpu_count_logical") or 1),
+        "cpu_percent": float(payload.get("cpu_percent") or 0.0),
+        "load_avg_1m": payload.get("load_avg_1m"),
+        "memory_total_gb": _to_gb(total_b),
+        "memory_used_gb": _to_gb(used_b),
+        "memory_percent": mem_percent,
+        "disks": disks,
+    }
+
+
+class WinRMSource(MetricsSource):
+    """Polls a Windows host over WinRM. One short PowerShell script per tick
+    emits a single JSON blob which we parse into the standard snapshot shape.
+
+    pywinrm is synchronous, so we run the call in a thread to avoid blocking
+    the event loop.
+    """
+
+    scope = "remote"
+
+    def __init__(self, host: Host, *, username: str, password: str, mcfg):
+        self._host = host
+        self._username = username
+        self._password = password
+        self._port = mcfg.winrm_port
+        self._transport = mcfg.winrm_transport
+        self._use_https = mcfg.winrm_use_https
+        self._timeout = mcfg.winrm_timeout_seconds
+        self.label = host.name
+        self._session = None  # type: ignore[assignment]
+
+    def _ensure_session(self):
+        if self._session is not None:
+            return self._session
+        try:
+            import winrm  # type: ignore
+        except ImportError as e:
+            raise MetricsError("pywinrm is not installed") from e
+        scheme = "https" if self._use_https else "http"
+        endpoint = f"{scheme}://{self._host.hostname}:{self._port}/wsman"
+        try:
+            self._session = winrm.Session(
+                endpoint,
+                auth=(self._username, self._password),
+                transport=self._transport,
+                server_cert_validation="ignore" if self._use_https else "validate",
+            )
+        except Exception as e:
+            raise MetricsUnreachable(
+                f"{self._host.name}: WinRM session init failed: {e}"
+            ) from e
+        return self._session
+
+    def _run_script_sync(self) -> dict:
+        import json as _json
+
+        session = self._ensure_session()
+        try:
+            result = session.run_ps(_WINRM_SCRIPT)
+        except Exception as e:
+            raise MetricsUnreachable(f"{self._host.name}: WinRM call failed: {e}") from e
+        if result.status_code != 0:
+            err = (result.std_err or b"").decode("utf-8", errors="replace")[:400]
+            raise MetricsUnreachable(
+                f"{self._host.name}: WinRM exit {result.status_code}: {err}"
+            )
+        out = (result.std_out or b"").decode("utf-8", errors="replace").strip()
+        if not out:
+            raise MetricsUnreachable(f"{self._host.name}: WinRM returned empty output")
+        try:
+            return _json.loads(out)
+        except _json.JSONDecodeError as e:
+            raise MetricsUnreachable(
+                f"{self._host.name}: WinRM returned non-JSON: {out[:200]!r}"
+            ) from e
+
+    async def snapshot(self) -> dict:
+        loop = asyncio.get_running_loop()
+        try:
+            payload = await asyncio.wait_for(
+                loop.run_in_executor(None, self._run_script_sync), timeout=self._timeout
+            )
+        except asyncio.TimeoutError as e:
+            raise MetricsUnreachable(
+                f"{self._host.name}: WinRM timed out after {self._timeout}s"
+            ) from e
+        snap = _winrm_payload_to_snapshot(payload)
+        snap["_scope"] = self.scope
+        snap["_label"] = self.label
+        return snap
+
+    async def aclose(self) -> None:
+        # pywinrm Session has no persistent socket to close; just drop the ref.
+        self._session = None
+
+
 # ---- Factory --------------------------------------------------------------
 
 
@@ -306,6 +471,19 @@ async def make_source_for_host(cfg: Config, host: Host) -> MetricsSource:
             else:
                 password = secret_text
         return SSHSource(host, username=username, password=password, ssh_private_key=ssh_key)
+    if host.protocol == "rdp":
+        cred = host.credential
+        if cred is None:
+            raise MetricsError(f"host {host.name!r} (RDP) has no bound credential for WinRM")
+        try:
+            secret_text = get_backend(cfg).get_str(cred.secret_ref)
+        except SecretNotFound as e:
+            raise MetricsError(
+                f"credential {cred.name!r} secret_ref {cred.secret_ref!r} missing"
+            ) from e
+        if not cred.username:
+            raise MetricsError(f"credential {cred.name!r} has no username; WinRM needs one")
+        return WinRMSource(host, username=cred.username, password=secret_text, mcfg=cfg.metrics)
     raise MetricsError(
-        f"no metrics source for protocol {host.protocol!r} yet — WinRM lands in 8c"
+        f"no metrics source for protocol {host.protocol!r}"
     )

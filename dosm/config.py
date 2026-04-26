@@ -59,6 +59,17 @@ class GuacamoleConfig(BaseModel):
     tunnel_bind_host: str = "0.0.0.0"
 
 
+class MetricsConfig(BaseModel):
+    """Defaults for the resource panel data sources."""
+
+    poll_interval_seconds: float = 2.0
+    # WinRM (Phase 8c): used for the resource panel's Windows-host source.
+    winrm_port: int = 5985
+    winrm_transport: str = "ntlm"  # basic | ntlm | kerberos
+    winrm_use_https: bool = False
+    winrm_timeout_seconds: float = 8.0
+
+
 class DocsIndexConfig(BaseModel):
     """Local docs ingestion: scan $DOSM_HOME/docs, chunk, embed, store."""
 
@@ -137,6 +148,7 @@ class Config(BaseModel):
     terminals: TerminalsConfig = TerminalsConfig()
     docs_index: DocsIndexConfig = DocsIndexConfig()
     guacamole: GuacamoleConfig = GuacamoleConfig()
+    metrics: MetricsConfig = MetricsConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     enabled_modules: list[str] = Field(default_factory=list)
 

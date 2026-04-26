@@ -52,6 +52,13 @@ DEFAULT_CONFIG: dict = {
         "dosm_reachable_host": "host.docker.internal",
         "tunnel_bind_host": "0.0.0.0",
     },
+    "metrics": {
+        "poll_interval_seconds": 2.0,
+        "winrm_port": 5985,
+        "winrm_transport": "ntlm",
+        "winrm_use_https": False,
+        "winrm_timeout_seconds": 8.0,
+    },
     "ssh_command_policy": {
         "require_confirmation_off_list": True,
         "confirmation_field": "host_name",
