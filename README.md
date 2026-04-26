@@ -66,6 +66,38 @@ dosm serve
 
 Then open <http://127.0.0.1:8765>.
 
+## Continue from another machine
+
+The complete planning context, phase-by-phase log, open backlog with
+recommended ordering, design rationale, and known limitations live in
+the repo so they travel with the code:
+
+- **[`CLAUDE.md`](CLAUDE.md)** — concise orientation any AI assistant
+  should read first.
+- **[`docs/ROADMAP.md`](docs/ROADMAP.md)** — full phase log, open backlog
+  (with rationale), preserved design decisions, and known limits.
+
+To pick up on a different machine:
+
+```bash
+git clone <repo-url>
+cd DevOps-Operations-Suite-Manager
+git checkout claude/devops-suite-llm-design-ZJ2aU
+
+python -m venv .venv
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
+pip install -e .
+
+dosm init ./.dosm-home
+export DOSM_HOME=$(pwd)/.dosm-home
+dosm db init
+dosm user create admin       # prompts for password
+dosm serve                   # then open http://127.0.0.1:8765
+```
+
+Read `docs/ROADMAP.md` for what's done, what's queued, and the design
+choices that shape the next move.
+
 ## Optional: Guacamole stack for browser SSH/RDP/VNC
 
 DOSM signs short-lived JSON connection envelopes that Guacamole's
