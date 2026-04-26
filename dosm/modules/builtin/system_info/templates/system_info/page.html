@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}System info — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>System info</h1>
+    <div class="subtitle">Snapshot of the DOSM host · <code>{{ snap.hostname }}</code></div>
+  </div>
+  <div class="actions">
+    <a href="/modules/system_info/api/snapshot" class="btn btn-ghost">JSON</a>
+    <a href="/modules" class="btn btn-ghost">All modules</a>
+  </div>
+</header>
+
+<div class="stat-grid">
+  <div class="stat">
+    <div class="label">CPU</div>
+    <div class="value">{{ "%.1f"|format(snap.cpu_percent) }}<span style="font-size:14px; color:var(--fg-muted)">%</span></div>
+    <div class="note">{{ snap.cpu_count_logical }} logical{% if snap.load_avg_1m is not none %} · load1 {{ snap.load_avg_1m }}{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Memory</div>
+    <div class="value">{{ snap.memory_percent }}<span style="font-size:14px; color:var(--fg-muted)">%</span></div>
+    <div class="note">{{ snap.memory_used_gb }} / {{ snap.memory_total_gb }} GB</div>
+  </div>
+  <div class="stat">
+    <div class="label">Uptime</div>
+    {% set days = (snap.uptime_seconds // 86400) %}
+    {% set hours = ((snap.uptime_seconds % 86400) // 3600) %}
+    {% set mins = ((snap.uptime_seconds % 3600) // 60) %}
+    <div class="value">{{ days }}<span style="font-size:14px; color:var(--fg-muted)">d</span> {{ hours }}<span style="font-size:14px; color:var(--fg-muted)">h</span> {{ mins }}<span style="font-size:14px; color:var(--fg-muted)">m</span></div>
+    <div class="note">{{ snap.os }} {{ snap.os_release }} · Python {{ snap.python }}</div>
+  </div>
+</div>
+
+<section class="card">
+  <h2>Disks</h2>
+  {% if snap.disks %}
+  <table class="data">
+    <thead><tr><th>Mount</th><th>Device</th><th>FS</th><th>Used</th><th>Total</th><th>%</th></tr></thead>
+    <tbody>
+    {% for d in snap.disks %}
+      <tr>
+        <td><code>{{ d.mountpoint }}</code></td>
+        <td class="muted">{{ d.device }}</td>
+        <td class="muted">{{ d.fstype }}</td>
+        <td>{{ d.used_gb }} GB</td>
+        <td>{{ d.total_gb }} GB</td>
+        <td>{{ d.percent }}%</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No readable disk partitions.</div>
+  {% endif %}
+</section>
+{% endblock %}

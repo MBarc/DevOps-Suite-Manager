@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Search docs — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Search</h1>
+    <div class="subtitle">
+      Embedder: <code>{{ status.embedder_name }}</code>
+      {% if hits and hits[0].mode == 'like' %} · <em>keyword fallback — no embeddings available</em>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <a href="/docs" class="btn btn-ghost">Back</a>
+  </div>
+</header>
+
+<section class="card">
+  <form method="get" action="/docs/search" class="search-field">
+    <input type="search" name="q" value="{{ q }}" placeholder="Search documents…" autofocus />
+    <span class="kbd-hint"><span class="kbd">/</span></span>
+  </form>
+</section>
+
+{% if q %}
+<section class="card">
+  <h2>{{ hits|length }} result{{ '' if hits|length == 1 else 's' }} for <code>{{ q }}</code></h2>
+  {% if hits %}
+    {% for h in hits %}
+    <article class="hit">
+      <header class="row-between">
+        <a href="/docs/view?path={{ h.rel_path|urlencode }}" style="color:var(--fg-strong); font-weight:500">
+          <code>{{ h.rel_path }}</code>
+        </a>
+        <span class="muted" style="font-size:12px">
+          chunk #{{ h.ord }} · score {{ "%.3f"|format(h.score) }} · {{ h.mode }}
+        </span>
+      </header>
+      {% if h.title %}<div class="muted" style="margin:4px 0 0 0; font-size:13px">{{ h.title }}</div>{% endif %}
+      <div class="snippet">{{ h.snippet }}</div>
+    </article>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">No matches.</div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

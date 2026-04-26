@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Dashboard</h1>
+    <div class="subtitle">Signed in as <code>{{ user.username }}</code> · {{ user.role }} · DOSM v{{ version }}</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/docs">Search docs <span class="kbd">/</span></a>
+  </div>
+</header>
+
+<div class="stat-grid">
+  <div class="stat">
+    <div class="label">DOSM_HOME</div>
+    <div class="value"><code>{{ home }}</code></div>
+  </div>
+  <div class="stat">
+    <div class="label">LLM model</div>
+    <div class="value"><code>{{ llm_model }}</code></div>
+    <div class="note">Configured in <code>config.yaml</code> under <code>llm</code>.</div>
+  </div>
+  <div class="stat">
+    <div class="label">Secrets backend</div>
+    <div class="value"><code>{{ secrets_backend }}</code></div>
+  </div>
+  <div class="stat">
+    <div class="label">Modules loaded</div>
+    <div class="value">{{ loaded_modules|length }}
+      {% if module_errors %}<span class="badge badge-red" style="margin-left:8px">{{ module_errors|length }} error{{ '' if module_errors|length == 1 else 's' }}</span>{% endif %}
+    </div>
+    <div class="note"><a href="/modules">Manage modules →</a></div>
+  </div>
+</div>
+
+<section class="card">
+  <h2>Active modules</h2>
+  {% if loaded_modules %}
+    <ul style="list-style:none; padding:0; margin:0">
+    {% for m in loaded_modules %}
+      <li style="padding:8px 0; border-top:1px solid var(--divider)">
+        <a href="/modules/{{ m.spec.name }}" style="color:var(--fg-strong); font-weight:500">{{ m.spec.name }}</a>
+        <span class="muted" style="margin-left:8px">v{{ m.spec.version }}</span>
+        <div class="muted" style="font-size:13px">{{ m.spec.description }}</div>
+      </li>
+    {% endfor %}
+    </ul>
+  {% else %}
+    <div class="empty-state">No modules loaded. <a href="/modules">Browse available modules</a>.</div>
+  {% endif %}
+  {% if module_errors %}
+    <h2 style="margin-top:16px; color:var(--danger)">Errors</h2>
+    <ul>
+    {% for name, err in module_errors.items() %}
+      <li><code>{{ name }}</code>: <span class="error">{{ err }}</span></li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+</section>
+{% endblock %}

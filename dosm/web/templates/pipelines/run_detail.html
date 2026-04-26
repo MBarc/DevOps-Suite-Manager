@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ run.id }} — DOSM{% endblock %}
+{% block content %}
+{% set s = run.status %}
+{% set badge = 'badge-blue' if s in ('queued','running')
+  else 'badge-green' if s == 'success'
+  else 'badge-red' if s in ('failed','cancelled')
+  else 'badge-gray' %}
+<header class="page-header">
+  <div>
+    <h1>{% if pipeline %}{{ pipeline.name }}{% endif %} · run #{{ run.id }}</h1>
+    <div class="subtitle">
+      <span class="badge {{ badge }}">{{ s }}</span>
+      · triggered {{ run.triggered_at.isoformat(timespec='seconds') }}
+      {% if run.external_id %}· external <code>{{ run.external_id }}</code>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/pipelines/runs/{{ run.id }}/refresh" class="inline">
+      <button type="submit">Refresh</button>
+    </form>
+    {% if run.html_url %}<a class="btn btn-subtle" href="{{ run.html_url }}" target="_blank" rel="noopener">Open at provider ↗</a>{% endif %}
+    {% if pipeline %}<a class="btn btn-ghost" href="/pipelines/{{ pipeline.id }}">Back to pipeline</a>{% endif %}
+  </div>
+</header>
+
+<section class="card">
+  <dl class="kv">
+    <dt>Pipeline</dt>
+    <dd>
+      {% if pipeline %}
+        <a href="/pipelines/{{ pipeline.id }}">{{ pipeline.name }}</a>
+        <span class="muted">· {{ pipeline.provider }}</span>
+      {% else %}
+        <em class="muted">deleted</em>
+      {% endif %}
+    </dd>
+    <dt>Status</dt><dd>{{ run.status }}</dd>
+    <dt>Started</dt><dd class="muted">{{ run.started_at.isoformat(timespec='seconds') if run.started_at else '—' }}</dd>
+    <dt>Completed</dt><dd class="muted">{{ run.completed_at.isoformat(timespec='seconds') if run.completed_at else '—' }}</dd>
+    <dt>Last polled</dt><dd class="muted">{{ run.last_polled_at.isoformat(timespec='seconds') if run.last_polled_at else '—' }}</dd>
+  </dl>
+  {% if run.error %}
+    <div style="margin-top: var(--sp-3)" class="error"><strong>Error:</strong> {{ run.error }}</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Inputs</h2>
+  {% if inputs %}
+    <pre class="plan-args">{{ inputs | tojson(indent=2) }}</pre>
+  {% else %}
+    <div class="empty-state">No inputs supplied.</div>
+  {% endif %}
+</section>
+{% endblock %}

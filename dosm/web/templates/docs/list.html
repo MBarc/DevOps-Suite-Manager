@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Docs — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Documentation</h1>
+    <div class="subtitle">Indexed from <code>{{ request.app.state.config.docs_dir }}</code> · embedder <code>{{ status.embedder_name }}</code></div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/docs/reindex" class="inline">
+      <button class="btn btn-ghost btn-sm" type="submit" name="force" value="0">Reindex changed</button>
+      <button class="btn btn-sm" type="submit" name="force" value="1">Reindex all</button>
+    </form>
+  </div>
+</header>
+
+<section class="card">
+  <form method="get" action="/docs/search" class="search-field">
+    <input type="search" name="q" placeholder="Search your runbooks, playbooks, reference docs…" autofocus />
+    <span class="kbd-hint"><span class="kbd">/</span></span>
+  </form>
+
+  <div class="status-row" style="margin-top: var(--sp-3)">
+    {% if status.running %}
+      <span class="badge badge-blue"><span class="dot info"></span> Indexing {{ status.processed }} / {{ status.total_files }}</span>
+    {% else %}
+      <span class="muted" style="font-size:12.5px">
+        {{ status.indexed }} indexed · {{ status.skipped_unchanged }} unchanged · {{ status.errors }} errors
+        {% if status.finished_at %} · last run {{ status.finished_at.isoformat(timespec='seconds') }}{% endif %}
+      </span>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>Documents</h2>
+  {% if docs %}
+  <table class="data">
+    <thead><tr><th>Path</th><th>Title</th><th>Chunks</th><th>Status</th><th>Indexed</th></tr></thead>
+    <tbody>
+    {% for d in docs %}
+      <tr>
+        <td><a href="/docs/view?path={{ d.rel_path|urlencode }}"><code>{{ d.rel_path }}</code></a></td>
+        <td>{{ d.title or "" }}</td>
+        <td class="muted">{{ d.chunk_count }}</td>
+        <td>
+          {% if d.status == 'indexed' %}<span class="badge badge-green"><span class="dot ok"></span> indexed</span>
+          {% elif d.status == 'error' %}<span class="badge badge-red" title="{{ d.error }}"><span class="dot err"></span> error</span>
+          {% else %}<span class="badge badge-gray"><span class="dot"></span> {{ d.status }}</span>{% endif %}
+        </td>
+        <td class="muted" style="font-size:12.5px">{{ d.indexed_at.isoformat(timespec='seconds') if d.indexed_at else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state">
+      No documents yet. Drop markdown, text, or PDF files into
+      <code>{{ request.app.state.config.docs_dir }}</code> and click <strong>Reindex all</strong>.
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

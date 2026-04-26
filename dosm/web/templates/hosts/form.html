@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit host' if host else 'Add host' }} — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>{{ 'Edit host' if host else 'Add host' }}</h1>
+    <div class="subtitle">{{ 'Update the stored record.' if host else 'Register a managed server.' }}</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="{{ '/hosts/' + host.id|string if host else '/hosts' }}">Cancel</a>
+  </div>
+</header>
+
+<section class="card card-narrow">
+  {% if error %}
+    <div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ error }}</div>
+  {% endif %}
+  <form method="post"
+        action="{{ '/hosts/' + host.id|string + '/edit' if host else '/hosts/new' }}"
+        class="stack">
+    <label>Name
+      <input type="text" name="name" required value="{{ host.name if host else '' }}" placeholder="sf-prod-01" />
+    </label>
+    <label>Hostname / IP
+      <input type="text" name="hostname" required value="{{ host.hostname if host else '' }}" placeholder="10.0.0.10" />
+    </label>
+    <div class="row">
+      <label style="flex:1">Protocol
+        <select name="protocol" id="protocol-select">
+          {% for p in protocols %}
+          <option value="{{ p }}" {% if host and host.protocol == p %}selected{% elif not host and p == 'ssh' %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label style="width:120px">Port
+        <input type="number" name="port" required value="{{ host.port if host else 22 }}" />
+      </label>
+    </div>
+    <label>Credential profile
+      <select name="credential_id">
+        <option value="">(none)</option>
+        {% for c in credentials %}
+        <option value="{{ c.id }}"
+          {% if host and host.credential_id == c.id %}selected{% endif %}>
+          {{ c.name }} ({{ c.kind }})
+        </option>
+        {% endfor %}
+      </select>
+      <span class="field-hint">Named profile pulling from the secrets backend. <a href="/credentials">Manage profiles →</a></span>
+    </label>
+    <label>Jump host
+      <select name="jump_host_id">
+        <option value="">(direct — no jump)</option>
+        {% for j in jump_candidates %}
+        <option value="{{ j.id }}" {% if host and host.jump_host_id == j.id %}selected{% endif %}>
+          {{ j.name }} ({{ j.hostname }}:{{ j.port }})
+        </option>
+        {% endfor %}
+      </select>
+      <span class="field-hint">If set, sessions reach this host through that SSH host. The jump's own credential and (if it has one) jump host are used too — chains up to 5 hosts deep.</span>
+    </label>
+    <label>Tags
+      <input type="text" name="tags"
+        placeholder="prod, sf, linux"
+        value="{{ host.tags|map(attribute='name')|join(', ') if host else '' }}" />
+      <span class="field-hint">Comma-separated. Free-form.</span>
+    </label>
+    <label>Description
+      <textarea name="description" rows="3" placeholder="Optional notes for teammates">{{ host.description or '' if host else '' }}</textarea>
+    </label>
+    <div class="row" style="margin-top:var(--sp-2)">
+      <button type="submit">{{ 'Save changes' if host else 'Create host' }}</button>
+    </div>
+  </form>
+</section>
+<script>
+  const defaults = {{ default_ports|tojson }};
+  const sel = document.getElementById('protocol-select');
+  const portInput = document.querySelector('input[name="port"]');
+  sel?.addEventListener('change', () => {
+    if (defaults[sel.value]) portInput.value = defaults[sel.value];
+  });
+</script>
+{% endblock %}

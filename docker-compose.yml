@@ -1,0 +1,45 @@
+services:
+  guacd:
+    image: guacamole/guacd:1.5.5
+    restart: unless-stopped
+    networks: [guac]
+
+  guacamole-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guacamole
+      POSTGRES_USER: guacamole
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?set GUACAMOLE_DB_PASSWORD in .env}
+    volumes:
+      - guac-db:/var/lib/postgresql/data
+      - ./guacamole/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [guac]
+
+  guacamole:
+    image: guacamole/guacamole:1.5.5
+    restart: unless-stopped
+    depends_on: [guacd, guacamole-db]
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRES_HOSTNAME: guacamole-db
+      POSTGRES_DATABASE: guacamole
+      POSTGRES_USER: guacamole
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?set GUACAMOLE_DB_PASSWORD in .env}
+      # auth-json: the same hex secret DOSM signs blobs with.
+      JSON_SECRET_KEY: ${GUACAMOLE_JSON_SECRET_KEY:?set GUACAMOLE_JSON_SECRET_KEY (`dosm guacamole keygen`)}
+      # Comma-separated trusted networks allowed to submit signed blobs.
+      JSON_TRUSTED_NETWORKS: ${GUACAMOLE_JSON_TRUSTED_NETWORKS:-127.0.0.1,::1,172.16.0.0/12}
+    ports:
+      - "${GUACAMOLE_PORT:-8080}:8080"
+    volumes:
+      # Session recordings land here. DOSM points its `recordings_dir` at the
+      # same host path so the wrapper page knows where to look.
+      - ${GUACAMOLE_RECORDINGS_HOST_DIR:-./.dosm-home/data/guacamole_recordings}:/recordings
+    networks: [guac]
+
+networks:
+  guac:
+
+volumes:
+  guac-db:

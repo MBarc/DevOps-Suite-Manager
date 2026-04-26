@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ host.name }} — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>{{ host.name }}</h1>
+    <div class="subtitle"><code>{{ host.hostname }}:{{ host.port }}</code> · {{ host.protocol }}</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-subtle" href="/hosts/{{ host.id }}/edit">Edit</a>
+    <form method="post" action="/hosts/{{ host.id }}/delete" class="inline"
+          onsubmit="return confirm('Delete {{ host.name }}?');">
+      <button class="btn btn-danger" type="submit">Delete</button>
+    </form>
+    <a class="btn btn-ghost" href="/hosts">Back</a>
+  </div>
+</header>
+
+<section class="card">
+  <dl class="kv">
+    <dt>Credential</dt>
+    <dd>
+      {% if host.credential %}
+        <code>{{ host.credential.name }}</code>
+        <span class="muted">({{ host.credential.kind }}{% if host.credential.username %}, {{ host.credential.username }}{% endif %})</span>
+      {% else %}
+        <em class="muted">none</em>
+      {% endif %}
+    </dd>
+    <dt>Path</dt>
+    <dd>
+      {% if jump_chain %}
+        {% for j in jump_chain %}
+          <a href="/hosts/{{ j.id }}"><code>{{ j.name }}</code></a>
+          <span class="muted">→</span>
+        {% endfor %}
+        <code>{{ host.name }}</code>
+        <div class="muted" style="font-size:12px; margin-top:2px">
+          via {{ jump_chain|length }} jump host{{ '' if jump_chain|length == 1 else 's' }}
+        </div>
+      {% else %}
+        <span class="muted">direct (no jump host)</span>
+      {% endif %}
+    </dd>
+    <dt>Tags</dt>
+    <dd>
+      {% if host.tags %}
+        {% for t in host.tags %}<span class="tag">{{ t.name }}</span>{% endfor %}
+      {% else %}<em class="muted">none</em>{% endif %}
+    </dd>
+    <dt>Source</dt><dd>{{ host.source_module or "manual" }}</dd>
+    <dt>Description</dt><dd>{{ host.description or "" }}</dd>
+  </dl>
+</section>
+
+<section class="card">
+  <h2>Remote access</h2>
+  {% if request.app.state.config.guacamole.enabled %}
+    <div class="row">
+      <a class="btn" href="/hosts/{{ host.id }}/connect">
+        Connect via Guacamole ({{ host.protocol }})
+      </a>
+      <span class="muted" style="font-size:12.5px; align-self:center">
+        Sessions are recorded to <code>{{ request.app.state.config.guacamole.recordings_dir }}</code> on the Guacamole host.
+      </span>
+    </div>
+  {% else %}
+    <p class="muted">Guacamole integration is disabled. Set <code>guacamole.enabled: true</code> in <code>config.yaml</code> and bring up the
+      <code>docker compose</code> stack to enable browser SSH/RDP/VNC.</p>
+  {% endif %}
+</section>
+{% endblock %}
