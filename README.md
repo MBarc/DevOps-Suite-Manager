@@ -1,108 +1,175 @@
-# DevOps Operations Suite Manager (DOSM)
+# DOSM — DevOps Operations Suite Manager
 
-A self-hosted, modular operations console for managing on-prem infrastructure —
-Service Fabric, Dynatrace ActiveGates, SAS Linux servers, and whatever else
-you bolt on via modules — with an embedded, CPU-friendly LLM that reads your
-local documentation and can run in either chat or agent (propose-and-approve)
-mode.
+A self-hosted, modular operations console for managing on-prem
+infrastructure — Service Fabric clusters, Dynatrace ActiveGates, SAS
+Linux servers, generic SSH/RDP/VNC hosts, and whatever else you bolt on
+via modules. Browser SSH/RDP through an embedded Guacamole stack, an
+LLM grounded in your local documentation, and an agent mode where every
+action is a plan card you Approve / Edit / Reject before it runs.
 
-> Status: early scaffold. Phase 1 ships the app skeleton, `$DOSM_HOME`
-> bootstrap, config loader, and a minimal dashboard. LLM, modules, and agent
-> mode land in later phases.
+Local-first by design. SQLite for state, Ollama for the LLM, fastembed
+for embeddings, Guacamole for browser sessions — nothing here requires
+outbound traffic.
 
-## Design at a glance
+> Status: actively developed. See [`docs/ROADMAP.md`](docs/ROADMAP.md)
+> for the phase-by-phase log, open backlog with rationale, design
+> decisions, and known limitations.
 
-- **Cross-platform app** (Windows + Linux). Individual modules may declare OS
-  constraints — e.g. the Service Fabric module requires Windows/pwsh.
-- **Modular integrations.** Each integration (Service Fabric, Dynatrace, SAS,
-  ...) is a module dropped into `$DOSM_HOME/modules/` with its own
-  `module.yaml`, routes, and agent-callable actions.
-- **Local-first LLM.** Ollama by default (CPU-friendly model like
-  `qwen2.5:7b-instruct`), with optional GPU. Retrieval is grounded in your
-  local `docs/` directory — no outbound traffic required.
-- **Two interaction modes.**
-  - *LLM mode*: RAG chat with citations, read-only.
-  - *Agent mode*: every action is a plan card (summary, command preview,
-    expected effect, rollback). User approves / edits / rejects before
-    execution. Approved actions feed an audit log that can be drafted into new
-    runbooks.
-- **Pluggable secrets.** Local age-encrypted file for solo setups; HashiCorp
-  Vault for shared deployments. Same interface.
-- **SQLite** for state (with `sqlite-vec` for embeddings) — one file under
-  `$DOSM_HOME/data/`.
+---
 
-## `$DOSM_HOME` layout
+## What's in the box
 
-```
-$DOSM_HOME/
-  config.yaml
-  config/        secrets key, per-host config
-  docs/          your documentation (indexed into the LLM)
-    drafts/      LLM-authored runbook drafts pending review
-  scripts/       scripts the agent can propose to run
-  modules/       installed integration modules
-  resources/     anything else
-  data/
-    app.db       SQLite (state + vector index)
-    action_log/  audit trail of approved agent actions
-  logs/
-```
+| Area | What you get |
+|------|--------------|
+| **Hosts inventory** | CRUD over hosts (SSH/RDP/VNC), free-form tags, named credential profiles backed by your secrets store, jump-host chains with cycle/protocol validation. |
+| **Credential profiles** | Named variables (e.g. *"Service Fabric Japan Model"*) tied to a secret in the configured backend. Set the secret inline from the UI or via CLI. |
+| **Browser sessions** | Apache Guacamole integration via a signed JSON envelope. SSH, RDP, VNC. Session recording on by default. Resource panel attached, showing live metrics for the actual remote host. |
+| **In-app terminals** | Local PowerShell / cmd / bash launched inside the DOSM UI (admin-only) with xterm.js + a PTY bridge. Asciinema recording. *Run as another user* via `sudo` / `runas` wrappers. |
+| **Documentation index** | Drop markdown / text / PDF into `$DOSM_HOME/docs/`; DOSM chunks, embeds with the on-CPU `bge-small-en-v1.5` ONNX model, and serves search with snippet citations. Falls back to keyword search if the embedder can't initialize. |
+| **LLM chat** | RAG-grounded chat against your docs index, streamed via SSE, with inline citations to the source files. |
+| **Agent mode** | The model proposes actions as `<plan>` blocks; each becomes a plan card the operator approves before execution. First action: `ssh_exec` (with a tiered allow-list and elevated-confirmation flow). Second: `run_pipeline`. |
+| **Pipeline runner** | Register CI/CD pipelines, trigger them with inputs, watch status. v1 supports GitHub Actions; the adapter contract is provider-agnostic. |
+| **Modules** | First-party `system_info` ships in the box. Drop additional modules into `$DOSM_HOME/modules/` with a `module.yaml` manifest; each can mount routes, register agent actions, and constrain itself by OS. |
+| **Settings & CLI catalog** | Toggle which DevOps CLIs (Azure / AWS / gcloud / git / gh / Terraform / kubectl / Helm / Docker / Ansible / sfctl / pwsh / cmd / bash) appear as quick-launch terminals. |
+| **Pluggable secrets** | `LocalEncryptedBackend` (Fernet, blobs in the app DB) or `VaultBackend` (HashiCorp KV v2). Same interface; selected in `config.yaml`. |
+| **Audit log** | Every state-changing operation lands a row — auth, host CRUD, credential changes, agent plan card lifecycle, pipeline runs, terminal sessions, Guacamole connects. |
 
-## Quick start (Phase 1)
+---
+
+## Quick start
+
+Requirements: **Python 3.11+**. Linux, macOS, or Windows.
 
 ```bash
-# 1. Install in editable mode
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e .
-
-# 2. Create your DOSM_HOME
-dosm init ./.dosm-home
-
-# 3. Start the app
-export DOSM_HOME=$(pwd)/.dosm-home   # Windows: set DOSM_HOME=...
-dosm serve
-```
-
-Then open <http://127.0.0.1:8765>.
-
-## Continue from another machine
-
-The complete planning context, phase-by-phase log, open backlog with
-recommended ordering, design rationale, and known limitations live in
-the repo so they travel with the code:
-
-- **[`CLAUDE.md`](CLAUDE.md)** — concise orientation any AI assistant
-  should read first.
-- **[`docs/ROADMAP.md`](docs/ROADMAP.md)** — full phase log, open backlog
-  (with rationale), preserved design decisions, and known limits.
-
-To pick up on a different machine:
-
-```bash
-git clone <repo-url>
+# 1. Clone and install
+git clone https://github.com/MBarc/DevOps-Operations-Suite-Manager
 cd DevOps-Operations-Suite-Manager
 git checkout claude/devops-suite-llm-design-ZJ2aU
 
 python -m venv .venv
-source .venv/bin/activate    # Windows: .venv\Scripts\activate
+source .venv/bin/activate           # Windows: .venv\Scripts\activate
 pip install -e .
 
+# 2. Bootstrap a DOSM_HOME (config + folder layout)
 dosm init ./.dosm-home
-export DOSM_HOME=$(pwd)/.dosm-home
+
+# 3. Initialize the SQLite schema and create the first admin user
+export DOSM_HOME=$(pwd)/.dosm-home   # Windows: set DOSM_HOME=...
 dosm db init
-dosm user create admin       # prompts for password
-dosm serve                   # then open http://127.0.0.1:8765
+dosm user create admin               # prompts for password
+
+# 4. Run the server
+dosm serve
 ```
 
-Read `docs/ROADMAP.md` for what's done, what's queued, and the design
-choices that shape the next move.
+Open <http://127.0.0.1:8765> and sign in.
 
-## Optional: Guacamole stack for browser SSH/RDP/VNC
+---
+
+## `$DOSM_HOME` layout
+
+The single root directory holding all state, config, secrets, and user
+content. Bind-mount this in production; back it up like any other
+ops-critical directory.
+
+```
+$DOSM_HOME/
+  config.yaml                       Main app config
+  config/
+    secrets.key                     Local-backend Fernet key (auto-generated)
+    session.key                     Cookie signing secret (auto-generated)
+    guacamole.key                   Guacamole auth-json shared secret (optional)
+  docs/                             Indexed into the docs search + RAG chat
+    drafts/                         (excluded from the index by default)
+  scripts/                          Browseable scripts the agent can propose
+  modules/                          User-installed modules (module.yaml each)
+  resources/                        Anything else
+  data/
+    app.db                          SQLite (state, audit log, plan cards, etc.)
+    index/                          Vector index workspace
+    action_log/                     Audit-trail extras
+    terminal_recordings/            Asciinema .cast files
+    guacamole_recordings/           Mounted into the Guacamole container
+  logs/
+```
+
+---
+
+## CLI reference
+
+`dosm --help` lists all commands. The most common:
+
+```bash
+# bootstrap & service
+dosm init <path>                    # create a new DOSM_HOME
+dosm serve [--host H --port N]      # run the web app
+dosm version
+
+# database
+dosm db init                        # create tables (idempotent)
+
+# users
+dosm user create <name> [--role admin|operator|viewer]
+dosm user list
+dosm user passwd <name>
+
+# secrets backend
+dosm secret set <path>              # writes through the configured backend
+dosm secret get <path>
+dosm secret list [<prefix>]
+dosm secret delete <path>
+
+# credential profiles (DB rows that reference secret paths)
+dosm credential add <name> --kind ssh_password --username svc --secret-ref ssh/prod/svc
+dosm credential list
+
+# documentation index
+dosm docs reindex [--force]
+dosm docs status
+
+# modules
+dosm module list
+
+# Guacamole
+dosm guacamole keygen               # generates the auth-json shared secret
+```
+
+---
+
+## Optional: Ollama for chat / agent mode
+
+Chat and agent modes call out to an Ollama HTTP endpoint. Without one,
+both pages still render and the SSE stream surfaces a clean
+"Ollama unreachable" error — the rest of the app keeps working.
+
+```bash
+# Run Ollama locally
+ollama serve
+
+# Pull a CPU-friendly tool-using model (the default in config.yaml)
+ollama pull qwen2.5:7b-instruct
+```
+
+In `$DOSM_HOME/config.yaml`:
+
+```yaml
+llm:
+  provider: ollama
+  base_url: http://127.0.0.1:11434
+  model: qwen2.5:7b-instruct
+  embedding_model: bge-small-en-v1.5
+```
+
+Restart DOSM. The Chat sidebar entry now produces real responses; Agent
+mode emits real `<plan>` blocks that become plan cards.
+
+---
+
+## Optional: Guacamole stack for browser SSH / RDP / VNC
 
 DOSM signs short-lived JSON connection envelopes that Guacamole's
-`guacamole-auth-json` extension consumes — your hosts and credentials stay in
-DOSM, Guacamole is a dumb renderer.
+`guacamole-auth-json` extension consumes — your hosts and credentials
+stay in DOSM, Guacamole is a dumb HTML5 renderer.
 
 ```bash
 # 1. Generate the shared 128-bit secret (writes to $DOSM_HOME/config/guacamole.key)
@@ -120,22 +187,64 @@ docker run --rm guacamole/guacamole:1.5.5 /opt/guacamole/bin/initdb.sh --postgre
 # 4. Bring the stack up
 docker compose up -d
 
-# 5. Enable the integration in DOSM
-# In $DOSM_HOME/config.yaml set:
-#   guacamole:
-#     enabled: true
-#     base_url: "http://127.0.0.1:8080/guacamole"
-# Restart DOSM. Each Host detail page now has a "Connect via Guacamole" button.
+# 5. Enable in DOSM (config.yaml)
+guacamole:
+  enabled: true
+  base_url: "http://127.0.0.1:8080/guacamole"
 ```
 
-## Roadmap
+Restart DOSM. Each Host detail page now has a *Connect via Guacamole*
+button. Sessions through a jump host are tunneled through DOSM via a
+shared, multiplexed SSH connection (`JumpTunnelManager`) so concurrent
+sessions to many targets behind one jump don't fight over auth.
 
-1. ✅ Phase 1 — scaffold, bootstrap, minimal dashboard
-2. ⏭ Phase 2 — SQLite + auth + secrets backend (local + Vault)
-3. ⏭ Phase 3 — module loader contract + trivial example module
-4. ⏭ Phase 4 — docs ingestion + RAG search
-5. ⏭ Phase 5 — Ollama wiring + LLM chat mode
-6. ⏭ Phase 6 — Agent mode: plan cards with Approve / Edit / Reject
-7. ⏭ Phase 7 — Script runner with approval
-8. ⏭ Phase 8 — Service Fabric module (PowerShell, Windows)
-9. ⏭ Phase 9 — Observer: draft runbooks from approved action logs
+---
+
+## Configuration overview
+
+`config.yaml` has the following top-level sections (all optional —
+defaults shown via `dosm init` are sensible):
+
+| Section | What it controls |
+|---------|------------------|
+| `server` | host, port |
+| `auth` | session cookie name, max age, secret file |
+| `secrets` | `backend: local` or `vault`, key file or Vault address/mount/prefix |
+| `llm` | Ollama base URL + model + embedding model |
+| `docs_index` | chunk size, overlap, include/exclude globs, embedder choice, auto-index on startup |
+| `terminals` | enabled, auto-detect, record by default, custom shells |
+| `metrics` | poll interval, WinRM port / transport / timeout |
+| `guacamole` | enabled, base URL, secret key file, recording dir, DOSM-reachable host, tunnel bind host |
+| `ssh_command_policy` | allow-list of safe commands for the agent's `ssh_exec` action |
+| `cli_tools` | `{tool_id: bool}` map populated by the Settings page |
+| `enabled_modules` | module names to load on startup |
+
+---
+
+## Architecture at a glance
+
+- **FastAPI + Jinja2 + HTMX-style server-rendered pages.** No SPA
+  framework; the UI is HTML the server sends back, with a small amount of
+  JS for xterm.js, SSE, and resource-panel WebSockets.
+- **SQLAlchemy 2 + SQLite** with WAL, `synchronous=NORMAL`, 30s timeout,
+  and `foreign_keys=ON`. Idempotent column-add migrations on startup.
+- **Pluggable interfaces**: `SecretsBackend`, `MetricsSource`,
+  `PipelineAdapter`, module `register(app, cfg)`. Each documented in its
+  package.
+- **`JumpTunnelManager`** keeps one persistent SSH connection per jump
+  host alive in-process; many targets behind one jump multiplex over it.
+- **Plan cards** (`PlanCard` model) gate every agent action. Tier
+  (`safe`/`elevated`) classified at approve time; elevated requires
+  typing the host name to confirm.
+- **Audit log** rows accompany every state mutation in the same DB
+  session as the change itself.
+
+For a deeper tour and the design choices behind these picks, see
+[`docs/ROADMAP.md`](docs/ROADMAP.md). For an AI assistant working in
+this repo, [`CLAUDE.md`](CLAUDE.md) is the orientation file.
+
+---
+
+## License
+
+MIT.
