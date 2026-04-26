@@ -65,17 +65,54 @@ def _from_custom(entries: list[CustomTerminal]) -> list[Shell]:
     return shells
 
 
-def discover_shells(cfg: TerminalsConfig) -> list[Shell]:
+def _from_cli_tools(cli_tools: dict[str, bool], existing_ids: set[str]) -> list[Shell]:
+    """Surface enabled CLI catalog entries as additional Shell rows.
+
+    Skips entries that the auto-detector already produced (pwsh, bash, cmd,
+    powershell) so the Terminals page doesn't duplicate them.
+    """
+    if not cli_tools:
+        return []
+    from dosm.settings.cli_catalog import CATALOG, _detect_one, shell_argv_for
+
+    out: list[Shell] = []
+    for spec in CATALOG:
+        if not cli_tools.get(spec.id):
+            continue
+        if spec.id in existing_ids:
+            continue
+        d = _detect_one(spec, with_version=False)
+        if not d.installed or d.path is None:
+            continue
+        argv = shell_argv_for(spec, d.path)
+        out.append(
+            Shell(
+                id=f"cli-{spec.id}",
+                name=spec.name,
+                command=argv,
+                source="cli",
+                description=spec.description,
+            )
+        )
+    return out
+
+
+def discover_shells(
+    cfg: TerminalsConfig,
+    cli_tools: dict[str, bool] | None = None,
+) -> list[Shell]:
     """Return the list of Shell entries to show on the Terminals page.
 
     Auto-detected shells come first, in platform candidate order, followed by
-    any user-defined custom entries. Duplicate ids are disambiguated by
-    appending an index suffix.
+    any user-defined custom entries, followed by Settings-enabled CLI tools.
+    Duplicate ids are disambiguated by appending an index suffix.
     """
     shells: list[Shell] = []
     if cfg.auto_detect:
         shells.extend(_auto_detect())
     shells.extend(_from_custom(cfg.custom))
+    auto_ids = {s.id for s in shells}
+    shells.extend(_from_cli_tools(cli_tools or {}, auto_ids))
 
     seen: dict[str, int] = {}
     for s in shells:

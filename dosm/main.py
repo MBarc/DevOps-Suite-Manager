@@ -23,6 +23,7 @@ from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
 from dosm.guacamole import guacamole_router
 from dosm.llm import chat_router
+from dosm.settings import settings_router
 from dosm.hosts import hosts_router
 from dosm.metrics import metrics_router
 from dosm.models import User
@@ -78,6 +79,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(chat_router)
     app.include_router(modules_router)
     app.include_router(metrics_router)
+    app.include_router(settings_router)
     if cfg.terminals.enabled:
         app.include_router(terminals_router)
 

@@ -35,7 +35,7 @@ async def terminals_index(request: Request, user: User = Depends(_require_admin)
     cfg = request.app.state.config
     if not cfg.terminals.enabled:
         raise HTTPException(status_code=404)
-    shells = discover_shells(cfg.terminals)
+    shells = discover_shells(cfg.terminals, cfg.cli_tools)
     return _templates(request).TemplateResponse(
         request,
         "terminals/list.html",
@@ -63,7 +63,7 @@ async def terminals_runas(
     target_user = target_user.strip()
     if not target_user or not all(c.isalnum() or c in "-_.\\@" for c in target_user):
         raise HTTPException(400, "invalid target user")
-    base = find_shell(discover_shells(cfg.terminals), shell_id)
+    base = find_shell(discover_shells(cfg.terminals, cfg.cli_tools), shell_id)
     if base is None:
         raise HTTPException(404, "unknown base shell")
     wrapped = make_runas_shell(base, target_user)
@@ -89,7 +89,7 @@ async def terminals_session(
     cfg = request.app.state.config
     if not cfg.terminals.enabled:
         raise HTTPException(status_code=404)
-    shell = find_shell(discover_shells(cfg.terminals), shell_id)
+    shell = find_shell(discover_shells(cfg.terminals, cfg.cli_tools), shell_id)
     if shell is None:
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
@@ -142,7 +142,7 @@ async def terminals_ws(
         username = user.username
 
     cfg = websocket.app.state.config
-    shell = find_shell(discover_shells(cfg.terminals), shell_id)
+    shell = find_shell(discover_shells(cfg.terminals, cfg.cli_tools), shell_id)
     if shell is None:
         await websocket.close(code=4404)
         return

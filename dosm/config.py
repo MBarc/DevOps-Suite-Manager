@@ -150,6 +150,9 @@ class Config(BaseModel):
     guacamole: GuacamoleConfig = GuacamoleConfig()
     metrics: MetricsConfig = MetricsConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
+    # cli_tools is a flat {tool_id: bool} map — Settings page toggles for
+    # the CLI catalog. Enabled tools surface on the Terminals page.
+    cli_tools: dict[str, bool] = Field(default_factory=dict)
     enabled_modules: list[str] = Field(default_factory=list)
 
     @property
@@ -208,3 +211,21 @@ def load_config(home: str | Path | None = None) -> Config:
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     return load_config()
+
+
+def update_config_yaml(home: Path, updates: dict) -> None:
+    """Shallow-merge `updates` into `$DOSM_HOME/config.yaml` and rewrite.
+
+    Keys in `updates` replace the matching top-level keys in the existing
+    file. Sub-keys not mentioned in `updates` are preserved by value, so a
+    settings page can rewrite just `cli_tools` without touching anything
+    else. The cached `get_config` value is invalidated so callers see fresh
+    state on the next request.
+    """
+    cfg_file = home / "config.yaml"
+    raw = yaml.safe_load(cfg_file.read_text()) if cfg_file.exists() else {}
+    if not isinstance(raw, dict):
+        raw = {}
+    raw.update(updates)
+    cfg_file.write_text(yaml.safe_dump(raw, sort_keys=False))
+    get_config.cache_clear()

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Settings — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Settings</h1>
+    <div class="subtitle">Enable the CLI tools you want available as quick-launch terminals.</div>
+  </div>
+</header>
+
+{% if request.query_params.get('saved') %}
+<section class="card" style="border-left: 3px solid var(--success); padding-top: var(--sp-3); padding-bottom: var(--sp-3)">
+  <span class="badge badge-green"><span class="dot ok"></span> Saved</span>
+  <span class="muted" style="margin-left: var(--sp-2)">Terminals page now reflects your selection.</span>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>CLI tool catalog</h2>
+  <form method="post" action="/settings">
+    <table class="data">
+      <thead>
+        <tr>
+          <th style="width:1%"></th>
+          <th>Tool</th>
+          <th>Status</th>
+          <th>Version</th>
+          <th>Path</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>
+            <input type="checkbox" name="enabled" value="{{ r.spec.id }}"
+              {% if r.enabled %}checked{% endif %}
+              {% if not r.installed %}disabled{% endif %} />
+          </td>
+          <td>
+            <div style="font-weight:500">{{ r.spec.name }}</div>
+            <div class="muted" style="font-size:12px">{{ r.spec.description }}</div>
+          </td>
+          <td>
+            {% if r.installed %}
+              <span class="badge badge-green"><span class="dot ok"></span> installed</span>
+            {% else %}
+              <span class="badge badge-gray"><span class="dot"></span> not installed</span>
+              {% if r.spec.install_url %}
+                <a href="{{ r.spec.install_url }}" target="_blank" rel="noopener" class="muted" style="margin-left:6px; font-size:12px">install →</a>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td class="muted" style="font-size:12.5px">{{ r.version or '' }}</td>
+          <td>{% if r.path %}<code>{{ r.path }}</code>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="row" style="margin-top: var(--sp-4)">
+      <button type="submit">Save settings</button>
+      <span class="muted" style="font-size:12.5px; align-self:center">
+        Toggles for not-installed tools are disabled. Install the tool, then refresh this page.
+      </span>
+    </div>
+  </form>
+</section>
+{% endblock %}
