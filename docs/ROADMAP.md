@@ -28,7 +28,7 @@ changelog; this is the one-line summary.
 | 9     | `f44c65f`    | Jump-host chains + credential profiles UI + WAL + idempotent migrations. |
 | 10    | `1e60b94`    | Settings page + DevOps CLI catalog (15 tools, toggle into Terminals). |
 | 11    | `21e35ae`    | Pipeline runner core + GitHub Actions adapter + `run_pipeline` agent action. |
-| 12+13 | pending      | Monitoring integrations (Dynatrace / Datadog / ServiceNow adapters, host-check page, fleet coverage matrix, 60s cache) + Certificate inventory (Windows cert stores + Linux PEM/DER walk, expiry coloring, 5-min cache). |
+| 12+13 | `2b1d1f9`    | Monitoring integrations (Dynatrace / Datadog / ServiceNow adapters, host-check page, fleet coverage matrix, 60s cache) + Certificate inventory (Windows cert stores + Linux PEM/DER walk, expiry coloring, 5-min cache). |
 
 ## Open backlog (recommended order)
 
