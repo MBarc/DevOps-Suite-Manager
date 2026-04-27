@@ -11,28 +11,228 @@
   </div>
 </header>
 
-<section class="card">
+<div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider)">
+  {% set tabs = [
+    ('',          'All',       n_total),
+    ('servers',   'Servers',   n_servers),
+    ('jumpboxes', 'Jumpboxes', n_jumpboxes),
+  ] %}
+  {% for slug, label, count in tabs %}
+    {% set active = (kind == slug) %}
+    <a href="{{ '/hosts' if not slug else '/hosts?kind=' + slug }}"
+       style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none;
+              color:{{ 'var(--fg-strong)' if active else 'var(--fg-muted)' }};
+              border-bottom:2px solid {{ 'var(--accent,#6366f1)' if active else 'transparent' }};
+              margin-bottom:-1px">
+      {{ label }}
+      <span style="margin-left:6px; font-size:11px; color:var(--fg-muted); font-weight:400">{{ count }}</span>
+    </a>
+  {% endfor %}
+</div>
+
+<section class="card" style="padding:0; overflow:hidden">
   {% if hosts %}
-  <table class="data">
+  <table style="width:100%; border-collapse:collapse; font-size:13px">
     <thead>
-      <tr><th>Name</th><th>Address</th><th>Protocol</th><th>Tags</th><th>Source</th></tr>
+      <tr style="border-bottom:1px solid var(--divider); text-align:left; background:var(--surface-raised,rgba(255,255,255,.03))">
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Address</th>
+        <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Type</th>
+        <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Credential</th>
+        <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Jump</th>
+        <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Tags</th>
+        <th style="padding:10px 14px"></th>
+      </tr>
     </thead>
     <tbody>
     {% for h in hosts %}
-      <tr>
-        <td><a href="/hosts/{{ h.id }}" style="color:var(--fg-strong); font-weight:500">{{ h.name }}</a></td>
-        <td><code>{{ h.hostname }}:{{ h.port }}</code></td>
-        <td><span class="tag">{{ h.protocol }}</span></td>
-        <td>
+      {% set proto_color = {'ssh': '#16a34a', 'rdp': '#3b82f6', 'vnc': '#8b5cf6'}[h.protocol] %}
+      <tr style="border-top:1px solid var(--divider)">
+        <td style="padding:10px 16px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <a href="/hosts/{{ h.id }}" style="font-family:monospace; font-weight:500; color:var(--fg-strong); text-decoration:none">{{ h.hostname }}:{{ h.port }}</a>
+            {% if h.is_jumpbox %}
+            <span style="display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; letter-spacing:.04em; background:#f59e0b; color:#000">JUMP</span>
+            {% endif %}
+          </div>
+          <div style="font-size:11px; color:var(--fg-muted); margin-top:2px">{{ h.name }}</div>
+        </td>
+        <td style="padding:10px 14px">
+          <span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600">
+            <span style="width:7px; height:7px; border-radius:50%; background:{{ proto_color }}; flex-shrink:0"></span>
+            {{ h.protocol | upper }}
+          </span>
+        </td>
+        <td style="padding:10px 14px; font-size:12px; color:var(--fg-muted)">
+          {{ h.credential.name if h.credential else '—' }}
+        </td>
+        <td style="padding:10px 14px; font-size:12px">
+          {% if h.jump_host %}
+            <span style="color:var(--fg-muted)">via</span>
+            <a href="/hosts/{{ h.jump_host.id }}" style="font-family:monospace; color:var(--fg); text-decoration:none">{{ h.jump_host.hostname }}</a>
+          {% else %}
+            <span style="color:var(--fg-muted)">direct</span>
+          {% endif %}
+        </td>
+        <td style="padding:10px 14px">
           {% for t in h.tags %}<span class="tag">{{ t.name }}</span>{% endfor %}
         </td>
-        <td class="muted">{{ h.source_module or "manual" }}</td>
+        <td style="padding:10px 14px; text-align:right; white-space:nowrap">
+          {% if guacamole_enabled %}
+          <a href="/hosts/{{ h.id }}/connect" class="btn btn-sm">Connect</a>
+          {% endif %}
+          <button type="button" onclick="toggleEdit({{ h.id }})" class="btn btn-ghost btn-sm">Edit</button>
+          <form method="post" action="/hosts/{{ h.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Delete {{ h.name }}?')">
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
+          </form>
+        </td>
+      </tr>
+
+      <!-- Inline edit panel -->
+      <tr id="edit-{{ h.id }}" style="display:none">
+        <td colspan="6" style="padding:0; background:var(--surface-raised,rgba(255,255,255,.04)); border-bottom:2px solid var(--accent,#6366f1)">
+          <form method="post" action="/hosts/{{ h.id }}/edit" style="padding:16px 20px">
+            <input type="hidden" name="back" value="list" />
+
+            <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:12px; margin-bottom:12px; align-items:end">
+              <div>
+                <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Hostname</label>
+                <input type="text" name="name" required value="{{ h.name }}"
+                  class="r-hostname" style="width:100%; box-sizing:border-box" />
+              </div>
+              <div>
+                <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">IP Address</label>
+                <input type="text" name="hostname" required value="{{ h.hostname }}"
+                  class="r-ip" style="width:100%; box-sizing:border-box" />
+              </div>
+              <div style="display:flex; gap:8px; align-items:end">
+                <div>
+                  <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Protocol</label>
+                  <select name="protocol" class="proto-select" style="width:90px">
+                    {% for p in protocols %}
+                    <option value="{{ p }}" {% if h.protocol == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Port</label>
+                  <input type="number" name="port" required value="{{ h.port }}" class="port-input" style="width:70px" />
+                </div>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px">
+              <div>
+                <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Credential</label>
+                <select name="credential_id" style="width:100%; box-sizing:border-box">
+                  <option value="">(none)</option>
+                  {% for c in credentials %}
+                  <option value="{{ c.id }}" {% if h.credential_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div>
+                <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Tags</label>
+                <input type="text" name="tags" value="{{ h.tags|map(attribute='name')|join(', ') }}"
+                  placeholder="prod, linux" style="width:100%; box-sizing:border-box" />
+              </div>
+            </div>
+
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px">
+              <input type="checkbox" name="is_jumpbox" id="jb-{{ h.id }}" value="1"
+                {% if h.is_jumpbox %}checked{% endif %} />
+              <label for="jb-{{ h.id }}" style="font-size:13px; font-weight:500">This host is a jumpbox</label>
+              <span style="font-size:11px; color:var(--fg-muted); margin-left:8px">Jumpboxes connect directly — no jump host needed.</span>
+            </div>
+
+            <div id="jh-{{ h.id }}" style="margin-bottom:12px;{% if h.is_jumpbox %} display:none{% endif %}">
+              <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Jump host</label>
+              <select name="jump_host_id" style="width:100%; box-sizing:border-box">
+                <option value="">(direct — no jump)</option>
+                {% for j in jump_candidates if j.id != h.id %}
+                <option value="{{ j.id }}" {% if h.jump_host_id == j.id %}selected{% endif %}>
+                  {{ j.name }} ({{ j.hostname }})
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div style="margin-bottom:12px">
+              <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Description</label>
+              <textarea name="description" rows="2"
+                style="width:100%; box-sizing:border-box; resize:vertical"
+                placeholder="Optional notes">{{ h.description or '' }}</textarea>
+            </div>
+
+            <div style="display:flex; gap:8px">
+              <button type="submit" class="btn btn-sm">Save</button>
+              <button type="button" onclick="toggleEdit({{ h.id }})" class="btn btn-ghost btn-sm">Cancel</button>
+            </div>
+          </form>
+        </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   {% else %}
-    <div class="empty-state">No hosts yet. <a href="/hosts/new">Add one</a>.</div>
+  <div class="empty-state" style="padding:48px 24px">No hosts yet. <a href="/hosts/new">Add one</a>.</div>
   {% endif %}
 </section>
+
+<script>
+(function () {
+  var DEFAULTS = {ssh: 22, rdp: 3389, vnc: 5900};
+
+  function toggleEdit(id) {
+    var row = document.getElementById('edit-' + id);
+    var opening = row.style.display === 'none';
+    document.querySelectorAll('[id^="edit-"]').forEach(function (r) {
+      r.style.display = 'none';
+    });
+    if (opening) row.style.display = '';
+  }
+
+  document.querySelectorAll('.proto-select').forEach(function (sel) {
+    sel.addEventListener('change', function () {
+      var portInput = sel.closest('form').querySelector('.port-input');
+      if (DEFAULTS[sel.value]) portInput.value = DEFAULTS[sel.value];
+    });
+  });
+
+  function wireResolve(form) {
+    var hostnameInput = form.querySelector('.r-hostname');
+    var ipInput = form.querySelector('.r-ip');
+    if (!hostnameInput || !ipInput) return;
+
+    function resolve(q, fill, key) {
+      if (!q.trim() || fill.value.trim()) return;
+      fetch('/hosts/resolve?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d[key]) fill.value = d[key]; })
+        .catch(function () {});
+    }
+
+    hostnameInput.addEventListener('blur', function () { resolve(hostnameInput.value, ipInput, 'ip'); });
+    ipInput.addEventListener('blur', function () { resolve(ipInput.value, hostnameInput, 'hostname'); });
+  }
+
+  document.querySelectorAll('[id^="edit-"] form').forEach(wireResolve);
+
+  document.querySelectorAll('input[name="is_jumpbox"]').forEach(function (cb) {
+    var jhRow = document.getElementById(cb.id.replace('jb-', 'jh-'));
+    if (!jhRow) return;
+    cb.addEventListener('change', function () {
+      if (cb.checked) {
+        jhRow.style.display = 'none';
+        var sel = jhRow.querySelector('select');
+        if (sel) sel.value = '';
+      } else {
+        jhRow.style.display = '';
+      }
+    });
+  });
+
+  window.toggleEdit = toggleEdit;
+})();
+</script>
 {% endblock %}

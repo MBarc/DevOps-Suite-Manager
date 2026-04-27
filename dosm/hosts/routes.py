@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import ipaddress
+import socket
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -37,12 +41,29 @@ def _form_context(db: Session, user: User, host=None, error: str | None = None) 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def hosts_list(
     request: Request,
+    kind: str = "",
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
-    hosts = repo.list_hosts(db)
+    if kind not in ("", "servers", "jumpboxes"):
+        kind = ""
+    hosts = repo.list_hosts(db, kind=kind or None)
+    credentials = repo.list_credentials(db)
+    jump_candidates = repo.list_jump_candidates(db)
+    n_servers, n_jumpboxes = repo.count_by_kind(db)
     return _templates(request).TemplateResponse(
-        request, "hosts/list.html", {"hosts": hosts, "user": user}
+        request, "hosts/list.html", {
+            "hosts": hosts,
+            "credentials": credentials,
+            "jump_candidates": jump_candidates,
+            "protocols": list(repo.SUPPORTED_PROTOCOLS),
+            "kind": kind,
+            "n_total": n_servers + n_jumpboxes,
+            "n_servers": n_servers,
+            "n_jumpboxes": n_jumpboxes,
+            "user": user,
+            "guacamole_enabled": request.app.state.config.guacamole.enabled,
+        }
     )
 
 
@@ -55,6 +76,31 @@ async def hosts_new(
     return _templates(request).TemplateResponse(
         request, "hosts/form.html", _form_context(db, user)
     )
+
+
+@router.get("/resolve", include_in_schema=False)
+async def resolve_host(
+    q: str = "",
+    user: User = Depends(require_user),
+) -> JSONResponse:
+    q = q.strip()
+    if not q:
+        return JSONResponse({})
+    try:
+        ipaddress.ip_address(q)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    try:
+        if is_ip:
+            hostname, _, _ = await asyncio.to_thread(socket.gethostbyaddr, q)
+            return JSONResponse({"hostname": hostname, "ip": q})
+        else:
+            infos = await asyncio.to_thread(socket.getaddrinfo, q, None)
+            ip = infos[0][4][0]
+            return JSONResponse({"hostname": q, "ip": ip})
+    except Exception:
+        return JSONResponse({})
 
 
 def _parse_int_or_none(v: str) -> int | None:
@@ -72,6 +118,7 @@ async def hosts_create(
     credential_id: str = Form(""),
     jump_host_id: str = Form(""),
     tags: str = Form(""),
+    is_jumpbox: str | None = Form(None),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
@@ -88,6 +135,7 @@ async def hosts_create(
             credential_id=cred_id,
             jump_host_id=jump_id,
             tags_csv=tags,
+            is_jumpbox=is_jumpbox is not None,
         )
     except (IntegrityError, HostValidationError) as e:
         db.rollback()
@@ -154,6 +202,8 @@ async def hosts_update(
     credential_id: str = Form(""),
     jump_host_id: str = Form(""),
     tags: str = Form(""),
+    is_jumpbox: str | None = Form(None),
+    back: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
@@ -174,6 +224,7 @@ async def hosts_update(
             credential_id=cred_id,
             jump_host_id=jump_id,
             tags_csv=tags,
+            is_jumpbox=is_jumpbox is not None,
         )
     except (IntegrityError, HostValidationError) as e:
         db.rollback()
@@ -184,7 +235,8 @@ async def hosts_update(
             status_code=400,
         )
     db.add(AuditLog(actor_id=user.id, action="host.update", target=f"host:{host.id}"))
-    return RedirectResponse(f"/hosts/{host.id}", status_code=303)
+    redirect_to = "/hosts" if back == "list" else f"/hosts/{host.id}"
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 @router.post("/{host_id}/delete", include_in_schema=False)

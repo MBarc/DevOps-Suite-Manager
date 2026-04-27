@@ -103,6 +103,15 @@ class TerminalsConfig(BaseModel):
     custom: list[CustomTerminal] = Field(default_factory=list)
 
 
+class CertsConfig(BaseModel):
+    """Certificate inventory scanner settings."""
+
+    expires_warn_days: int = 30
+    expires_critical_days: int = 7
+    scan_paths: list[str] = Field(default_factory=list)
+    windows_stores: list[str] = Field(default_factory=lambda: ["MY", "ROOT", "CA"])
+
+
 class SSHPolicyConfig(BaseModel):
     """Governs what `ssh_exec` actions can run without elevated confirmation.
 
@@ -149,6 +158,7 @@ class Config(BaseModel):
     docs_index: DocsIndexConfig = DocsIndexConfig()
     guacamole: GuacamoleConfig = GuacamoleConfig()
     metrics: MetricsConfig = MetricsConfig()
+    certs: CertsConfig = CertsConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     # cli_tools is a flat {tool_id: bool} map — Settings page toggles for
     # the CLI catalog. Enabled tools surface on the Terminals page.

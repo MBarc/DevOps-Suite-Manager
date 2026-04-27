@@ -89,6 +89,7 @@ class Host(Base):
     jump_host_id: Mapped[int | None] = mapped_column(
         ForeignKey("hosts.id", ondelete="SET NULL"), nullable=True
     )
+    is_jumpbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source_module: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -261,6 +262,32 @@ class PipelineRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+# ---- Monitoring sources ---------------------------------------------------
+
+
+class MonitoringSource(Base):
+    """A configured monitoring tool tenant (Dynatrace env, Datadog org, or
+    ServiceNow instance). Secrets are stored in the secrets backend; the
+    columns here hold only the path references."""
+
+    __tablename__ = "monitoring_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    tool: Mapped[str] = mapped_column(String(32), nullable=False)
+    # dynatrace: base URL  |  datadog: site (e.g. datadoghq.com)  |  servicenow: base URL
+    url: Mapped[str] = mapped_column(String(512), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)  # ServiceNow only
+    # Paths in the secrets backend (not the values themselves)
+    token_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    token2_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Datadog app key
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 # ---- Secrets storage (local backend) --------------------------------------
 
 
@@ -305,6 +332,7 @@ __all__ = [
     "HostTag",
     "Credential",
     "Host",
+    "MonitoringSource",
     "SecretBlob",
     "AuditLog",
     "Document",

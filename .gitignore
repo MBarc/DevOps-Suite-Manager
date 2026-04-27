@@ -19,3 +19,8 @@ env/
 
 # Local DOSM_HOME used for dev/smoke tests
 .dosm-home/
+
+# Runtime files produced by start scripts
+.dosm.pid
+dosm.log
+dosm.err

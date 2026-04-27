@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Monitoring Sources — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <div style="margin-bottom:4px">
+      <a href="/monitoring" style="color:var(--fg-muted); font-size:13px; text-decoration:none">&larr; Monitoring Coverage</a>
+    </div>
+    <h1>Monitoring Sources</h1>
+    <div class="subtitle">Configure the Dynatrace, Datadog, and ServiceNow tenants DOSM will query</div>
+  </div>
+  <div class="actions">
+    <a href="/monitoring/sources/new" class="btn">Add Source</a>
+  </div>
+</header>
+
+<section class="card" style="padding:0; overflow:hidden">
+  {% if sources %}
+  <table style="width:100%; border-collapse:collapse; font-size:13px">
+    <thead>
+      <tr style="border-bottom:1px solid var(--divider); text-align:left">
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Name</th>
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Tool</th>
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">URL / Site</th>
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Credentials</th>
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Enabled</th>
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for source in sources %}
+      <tr style="border-top:1px solid var(--divider)">
+        <td style="padding:10px 16px; font-weight:500">{{ source.name }}</td>
+        <td style="padding:10px 16px">
+          <span style="display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; background:var(--surface-raised, rgba(255,255,255,.06)); color:var(--fg-muted)">
+            {{ tool_labels[source.tool] }}
+          </span>
+        </td>
+        <td style="padding:10px 16px; font-family:monospace; font-size:12px; color:var(--fg-muted); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+          {{ source.url }}
+        </td>
+        <td style="padding:10px 16px; font-size:12px; color:var(--fg-muted)">
+          {% if source.token_secret %}
+            <span style="color:#16a34a">token set</span>
+          {% else %}
+            <span style="color:var(--danger)">no token</span>
+          {% endif %}
+          {% if source.tool == 'datadog' %}
+            &nbsp;/&nbsp;
+            {% if source.token2_secret %}
+              <span style="color:#16a34a">app key set</span>
+            {% else %}
+              <span style="color:var(--danger)">no app key</span>
+            {% endif %}
+          {% endif %}
+          {% if source.tool == 'servicenow' and source.username %}
+            &nbsp;&middot;&nbsp;{{ source.username }}
+          {% endif %}
+        </td>
+        <td style="padding:10px 16px">
+          {% if source.enabled %}
+            <span style="color:#16a34a; font-size:12px; font-weight:600">YES</span>
+          {% else %}
+            <span style="color:var(--fg-muted); font-size:12px">no</span>
+          {% endif %}
+        </td>
+        <td style="padding:10px 16px; text-align:right; white-space:nowrap">
+          <a href="/monitoring/sources/{{ source.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+          <form method="post" action="/monitoring/sources/{{ source.id }}/delete" style="display:inline" onsubmit="return confirm('Delete {{ source.name }}?')">
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state" style="padding:48px 24px">
+    No sources yet. <a href="/monitoring/sources/new">Add your first source &rarr;</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

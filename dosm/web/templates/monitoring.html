@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Monitoring Coverage — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Monitoring Coverage</h1>
+    <div class="subtitle">Check whether a host is registered in your monitoring tools</div>
+  </div>
+  <div class="actions">
+    <a href="/monitoring/coverage" class="btn btn-ghost">Fleet Coverage</a>
+    <a href="/monitoring/sources" class="btn btn-ghost">Manage Sources</a>
+  </div>
+</header>
+
+{% if not has_sources %}
+<div class="card" style="border-left:3px solid var(--warning,#eab308); margin-bottom:24px">
+  No monitoring sources configured.
+  <a href="/monitoring/sources/new" style="margin-left:8px">Add one now &rarr;</a>
+</div>
+{% endif %}
+
+<!-- Search -->
+<section class="card" style="margin-bottom:24px">
+  <form method="get" action="/monitoring" autocomplete="off" id="coverage-form">
+    <div style="display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap">
+      <div style="flex:1; min-width:220px; position:relative">
+        <input
+          id="host-search"
+          name="hostname"
+          type="text"
+          value="{{ hostname }}"
+          placeholder="Type a host name or IP..."
+          style="width:100%; box-sizing:border-box"
+          autocomplete="off"
+        />
+        <div id="search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; z-index:50; background:var(--surface); border:1px solid var(--divider); border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.15); margin-top:2px; max-height:240px; overflow-y:auto"></div>
+      </div>
+      <button type="submit" class="btn" {% if not has_sources %}disabled{% endif %}>Check Coverage</button>
+    </div>
+  </form>
+</section>
+
+<!-- Results -->
+{% if results is not none %}
+  {% if error %}
+  <div class="card" style="border-left:3px solid var(--danger)">
+    <strong style="color:var(--danger)">Error:</strong> {{ error }}
+  </div>
+  {% elif results %}
+    {% set tools_present = results | map(attribute='tool') | list | unique | list %}
+    {% for tool in ['dynatrace', 'datadog', 'servicenow'] %}
+      {% set tool_results = results | selectattr('tool', 'equalto', tool) | list %}
+      {% if tool_results %}
+      <section class="card" style="margin-bottom:16px">
+        <h2 style="margin-top:0">{{ tool_labels[tool] }}</h2>
+        <table style="width:100%; border-collapse:collapse; font-size:13px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--divider); text-align:left">
+              <th style="padding:8px 12px; color:var(--fg-muted); font-weight:600">Source</th>
+              <th style="padding:8px 12px; color:var(--fg-muted); font-weight:600">Status</th>
+              <th style="padding:8px 12px; color:var(--fg-muted); font-weight:600">Entity</th>
+              <th style="padding:8px 12px; color:var(--fg-muted); font-weight:600">ID</th>
+              <th style="padding:8px 12px; color:var(--fg-muted); font-weight:600">Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in tool_results %}
+            <tr style="border-top:1px solid var(--divider)">
+              <td style="padding:10px 12px; font-weight:500">{{ r.source_name }}</td>
+              <td style="padding:10px 12px">
+                {% if r.error %}
+                  <span style="color:#f97316; font-size:12px; font-weight:600">ERROR</span>
+                {% elif r.found %}
+                  <span style="color:#16a34a; font-size:12px; font-weight:600">FOUND</span>
+                {% else %}
+                  <span style="color:var(--fg-muted); font-size:12px; font-weight:600">NOT FOUND</span>
+                {% endif %}
+              </td>
+              <td style="padding:10px 12px">
+                {% if r.entity_url %}
+                  <a href="{{ r.entity_url }}" target="_blank" rel="noopener" style="color:var(--accent)">{{ r.entity_name }}</a>
+                {% else %}
+                  <span class="muted">{{ r.entity_name or '—' }}</span>
+                {% endif %}
+              </td>
+              <td style="padding:10px 12px; font-family:monospace; font-size:12px; color:var(--fg-muted)">
+                {{ r.entity_id or '—' }}
+              </td>
+              <td style="padding:10px 12px; font-size:12px; color:var(--fg-muted)">
+                {% if r.error %}
+                  <span style="color:#f97316" title="{{ r.error }}">{{ r.error[:80] }}{% if r.error|length > 80 %}…{% endif %}</span>
+                {% elif r.extra %}
+                  {% for k, v in r.extra.items() %}
+                    {% if v is not none %}<span style="margin-right:8px"><strong>{{ k }}:</strong> {{ v }}</span>{% endif %}
+                  {% endfor %}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+  <div class="card">
+    <div class="empty-state">No enabled monitoring sources returned results for <strong>{{ hostname }}</strong>.</div>
+  </div>
+  {% endif %}
+{% endif %}
+
+<script>
+(function () {
+  const input = document.getElementById('host-search');
+  const dropdown = document.getElementById('search-dropdown');
+  let debounce = null;
+
+  function hide() {
+    dropdown.style.display = 'none';
+    dropdown.innerHTML = '';
+  }
+
+  function show(items) {
+    dropdown.innerHTML = '';
+    if (!items.length) { hide(); return; }
+    items.forEach(function (item) {
+      const div = document.createElement('div');
+      div.style.cssText = 'padding:8px 12px; cursor:pointer; font-size:13px';
+      div.textContent = item.name + ' (' + item.hostname + ')';
+      div.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        input.value = item.hostname;
+        hide();
+      });
+      div.addEventListener('mouseover', function () { div.style.background = 'var(--hover)'; });
+      div.addEventListener('mouseout',  function () { div.style.background = ''; });
+      dropdown.appendChild(div);
+    });
+    dropdown.style.display = 'block';
+  }
+
+  input.addEventListener('input', function () {
+    clearTimeout(debounce);
+    const q = input.value.trim();
+    if (!q) { hide(); return; }
+    debounce = setTimeout(function () {
+      fetch('/monitoring/search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(show)
+        .catch(hide);
+    }, 180);
+  });
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') hide();
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) hide();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Fleet Coverage — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <div style="margin-bottom:4px">
+      <a href="/monitoring" style="color:var(--fg-muted); font-size:13px; text-decoration:none">&larr; Monitoring</a>
+    </div>
+    <h1>Fleet Coverage</h1>
+    <div class="subtitle">Coverage matrix — all hosts against all monitoring sources</div>
+  </div>
+  <div class="actions">
+    <a href="/monitoring/coverage?refresh=1" class="btn btn-ghost">Refresh</a>
+    <a href="/monitoring/sources" class="btn btn-ghost">Manage Sources</a>
+  </div>
+</header>
+
+{% if not has_sources %}
+<div class="card" style="border-left:3px solid var(--warning,#eab308); margin-bottom:24px">
+  No monitoring sources configured.
+  <a href="/monitoring/sources/new" style="margin-left:8px">Add one now &rarr;</a>
+</div>
+{% elif not has_hosts %}
+<div class="card" style="border-left:3px solid var(--warning,#eab308); margin-bottom:24px">
+  No hosts in the inventory yet.
+  <a href="/hosts/new" style="margin-left:8px">Add a host &rarr;</a>
+</div>
+{% else %}
+
+<!-- Summary stats -->
+<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px">
+  <div class="card" style="text-align:center; padding:16px 12px">
+    <div style="font-size:26px; font-weight:700">{{ n_hosts }}</div>
+    <div class="muted" style="font-size:12px; margin-top:4px">Total Hosts</div>
+  </div>
+  <div class="card" style="text-align:center; padding:16px 12px">
+    <div style="font-size:26px; font-weight:700; color:#16a34a">{{ n_fully }}</div>
+    <div class="muted" style="font-size:12px; margin-top:4px">Fully Covered</div>
+  </div>
+  <div class="card" style="text-align:center; padding:16px 12px">
+    <div style="font-size:26px; font-weight:700; color:#eab308">{{ n_partially }}</div>
+    <div class="muted" style="font-size:12px; margin-top:4px">Partial</div>
+  </div>
+  <div class="card" style="text-align:center; padding:16px 12px">
+    <div style="font-size:26px; font-weight:700; color:var(--danger)">{{ n_not_covered }}</div>
+    <div class="muted" style="font-size:12px; margin-top:4px">Not Covered</div>
+  </div>
+</div>
+
+<!-- Matrix -->
+<section class="card" style="padding:0; overflow:hidden">
+  <div style="overflow-x:auto">
+    <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:500px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--divider); text-align:left; background:var(--surface-raised,rgba(255,255,255,.03))">
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted); min-width:180px; position:sticky; left:0; background:inherit">Host</th>
+          {% for source in sources %}
+          <th style="padding:10px 14px; text-align:center; min-width:130px; border-left:1px solid var(--divider)">
+            <div style="font-size:10px; color:var(--fg-muted); font-weight:600; text-transform:uppercase; letter-spacing:.06em">{{ tool_labels[source.tool] }}</div>
+            <div style="font-size:12px; color:var(--fg); font-weight:600; margin-top:2px">{{ source.name }}</div>
+            <div style="font-size:11px; color:var(--fg-muted); font-weight:400; margin-top:4px">{{ col_found[loop.index0] }}/{{ rows|length }}</div>
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr style="border-top:1px solid var(--divider)">
+          <td style="padding:10px 16px; position:sticky; left:0; background:var(--surface)">
+            <div style="font-weight:500">{{ row.host.name }}</div>
+            <div style="font-size:11px; color:var(--fg-muted); font-family:monospace; margin-top:1px">{{ row.host.hostname }}</div>
+          </td>
+          {% for cell in row.cells %}
+          <td style="padding:10px 14px; text-align:center; border-left:1px solid var(--divider)">
+            {% if cell is none %}
+              <span style="color:var(--fg-muted); font-size:11px">—</span>
+            {% elif cell.error %}
+              <span style="color:#f97316; font-size:11px; font-weight:600; cursor:help" title="{{ cell.error }}">ERROR</span>
+            {% elif cell.found %}
+              {% if cell.entity_url %}
+              <a href="{{ cell.entity_url }}" target="_blank" rel="noopener"
+                 style="color:#16a34a; font-size:11px; font-weight:600; text-decoration:none"
+                 title="{{ cell.entity_name or '' }}">FOUND ↗</a>
+              {% else %}
+              <span style="color:#16a34a; font-size:11px; font-weight:600">FOUND</span>
+              {% endif %}
+            {% else %}
+              <span style="color:var(--fg-muted); font-size:11px">NOT FOUND</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="muted" style="font-size:12px; margin-top:8px">
+  Results are cached for 60 seconds.
+  <a href="/monitoring/coverage?refresh=1" style="color:var(--accent)">Force refresh</a>
+</div>
+{% endif %}
+{% endblock %}

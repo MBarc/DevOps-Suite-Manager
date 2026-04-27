@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{% if source %}Edit{% else %}Add{% endif %} Monitoring Source — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <div style="margin-bottom:4px">
+      <a href="/monitoring/sources" style="color:var(--fg-muted); font-size:13px; text-decoration:none">&larr; Monitoring Sources</a>
+    </div>
+    <h1>{% if source %}Edit{% else %}Add{% endif %} Monitoring Source</h1>
+  </div>
+</header>
+
+{% if error %}
+<div class="card" style="border-left:3px solid var(--danger); margin-bottom:16px; color:var(--danger)">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="{% if source %}/monitoring/sources/{{ source.id }}{% else %}/monitoring/sources{% endif %}">
+  <section class="card" style="margin-bottom:16px">
+    <h2>General</h2>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px">
+      <div>
+        <label style="display:block; font-size:13px; font-weight:500; margin-bottom:4px">Display Name</label>
+        <input type="text" name="name" required value="{{ source.name if source else '' }}"
+          placeholder="e.g. Production DT" style="width:100%; box-sizing:border-box" />
+      </div>
+      <div>
+        <label style="display:block; font-size:13px; font-weight:500; margin-bottom:4px">Tool</label>
+        <select name="tool" id="tool-select" style="width:100%; box-sizing:border-box">
+          {% for t in tool_choices %}
+          <option value="{{ t }}"
+            {% if source and source.tool == t %}selected
+            {% elif not source and loop.first %}selected{% endif %}>
+            {{ tool_labels[t] }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px">
+      <input type="checkbox" name="enabled" id="enabled" value="1"
+        {% if not source or source.enabled %}checked{% endif %} />
+      <label for="enabled" style="font-size:13px; font-weight:500">Enabled</label>
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom:16px">
+    <h2 id="creds-heading">Connection</h2>
+    <div style="display:grid; gap:16px">
+
+      <div>
+        <label id="url-label" style="display:block; font-size:13px; font-weight:500; margin-bottom:4px">URL</label>
+        <input type="text" name="url" id="url-input"
+          value="{{ source.url if source else '' }}"
+          style="width:100%; box-sizing:border-box" />
+        <div id="url-hint" class="muted" style="font-size:12px; margin-top:4px"></div>
+      </div>
+
+      <div id="username-row">
+        <label style="display:block; font-size:13px; font-weight:500; margin-bottom:4px">Username</label>
+        <input type="text" name="username" value="{{ source.username if source and source.username else '' }}"
+          placeholder="api_user" style="width:100%; box-sizing:border-box" />
+      </div>
+
+      <div>
+        <label id="token-label" style="display:block; font-size:13px; font-weight:500; margin-bottom:4px">Token / Password</label>
+        <input type="password" name="token" autocomplete="new-password"
+          placeholder="{% if source and source.token_secret %}leave blank to keep existing{% endif %}"
+          style="width:100%; box-sizing:border-box" />
+        <div id="token-hint" class="muted" style="font-size:12px; margin-top:4px"></div>
+      </div>
+
+      <div id="token2-row">
+        <label id="token2-label" style="display:block; font-size:13px; font-weight:500; margin-bottom:4px">Application Key</label>
+        <input type="password" name="token2" autocomplete="new-password"
+          placeholder="{% if source and source.token2_secret %}leave blank to keep existing{% endif %}"
+          style="width:100%; box-sizing:border-box" />
+      </div>
+
+    </div>
+  </section>
+
+  <div style="display:flex; gap:10px">
+    <button type="submit" class="btn">{% if source %}Save Changes{% else %}Add Source{% endif %}</button>
+    <a href="/monitoring/sources" class="btn btn-ghost">Cancel</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  var meta = {
+    dynatrace: {
+      urlLabel:   'Environment URL',
+      urlHint:    'e.g. https://abc123.live.dynatrace.com',
+      urlPh:      'https://abc123.live.dynatrace.com',
+      tokenLabel: 'API Token',
+      tokenHint:  'Requires entities.read scope',
+      showUser:   false,
+      showToken2: false,
+    },
+    datadog: {
+      urlLabel:   'Site',
+      urlHint:    'e.g. datadoghq.com, datadoghq.eu, us3.datadoghq.com',
+      urlPh:      'datadoghq.com',
+      tokenLabel: 'API Key',
+      tokenHint:  '',
+      showUser:   false,
+      showToken2: true,
+      token2Label:'Application Key',
+    },
+    servicenow: {
+      urlLabel:   'Instance URL',
+      urlHint:    'e.g. https://company.service-now.com',
+      urlPh:      'https://company.service-now.com',
+      tokenLabel: 'Password',
+      tokenHint:  '',
+      showUser:   true,
+      showToken2: false,
+    },
+  };
+
+  function applyTool(tool) {
+    var m = meta[tool];
+    if (!m) return;
+    document.getElementById('url-label').textContent     = m.urlLabel;
+    document.getElementById('url-hint').textContent      = m.urlHint;
+    document.getElementById('url-input').placeholder     = m.urlPh;
+    document.getElementById('token-label').textContent   = m.tokenLabel;
+    document.getElementById('token-hint').textContent    = m.tokenHint;
+    document.getElementById('username-row').style.display  = m.showUser   ? '' : 'none';
+    document.getElementById('token2-row').style.display    = m.showToken2 ? '' : 'none';
+    if (m.token2Label) document.getElementById('token2-label').textContent = m.token2Label;
+  }
+
+  var sel = document.getElementById('tool-select');
+  sel.addEventListener('change', function () { applyTool(this.value); });
+  applyTool(sel.value);
+})();
+</script>
+{% endblock %}

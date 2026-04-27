@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ cert.subject_cn }} — Certificates — DOSM{% endblock %}
+{% block content %}
+
+{% if cert.status == 'expired' %}
+  {% set status_color = '#ef4444' %}
+{% elif cert.status == 'critical' %}
+  {% set status_color = '#f97316' %}
+{% elif cert.status == 'warn' %}
+  {% set status_color = '#ca8a04' %}
+{% else %}
+  {% set status_color = '#16a34a' %}
+{% endif %}
+
+<header class="page-header">
+  <div>
+    <div style="margin-bottom:4px">
+      <a href="/certs" style="color:var(--fg-muted); font-size:13px; text-decoration:none">&larr; Certificates</a>
+    </div>
+    <h1 style="display:flex; align-items:center; gap:12px">
+      {{ cert.subject_cn }}
+      <span style="display:inline-block; padding:3px 10px; border-radius:5px; font-size:13px; font-weight:600; text-transform:uppercase; background:{{ status_color }}22; color:{{ status_color }}">
+        {{ cert.status }}
+      </span>
+    </h1>
+    <div class="subtitle">
+      {% if cert.days_remaining < 0 %}
+        Expired {{ cert.days_remaining|abs }} day{{ '' if cert.days_remaining|abs == 1 else 's' }} ago
+      {% else %}
+        Expires in {{ cert.days_remaining }} day{{ '' if cert.days_remaining == 1 else 's' }}
+      {% endif %}
+    </div>
+  </div>
+</header>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px">
+
+  <section class="card">
+    <h2>Subject</h2>
+    <dl style="display:grid; grid-template-columns:140px 1fr; gap:6px 12px; margin:0; font-size:13px">
+      <dt style="color:var(--fg-muted); font-weight:500">Common Name</dt>
+      <dd style="margin:0; word-break:break-all">{{ cert.subject_cn }}</dd>
+      <dt style="color:var(--fg-muted); font-weight:500">Full DN</dt>
+      <dd style="margin:0; word-break:break-all; font-family:monospace; font-size:12px">{{ cert.subject }}</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Issuer</h2>
+    <dl style="display:grid; grid-template-columns:140px 1fr; gap:6px 12px; margin:0; font-size:13px">
+      <dt style="color:var(--fg-muted); font-weight:500">Common Name</dt>
+      <dd style="margin:0; word-break:break-all">{{ cert.issuer_cn }}</dd>
+      <dt style="color:var(--fg-muted); font-weight:500">Full DN</dt>
+      <dd style="margin:0; word-break:break-all; font-family:monospace; font-size:12px">{{ cert.issuer }}</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Validity</h2>
+    <dl style="display:grid; grid-template-columns:140px 1fr; gap:6px 12px; margin:0; font-size:13px">
+      <dt style="color:var(--fg-muted); font-weight:500">Not Before</dt>
+      <dd style="margin:0">{{ cert.not_before.strftime('%Y-%m-%d %H:%M:%S UTC') }}</dd>
+      <dt style="color:var(--fg-muted); font-weight:500">Not After</dt>
+      <dd style="margin:0; color:{{ status_color }}; font-weight:500">{{ cert.not_after.strftime('%Y-%m-%d %H:%M:%S UTC') }}</dd>
+      <dt style="color:var(--fg-muted); font-weight:500">Days Remaining</dt>
+      <dd style="margin:0; color:{{ status_color }}; font-weight:600">
+        {% if cert.days_remaining < 0 %}
+          {{ cert.days_remaining|abs }}d ago
+        {% else %}
+          {{ cert.days_remaining }}d
+        {% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Identity</h2>
+    <dl style="display:grid; grid-template-columns:140px 1fr; gap:6px 12px; margin:0; font-size:13px">
+      <dt style="color:var(--fg-muted); font-weight:500">Serial Number</dt>
+      <dd style="margin:0; font-family:monospace; font-size:12px; word-break:break-all">{{ cert.serial }}</dd>
+      <dt style="color:var(--fg-muted); font-weight:500">SHA-256 Thumbprint</dt>
+      <dd style="margin:0; font-family:monospace; font-size:12px; word-break:break-all">{{ cert.thumbprint }}</dd>
+      <dt style="color:var(--fg-muted); font-weight:500">Source</dt>
+      <dd style="margin:0; font-family:monospace; font-size:12px; word-break:break-all">{{ cert.source }}</dd>
+    </dl>
+  </section>
+
+</div>
+{% endblock %}

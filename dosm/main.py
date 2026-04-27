@@ -23,6 +23,8 @@ from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
 from dosm.guacamole import guacamole_router
 from dosm.llm import chat_router
+from dosm.certs import certs_router
+from dosm.monitoring import monitoring_router
 from dosm.pipelines import pipelines_router
 from dosm.settings import settings_router
 from dosm.hosts import hosts_router
@@ -41,10 +43,10 @@ STATIC_DIR = PACKAGE_ROOT / "web" / "static"
 def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or load_config()
     engine = init_engine(cfg)
-    # Apply idempotent column-add migrations so an older DOSM_HOME upgrades
-    # without requiring a manual `dosm db init`.
-    from dosm.migrations import run_migrations
-    run_migrations(engine)
+    # Create any new tables and apply idempotent column-add migrations so an
+    # older DOSM_HOME upgrades without requiring a manual `dosm db init`.
+    from dosm.db import create_all
+    create_all(cfg)
 
     app = FastAPI(
         title="DOSM",
@@ -74,6 +76,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         app.include_router(guacamole_router)
     app.include_router(docs_router)
     app.include_router(pipelines_router)
+    app.include_router(certs_router)
+    app.include_router(monitoring_router)
     # Agent plan card routes share the /chat prefix and must register before
     # the broader chat_router so /chat/{cid}/plan/... matches before any
     # generic /chat/{cid}/... handler that doesn't exist (defensive).

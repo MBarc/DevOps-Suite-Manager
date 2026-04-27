@@ -18,11 +18,11 @@
   <form method="post"
         action="{{ '/hosts/' + host.id|string + '/edit' if host else '/hosts/new' }}"
         class="stack">
-    <label>Name
-      <input type="text" name="name" required value="{{ host.name if host else '' }}" placeholder="sf-prod-01" />
+    <label>Hostname
+      <input type="text" name="name" id="f-hostname" required value="{{ host.name if host else '' }}" placeholder="sf-prod-01.company.com" />
     </label>
-    <label>Hostname / IP
-      <input type="text" name="hostname" required value="{{ host.hostname if host else '' }}" placeholder="10.0.0.10" />
+    <label>IP Address
+      <input type="text" name="hostname" id="f-ip" required value="{{ host.hostname if host else '' }}" placeholder="10.0.0.10" />
     </label>
     <div class="row">
       <label style="flex:1">Protocol
@@ -48,7 +48,15 @@
       </select>
       <span class="field-hint">Named profile pulling from the secrets backend. <a href="/credentials">Manage profiles →</a></span>
     </label>
-    <label>Jump host
+    <label style="display:flex; align-items:center; gap:8px; flex-direction:row">
+      <input type="checkbox" id="is-jumpbox-cb" name="is_jumpbox" value="1"
+        {% if host and host.is_jumpbox %}checked{% endif %} />
+      <span>This host is a jumpbox</span>
+      <span class="field-hint" style="margin-left:auto">Jumpboxes connect directly — no jump host needed.</span>
+    </label>
+    <label id="jump-host-row"
+      {% if host and host.is_jumpbox %}style="display:none"{% endif %}>
+      Jump host
       <select name="jump_host_id">
         <option value="">(direct — no jump)</option>
         {% for j in jump_candidates %}
@@ -57,7 +65,7 @@
         </option>
         {% endfor %}
       </select>
-      <span class="field-hint">If set, sessions reach this host through that SSH host. The jump's own credential and (if it has one) jump host are used too — chains up to 5 hosts deep.</span>
+      <span class="field-hint">If set, sessions reach this host through that jumpbox. Only hosts flagged as jumpboxes are listed.</span>
     </label>
     <label>Tags
       <input type="text" name="tags"
@@ -80,5 +88,37 @@
   sel?.addEventListener('change', () => {
     if (defaults[sel.value]) portInput.value = defaults[sel.value];
   });
+
+  (function () {
+    const hostnameInput = document.getElementById('f-hostname');
+    const ipInput = document.getElementById('f-ip');
+    if (!hostnameInput || !ipInput) return;
+
+    function resolve(q, fill, key) {
+      if (!q.trim() || fill.value.trim()) return;
+      fetch('/hosts/resolve?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(d => { if (d[key]) fill.value = d[key]; })
+        .catch(() => {});
+    }
+
+    hostnameInput.addEventListener('blur', () => resolve(hostnameInput.value, ipInput, 'ip'));
+    ipInput.addEventListener('blur', () => resolve(ipInput.value, hostnameInput, 'hostname'));
+  })();
+
+  (function () {
+    const cb = document.getElementById('is-jumpbox-cb');
+    const jhRow = document.getElementById('jump-host-row');
+    if (!cb || !jhRow) return;
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        jhRow.style.display = 'none';
+        const sel = jhRow.querySelector('select');
+        if (sel) sel.value = '';
+      } else {
+        jhRow.style.display = '';
+      }
+    });
+  })();
 </script>
 {% endblock %}

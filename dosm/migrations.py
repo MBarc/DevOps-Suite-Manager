@@ -42,4 +42,19 @@ def run_migrations(engine: Engine) -> list[str]:
         "jump_host_id INTEGER REFERENCES hosts(id) ON DELETE SET NULL",
     ):
         applied.append("hosts.jump_host_id")
+    # Explicit jumpbox role flag. Backfill: any host already referenced as a
+    # jump_host_id by another host gets flagged so existing inventories keep
+    # working without manual intervention.
+    if _add_column_if_missing(
+        engine,
+        "hosts",
+        "is_jumpbox",
+        "is_jumpbox BOOLEAN NOT NULL DEFAULT 0",
+    ):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE hosts SET is_jumpbox = 1 WHERE id IN ("
+                "SELECT DISTINCT jump_host_id FROM hosts WHERE jump_host_id IS NOT NULL)"
+            ))
+        applied.append("hosts.is_jumpbox")
     return applied

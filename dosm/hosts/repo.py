@@ -26,7 +26,13 @@ def get_or_create_tag(db: Session, name: str) -> Tag:
     return tag
 
 
-def list_hosts(db: Session) -> list[Host]:
+def list_hosts(db: Session, *, kind: str | None = None) -> list[Host]:
+    """List hosts, optionally filtered by role.
+
+    kind=None        — all hosts (default)
+    kind='servers'   — only is_jumpbox=False
+    kind='jumpboxes' — only is_jumpbox=True
+    """
     stmt = (
         select(Host)
         .options(
@@ -36,7 +42,19 @@ def list_hosts(db: Session) -> list[Host]:
         )
         .order_by(Host.name)
     )
+    if kind == "jumpboxes":
+        stmt = stmt.where(Host.is_jumpbox.is_(True))
+    elif kind == "servers":
+        stmt = stmt.where(Host.is_jumpbox.is_(False))
     return list(db.execute(stmt).scalars())
+
+
+def count_by_kind(db: Session) -> tuple[int, int]:
+    """Return (servers_count, jumpboxes_count)."""
+    rows = db.execute(select(Host.is_jumpbox)).scalars().all()
+    jumpboxes = sum(1 for v in rows if v)
+    servers = len(rows) - jumpboxes
+    return servers, jumpboxes
 
 
 def get_host(db: Session, host_id: int) -> Host | None:
@@ -52,8 +70,13 @@ def list_tags(db: Session) -> list[Tag]:
 
 
 def list_jump_candidates(db: Session, exclude_host_id: int | None = None) -> list[Host]:
-    """Hosts eligible to act as a jump box: SSH protocol, not the host itself."""
-    stmt = select(Host).where(Host.protocol == "ssh").order_by(Host.name)
+    """Hosts eligible to act as a jump box: flagged is_jumpbox, SSH protocol,
+    not the host itself."""
+    stmt = (
+        select(Host)
+        .where(Host.is_jumpbox.is_(True))
+        .order_by(Host.name)
+    )
     if exclude_host_id is not None:
         stmt = stmt.where(Host.id != exclude_host_id)
     return list(db.execute(stmt).scalars())
@@ -81,9 +104,9 @@ def _validate_jump(db: Session, host_id: int | None, jump_host_id: int | None) -
         node = db.get(Host, cur_id)
         if node is None:
             raise HostValidationError(f"jump host {cur_id} not found")
-        if node.protocol != "ssh":
+        if not node.is_jumpbox:
             raise HostValidationError(
-                f"jump host {node.name!r} must be SSH protocol (was {node.protocol})"
+                f"host {node.name!r} is not flagged as a jumpbox"
             )
         cur_id = node.jump_host_id
         depth += 1
@@ -100,10 +123,13 @@ def create_host(
     credential_id: int | None,
     jump_host_id: int | None,
     tags_csv: str,
+    is_jumpbox: bool = False,
     source_module: str | None = None,
 ) -> Host:
     if protocol not in SUPPORTED_PROTOCOLS:
         raise HostValidationError(f"Unsupported protocol: {protocol!r}")
+    if is_jumpbox:
+        jump_host_id = None  # jumpboxes connect directly — no chained jumps
     _validate_jump(db, host_id=None, jump_host_id=jump_host_id)
     host = Host(
         name=name,
@@ -113,6 +139,7 @@ def create_host(
         description=description or None,
         credential_id=credential_id,
         jump_host_id=jump_host_id,
+        is_jumpbox=is_jumpbox,
         source_module=source_module,
     )
     db.add(host)
@@ -136,9 +163,20 @@ def update_host(
     credential_id: int | None,
     jump_host_id: int | None,
     tags_csv: str,
+    is_jumpbox: bool = False,
 ) -> Host:
     if protocol not in SUPPORTED_PROTOCOLS:
         raise HostValidationError(f"Unsupported protocol: {protocol!r}")
+    if host.is_jumpbox and not is_jumpbox:
+        in_use = db.execute(
+            select(Host.id).where(Host.jump_host_id == host.id).limit(1)
+        ).scalar_one_or_none()
+        if in_use is not None:
+            raise HostValidationError(
+                "cannot unflag — this host is currently used as a jump host by another host"
+            )
+    if is_jumpbox:
+        jump_host_id = None  # jumpboxes connect directly — no chained jumps
     _validate_jump(db, host_id=host.id, jump_host_id=jump_host_id)
     host.name = name
     host.hostname = hostname
@@ -147,6 +185,7 @@ def update_host(
     host.description = description or None
     host.credential_id = credential_id
     host.jump_host_id = jump_host_id
+    host.is_jumpbox = is_jumpbox
     db.query(HostTag).filter(HostTag.host_id == host.id).delete()
     for tag_name in _normalize_tags(tags_csv):
         tag = get_or_create_tag(db, tag_name)
@@ -156,7 +195,6 @@ def update_host(
 
 
 def delete_host(db: Session, host: Host) -> None:
-    db.query(HostTag).filter(HostTag.host_id == host.id).delete()
     db.delete(host)
     db.flush()
 

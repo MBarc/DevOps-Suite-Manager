@@ -28,6 +28,7 @@ changelog; this is the one-line summary.
 | 9     | `f44c65f`    | Jump-host chains + credential profiles UI + WAL + idempotent migrations. |
 | 10    | `1e60b94`    | Settings page + DevOps CLI catalog (15 tools, toggle into Terminals). |
 | 11    | `21e35ae`    | Pipeline runner core + GitHub Actions adapter + `run_pipeline` agent action. |
+| 12+13 | pending      | Monitoring integrations (Dynatrace / Datadog / ServiceNow adapters, host-check page, fleet coverage matrix, 60s cache) + Certificate inventory (Windows cert stores + Linux PEM/DER walk, expiry coloring, 5-min cache). |
 
 ## Open backlog (recommended order)
 
@@ -39,10 +40,49 @@ changelog; this is the one-line summary.
 | 11d | Octopus Deploy adapter | REST API + API key. |
 | 11e | Ansible/AWX adapter | AWX REST. |
 | 11f | Terraform Cloud adapter | TFC REST + workspace runs. |
-| 13 | Certificate inventory | Cross-platform: `cryptography` + `pywin32` for Windows cert stores; PEM/DER walk for Linux dirs. Color-code by `expires_warn_days` / `expires_critical_days` (configurable). |
+| ~~12~~ | ~~Monitoring integrations~~ | Shipped — see phase log above. |
+| ~~12b~~ | ~~Dynatrace adapter~~ | Shipped — see phase log above. |
+| ~~12c~~ | ~~Datadog adapter~~ | Shipped — see phase log above. |
+| ~~12d~~ | ~~ServiceNow adapter~~ | Shipped — see phase log above. |
+| ~~13~~ | ~~Certificate inventory~~ | Shipped — see phase log above. |
 | 14 | Organization graph | Departments + AD sync (`ldap3`). List view + tree view (D3). Description text feeds the docs index so the agent can answer "who do I talk to about X". |
 | 15 | Documentation vault & importer | Extends `docs_index/` with PDF/Word→markdown import (mammoth for Word, pypdf for PDF), in-UI markdown editor, per-application taxonomy. |
 | 8d | Session recordings browser | Last because it's most useful once there's actually history to browse — the user explicitly asked for this to be near the end. |
+
+## Design notes
+
+### Phase 12 — Monitoring integrations
+
+A new **Monitoring** section in the sidebar (between Pipelines and Settings).
+The core idea is a read-only health dashboard: pull current alert/incident
+state from whichever tools the operator has configured, surface it in one
+place, and let the agent answer questions about it.
+
+**Adapter contract** — same plug-in shape as pipeline adapters:
+- `MonitoringAdapter` ABC in `dosm/monitoring/adapters/base.py`
+- Required method: `fetch_alerts() -> list[Alert]`
+- `Alert` is a dataclass: `id, title, severity, status, source, url, ts`
+- Each adapter reads its config (base URL, token) from the secrets backend
+  so credentials are never stored in plain text
+
+**Adapters planned:**
+- `DynatraceAdapter` — Problems API v2 (`/api/v2/problems`). Auth: `Api-Token` header.
+- `DatadogAdapter` — Monitors API (`/api/v1/monitor`). Auth: `DD-API-KEY` + `DD-APPLICATION-KEY` headers.
+- `ServiceNowAdapter` — Incidents table API (`/api/now/table/incident`). Auth: basic or OAuth bearer.
+
+**UI:**
+- Dashboard tab: severity-banded alert list across all enabled sources, auto-refresh every 60 s
+- Per-source config tab: enable/disable toggle, base URL, API key fields (stored via secrets backend)
+- Alert detail side-panel with a link out to the native tool
+
+**Agent integration:**
+- Expose a `query_monitoring` action so the agent can answer "are there any
+  P1 alerts right now?" by calling `fetch_alerts()` across enabled adapters
+- Result is read-only; no write actions to monitoring tools (out of scope)
+
+**Dependencies to add:** `httpx` is already present. No new deps needed for
+Dynatrace or Datadog. ServiceNow OAuth may need `authlib` if basic auth
+isn't sufficient in the target environment.
 
 ## Design decisions worth preserving
 

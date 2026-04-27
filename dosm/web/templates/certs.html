@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Certificates — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Certificate Inventory</h1>
+    <div class="subtitle">
+      Warn at {{ warn_days }} days &middot; Critical at {{ critical_days }} days
+    </div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/certs/scan">
+      <button type="submit" class="btn">Rescan</button>
+    </form>
+  </div>
+</header>
+
+{% if error %}
+<div class="card" style="border-left:3px solid var(--danger); margin-bottom:16px">
+  <strong style="color:var(--danger)">Scan error:</strong>
+  <code style="margin-left:8px">{{ error }}</code>
+</div>
+{% endif %}
+
+<div class="stat-grid" style="margin-bottom:24px">
+  <div class="stat">
+    <div class="label">Total</div>
+    <div class="value">{{ total }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Expired</div>
+    <div class="value" style="color:var(--danger)">{{ expired }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Critical (&le;{{ critical_days }}d)</div>
+    <div class="value" style="color:#f97316">{{ critical }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Warning (&le;{{ warn_days }}d)</div>
+    <div class="value" style="color:#eab308">{{ warn }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">OK</div>
+    <div class="value" style="color:var(--success, #22c55e)">{{ ok }}</div>
+  </div>
+</div>
+
+<section class="card" style="padding:0; overflow:hidden">
+  {% if certs %}
+  <div style="overflow-x:auto">
+    <table style="width:100%; border-collapse:collapse; font-size:13px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--divider); text-align:left">
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Status</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Subject</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Issuer</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Expires</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Days</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cert in certs %}
+        {% if cert.status == 'expired' %}
+          {% set row_bg = 'rgba(239,68,68,0.06)' %}
+          {% set badge_color = '#ef4444' %}
+          {% set days_color = '#ef4444' %}
+        {% elif cert.status == 'critical' %}
+          {% set row_bg = 'rgba(249,115,22,0.06)' %}
+          {% set badge_color = '#f97316' %}
+          {% set days_color = '#f97316' %}
+        {% elif cert.status == 'warn' %}
+          {% set row_bg = 'rgba(234,179,8,0.06)' %}
+          {% set badge_color = '#ca8a04' %}
+          {% set days_color = '#ca8a04' %}
+        {% else %}
+          {% set row_bg = 'transparent' %}
+          {% set badge_color = '#16a34a' %}
+          {% set days_color = 'var(--fg-muted)' %}
+        {% endif %}
+        <tr style="border-top:1px solid var(--divider); background:{{ row_bg }}; cursor:pointer" onclick="window.location='/certs/{{ cert.thumbprint }}'">
+          <td style="padding:10px 16px">
+            <span style="display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; text-transform:uppercase; background:{{ badge_color }}22; color:{{ badge_color }}">
+              {{ cert.status }}
+            </span>
+          </td>
+          <td style="padding:10px 16px; max-width:240px">
+            <span title="{{ cert.subject }}" style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500">
+              {{ cert.subject_cn }}
+            </span>
+          </td>
+          <td style="padding:10px 16px; max-width:200px; color:var(--fg-muted)">
+            <span title="{{ cert.issuer }}" style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+              {{ cert.issuer_cn }}
+            </span>
+          </td>
+          <td style="padding:10px 16px; white-space:nowrap; color:var(--fg-muted)">
+            {{ cert.not_after.strftime('%Y-%m-%d') }}
+          </td>
+          <td style="padding:10px 16px; font-weight:600; color:{{ days_color }}; white-space:nowrap">
+            {% if cert.days_remaining < 0 %}
+              {{ cert.days_remaining|abs }}d ago
+            {% else %}
+              {{ cert.days_remaining }}d
+            {% endif %}
+          </td>
+          <td style="padding:10px 16px; max-width:260px; color:var(--fg-muted)">
+            <span title="{{ cert.source }}" style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-family:monospace">
+              {{ cert.source }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state" style="padding:48px 24px">
+    {% if not error %}
+    No certificates found. Add paths to scan in <code>config.yaml</code> under <code>certs.scan_paths</code>.
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -36,6 +36,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l3 4h9"/><path d="M3 17h6l3-4"/><circle cx="3" cy="7" r="1.5"/><circle cx="3" cy="17" r="1.5"/><circle cx="21" cy="11" r="1.5"/></svg>
         Pipelines
       </a>
+      <a href="/monitoring" class="{% if path.startswith('/monitoring') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 8-6-16-3 8H2"/></svg>
+        Monitoring
+      </a>
+      <a href="/certs" class="{% if path.startswith('/certs') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M9 12v8l3-2 3 2v-8"/></svg>
+        Certificates
+      </a>
       {% if request.app.state.config.terminals.enabled %}
       <a href="/terminals" class="{% if path.startswith('/terminals') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
