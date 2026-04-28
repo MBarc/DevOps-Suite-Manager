@@ -13,6 +13,7 @@ multiplexed channels, not N reauths.
 from __future__ import annotations
 
 import asyncio
+import secrets
 import threading
 import time
 from dataclasses import dataclass, field
@@ -25,6 +26,24 @@ from dosm.jumps.connections import HopCreds, _connect_kwargs, build_jump_chain
 from dosm.models import Host
 
 IDLE_CLOSE_AFTER_SECONDS = 300.0  # tear down a jump SSH conn after 5min idle
+GC_INTERVAL_SECONDS = 60.0
+PROBE_TIMEOUT_SECONDS = 5.0
+
+
+class JumpUnreachableError(Exception):
+    """Could not open a network connection to a jump host."""
+
+
+class JumpAuthError(Exception):
+    """Connected to a jump host but authentication was rejected."""
+
+
+class TargetUnreachableError(Exception):
+    """Jump host cannot forward connections to the target."""
+
+
+class TargetAuthError(Exception):
+    """Reached the target but credentials were rejected."""
 
 
 def _chain_signature(jump_hops: list[HopCreds]) -> tuple[int, ...]:
@@ -75,6 +94,10 @@ class JumpTunnelManager:
         self._lock = asyncio.Lock()
         # key: chain_sig
         self._jumps: dict[tuple[int, ...], _JumpEntry] = {}
+        # Browser-session registry: maps an opaque session id to the lease
+        # held for that connect call. Released on explicit disconnect (e.g.
+        # tab close → pagehide beacon) or by the TTL backstop task.
+        self._sessions: dict[str, TunnelLease] = {}
 
     async def acquire(
         self,
@@ -133,7 +156,18 @@ class JumpTunnelManager:
 
         prev = None
         for hop in jump_hops:
-            prev = await asyncssh.connect(**_connect_kwargs(hop, tunnel=prev))
+            try:
+                prev = await asyncssh.connect(**_connect_kwargs(hop, tunnel=prev))
+            except asyncssh.PermissionDenied as e:
+                raise JumpAuthError(
+                    f"authentication failed at jump host {hop.name!r} "
+                    f"(user {hop.username!r}) — check the credential profile"
+                ) from e
+            except Exception as e:
+                raise JumpUnreachableError(
+                    f"cannot connect to jump host {hop.name!r} "
+                    f"({hop.hostname}:{hop.port}): {e}"
+                ) from e
         return prev
 
     async def _release(self, key: tuple[tuple[int, ...], str, int]) -> None:
@@ -153,6 +187,52 @@ class JumpTunnelManager:
                     pass
                 entry.forwards.pop((target_host, target_port), None)
             entry.last_active = time.monotonic()
+
+    async def register_session(self, lease: TunnelLease, ttl_seconds: int) -> str:
+        """Track ``lease`` under a fresh session id; schedule a TTL backstop.
+
+        The browser holds the id and pings ``release_session`` on tab close
+        (pagehide beacon). The backstop guarantees release if the browser
+        signal never arrives — kill, network drop, mobile Safari quirk.
+        """
+        sid = secrets.token_urlsafe(16)
+        async with self._lock:
+            self._sessions[sid] = lease
+        asyncio.create_task(self._auto_release(sid, ttl_seconds))
+        return sid
+
+    async def release_session(self, sid: str) -> bool:
+        """Release the lease registered under ``sid``. Idempotent."""
+        async with self._lock:
+            lease = self._sessions.pop(sid, None)
+        if lease is None:
+            return False
+        try:
+            await lease.release()
+        except Exception:
+            pass
+        return True
+
+    async def _auto_release(self, sid: str, ttl_seconds: int) -> None:
+        try:
+            await asyncio.sleep(ttl_seconds)
+        except asyncio.CancelledError:
+            return
+        await self.release_session(sid)
+
+    def stats(self) -> dict:
+        """Return a snapshot of pool size for health/diagnostics views.
+
+        Reads private state directly — synchronous and approximate; a
+        concurrent acquire/release may shift the numbers by one. That's
+        fine for a status display.
+        """
+        jumps = list(self._jumps.values())
+        return {
+            "open_jump_connections": len(jumps),
+            "open_forwards": sum(len(e.forwards) for e in jumps),
+            "active_sessions": len(self._sessions),
+        }
 
     async def gc(self) -> int:
         """Close jump connections that have no forwards and have been idle for
@@ -185,3 +265,117 @@ def get_tunnel_manager() -> JumpTunnelManager:
         if _manager is None:
             _manager = JumpTunnelManager()
         return _manager
+
+
+async def probe_forward(
+    lease: TunnelLease, *, timeout: float = PROBE_TIMEOUT_SECONDS
+) -> None:
+    """Open a TCP connection through the tunnel to verify the target is reachable.
+
+    Connects to the local listener that asyncssh is forwarding to the target.
+    If the target refuses or is silent, raises ``TargetUnreachableError`` with
+    a human-readable message before Guacamole ever attempts its session.
+    """
+    # Listener is on bind_host (often 0.0.0.0); probe via loopback.
+    probe_addr = (
+        "127.0.0.1"
+        if lease.bind_host in ("0.0.0.0", "")
+        else lease.bind_host
+    )
+    writer = None
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(probe_addr, lease.bind_port),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        raise TargetUnreachableError(
+            f"jump box cannot reach {lease.target_host}:{lease.target_port} "
+            f"— connection timed out (host unreachable or port filtered)"
+        )
+    except OSError as e:
+        raise TargetUnreachableError(
+            f"jump box cannot reach {lease.target_host}:{lease.target_port} "
+            f"— {e}"
+        )
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+
+async def verify_ssh_credentials(
+    *,
+    bind_port: int,
+    bind_host: str = "0.0.0.0",
+    username: str | None,
+    password: str | None,
+    private_key: str | None,
+    target_host: str,
+    target_port: int,
+    timeout: float = 10.0,
+) -> None:
+    """Attempt SSH auth to the target through an established tunnel.
+
+    Skipped when no auth material is present (guacd will prompt the user).
+    Raises ``TargetAuthError`` if the server rejects the credentials.
+    Raises ``TargetUnreachableError`` if the handshake fails for other reasons.
+    """
+    if not password and not private_key:
+        return
+
+    import asyncssh  # type: ignore
+
+    connect_host = "127.0.0.1" if bind_host in ("0.0.0.0", "") else bind_host
+    kwargs: dict = {
+        "host": connect_host,
+        "port": bind_port,
+        "username": username or "root",
+        "known_hosts": None,
+    }
+    if private_key:
+        kwargs["client_keys"] = [asyncssh.import_private_key(private_key)]
+    elif password:
+        kwargs["password"] = password
+
+    conn = None
+    try:
+        conn = await asyncio.wait_for(asyncssh.connect(**kwargs), timeout=timeout)
+    except asyncssh.PermissionDenied as e:
+        raise TargetAuthError(
+            f"target {target_host}:{target_port} rejected credentials "
+            f"for user {username!r} — check the credential profile"
+        ) from e
+    except asyncio.TimeoutError:
+        raise TargetUnreachableError(
+            f"target {target_host}:{target_port} timed out during SSH handshake"
+        )
+    except (TargetUnreachableError, TargetAuthError):
+        raise
+    except Exception as e:
+        raise TargetUnreachableError(
+            f"SSH handshake with target {target_host}:{target_port} failed: {e}"
+        ) from e
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+async def gc_loop(interval: float = GC_INTERVAL_SECONDS) -> None:
+    """Periodically reap idle jump connections. Started from app startup."""
+    manager = get_tunnel_manager()
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            await manager.gc()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            # Reaper must never die from a transient error — keep ticking.
+            continue

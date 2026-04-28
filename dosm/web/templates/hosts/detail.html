@@ -54,6 +54,48 @@
 </section>
 
 <section class="card">
+  <h2>Reachability</h2>
+  <div class="row">
+    <button id="ping-btn" class="btn" type="button">Ping</button>
+    <span id="ping-result" class="muted" style="font-size:13px; align-self:center">
+      TCP probe to <code>{{ host.hostname }}:{{ host.port }}</code>{% if jump_chain %} via {{ jump_chain|length }} jump host{{ '' if jump_chain|length == 1 else 's' }}{% endif %}.
+    </span>
+  </div>
+</section>
+<script>
+(function () {
+  const btn = document.getElementById('ping-btn');
+  const out = document.getElementById('ping-result');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    out.textContent = 'Pinging…';
+    out.className = 'muted';
+    out.style.fontSize = '13px';
+    out.style.color = '';
+    try {
+      const res = await fetch('/hosts/{{ host.id }}/ping', {method: 'POST'});
+      const d = await res.json();
+      const latency = d.latency_ms === null ? '' : ` (${d.latency_ms} ms)`;
+      out.textContent = `${d.ok ? '✓' : '✗'} ${d.message}${latency}`;
+      if (d.ok) {
+        out.className = '';
+        out.style.color = 'var(--success)';
+      } else {
+        out.className = 'error';
+        out.style.color = '';
+      }
+    } catch (e) {
+      out.textContent = `✗ request failed: ${e}`;
+      out.className = 'error';
+      out.style.color = '';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+
+<section class="card">
   <h2>Remote access</h2>
   {% if request.app.state.config.guacamole.enabled %}
     <div class="row">

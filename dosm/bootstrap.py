@@ -77,15 +77,14 @@ DEFAULT_CONFIG: dict = {
             "systemctl status *",
         ],
     },
-    "enabled_modules": ["system_info"],
 }
 
 SUBDIRS = [
     "config",
     "docs",
     "docs/drafts",
+    "docs/_unfiled",   # default landing dir for vault docs with no application
     "scripts",
-    "modules",
     "resources",
     "data",
     "data/index",
@@ -102,7 +101,6 @@ This directory is the root that the DevOps Operations Suite Manager reads from.
 
 - `docs/`       Markdown, text, and PDF documentation. Indexed into the LLM.
 - `scripts/`    Executable scripts the agent can propose to run (with approval).
-- `modules/`    Installed integration modules (Service Fabric, Dynatrace, etc.).
 - `resources/`  Any other files you want alongside your ops workspace.
 - `data/`       Application state: SQLite DB, vector index, action log.
 - `logs/`       App logs.

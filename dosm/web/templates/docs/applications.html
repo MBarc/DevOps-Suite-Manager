@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Folders — DOSM Docs{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Folders</h1>
+    <div class="subtitle">Taxonomy labels for grouping documentation</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/docs">All docs</a>
+  </div>
+</header>
+
+<section class="card">
+  <h2>Create folder</h2>
+  {% if error %}
+  <div class="error" style="margin-bottom: var(--sp-3)">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="/docs/folders" style="display:flex; gap: var(--sp-2); align-items: end">
+    <label class="field" style="flex:1">
+      Name
+      <input type="text" name="name" required placeholder="Service Fabric">
+    </label>
+    <div><button type="submit">Create</button></div>
+  </form>
+</section>
+
+{% if folders %}
+<section class="card">
+  <h2>Folders</h2>
+  <table class="data">
+    <thead><tr><th>Name</th><th>Slug</th><th>Description</th><th>Docs</th><th></th></tr></thead>
+    <tbody>
+    {% for f in folders %}
+    <tr>
+      <td><a href="/docs/folders/{{ f.slug }}"><strong>{{ f.name }}</strong></a></td>
+      <td><code>{{ f.slug }}</code></td>
+      <td class="muted">{{ f.description or "" }}</td>
+      <td class="muted">{{ counts.get(f.id, 0) }}</td>
+      <td>
+        <form method="post" action="/docs/folders/{{ f.slug }}/delete" class="inline"
+              onsubmit="return confirm('Delete folder {{ f.name|e }}? Docs will become unfiled.')">
+          <button type="submit" class="btn btn-ghost btn-sm" style="color: var(--red, #ef4444)">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<section class="card">
+  <div class="empty-state">No folders yet. Create one above.</div>
+</section>
+{% endif %}
+
+{% endblock %}

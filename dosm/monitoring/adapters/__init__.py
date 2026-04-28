@@ -3,12 +3,14 @@ from __future__ import annotations
 from dosm.monitoring.adapters.base import HostCheckResult, MonitoringAdapter
 from dosm.monitoring.adapters.datadog import DatadogAdapter
 from dosm.monitoring.adapters.dynatrace import DynatraceAdapter
+from dosm.monitoring.adapters.prometheus import PrometheusAdapter
 from dosm.monitoring.adapters.servicenow import ServiceNowAdapter
 
 TOOL_LABELS = {
     "dynatrace": "Dynatrace",
     "datadog": "Datadog",
     "servicenow": "ServiceNow",
+    "prometheus": "Prometheus",
 }
 
 
@@ -21,6 +23,10 @@ def make_adapter(source, token: str, token2: str) -> MonitoringAdapter | None:
         return ServiceNowAdapter(
             source.id, source.name, source.url, source.username or "", token
         )
+    if source.tool == "prometheus":
+        return PrometheusAdapter(
+            source.id, source.name, source.url, source.username or "", token
+        )
     return None
 
 
@@ -30,6 +36,7 @@ __all__ = [
     "DynatraceAdapter",
     "DatadogAdapter",
     "ServiceNowAdapter",
+    "PrometheusAdapter",
     "TOOL_LABELS",
     "make_adapter",
 ]

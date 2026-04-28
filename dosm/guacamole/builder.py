@@ -76,10 +76,10 @@ def _common_for_vnc(host: Host, params: dict) -> dict:
     return params
 
 
-def _resolve_credential(cfg: Config, cred: Credential | None) -> tuple[str | None, str | None, str | None]:
-    """Return (username, password, ssh_private_key) for the given credential."""
+def _resolve_credential(cfg: Config, cred: Credential | None) -> tuple[str | None, str | None, str | None, str | None]:
+    """Return (username, password, ssh_private_key, domain) for the given credential."""
     if cred is None:
-        return None, None, None
+        return None, None, None, None
     try:
         secret_text = get_backend(cfg).get_str(cred.secret_ref)
     except SecretNotFound as e:
@@ -87,8 +87,9 @@ def _resolve_credential(cfg: Config, cred: Credential | None) -> tuple[str | Non
             f"credential {cred.name!r} secret_ref {cred.secret_ref!r} missing"
         ) from e
     if cred.kind == "ssh_key":
-        return cred.username, None, secret_text
-    return cred.username, secret_text, None
+        return cred.username, None, secret_text, None
+    # login → username + password; pat → token used as password
+    return cred.username, secret_text, None, cred.domain
 
 
 def build_connection(
@@ -96,19 +97,22 @@ def build_connection(
     host: Host,
     *,
     endpoint_override: tuple[str, int] | None = None,
+    gateway_host: Host | None = None,
 ) -> BuiltConnection:
     """Build a Guacamole connection blob for ``host``.
 
-    If ``endpoint_override`` is given (host, port), it replaces the host's
-    real address — used by the jump-tunnel path so Guacamole connects to
-    DOSM's local port forward instead of trying to reach the target directly.
+    ``endpoint_override`` (host, port) replaces the target address — used by
+    the SSH-tunnel path so Guacamole connects to DOSM's local port forward.
+
+    ``gateway_host`` is an RDP jumpbox reached via RD Gateway. When supplied
+    (and target is RDP), the gateway's hostname/port/credentials are added as
+    ``gateway-*`` params and guacd handles the hop directly. This is mutually
+    exclusive with ``endpoint_override``.
     """
     if not host.protocol or host.protocol not in {"ssh", "rdp", "vnc"}:
         raise GuacamoleBuildError(f"unsupported protocol: {host.protocol!r}")
-    username, password, ssh_key = _resolve_credential(cfg, host.credential)
+    username, password, ssh_key, domain = _resolve_credential(cfg, host.credential)
     params: dict = {}
-    # Stash the real address so the per-protocol helpers don't need to know
-    # about the override; we patch hostname/port at the end.
     if host.protocol == "ssh":
         if username:
             params["username"] = username
@@ -122,7 +126,19 @@ def build_connection(
             params["username"] = username
         if password:
             params["password"] = password
+        if domain:
+            params["domain"] = domain
         _common_for_rdp(host, params)
+        if gateway_host is not None:
+            gw_username, gw_password, _, gw_domain = _resolve_credential(cfg, gateway_host.credential)
+            params["gateway-hostname"] = gateway_host.hostname
+            params["gateway-port"] = str(gateway_host.port or 443)
+            if gw_username:
+                params["gateway-username"] = gw_username
+            if gw_password:
+                params["gateway-password"] = gw_password
+            if gw_domain:
+                params["gateway-domain"] = gw_domain
     else:  # vnc
         if password:
             params["password"] = password

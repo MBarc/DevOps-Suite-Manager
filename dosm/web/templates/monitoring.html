@@ -48,7 +48,7 @@
   </div>
   {% elif results %}
     {% set tools_present = results | map(attribute='tool') | list | unique | list %}
-    {% for tool in ['dynatrace', 'datadog', 'servicenow'] %}
+    {% for tool in ['dynatrace', 'datadog', 'servicenow', 'prometheus'] %}
       {% set tool_results = results | selectattr('tool', 'equalto', tool) | list %}
       {% if tool_results %}
       <section class="card" style="margin-bottom:16px">
@@ -89,6 +89,66 @@
               <td style="padding:10px 12px; font-size:12px; color:var(--fg-muted)">
                 {% if r.error %}
                   <span style="color:#f97316" title="{{ r.error }}">{{ r.error[:80] }}{% if r.error|length > 80 %}…{% endif %}</span>
+                {% elif r.tool == 'servicenow' and r.found %}
+                  {% set extra = r.extra %}
+                  {# Monitoring disabled banner #}
+                  {% if not extra.monitor_enabled %}
+                  <div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:4px; padding:4px 8px; margin-bottom:8px; color:#92400e; font-weight:600; font-size:11px; display:inline-block">
+                    &#9888; Monitoring is administratively disabled on this CI
+                  </div>
+                  {% endif %}
+                  {# Discovery info #}
+                  {% if extra.last_discovered %}
+                  <div style="margin-bottom:6px">
+                    <strong>Last discovered:</strong> {{ extra.last_discovered }}{% if extra.discovery_source %} via {{ extra.discovery_source }}{% endif %}
+                  </div>
+                  {% endif %}
+                  {# Monitoring relationships #}
+                  {% set rels = extra.monitoring_relationships or [] %}
+                  <div style="margin-bottom:6px">
+                    <strong>Configured monitoring ({{ rels | length }}):</strong>
+                    {% if rels %}
+                    <ul style="margin:4px 0 0 0; padding-left:16px">
+                      {% for rel in rels %}
+                      <li>{{ rel.name }}{% if rel.rel_type %} <span style="color:var(--fg-muted)">— {{ rel.rel_type }}</span>{% endif %}</li>
+                      {% endfor %}
+                    </ul>
+                    {% else %}
+                    <span style="color:var(--fg-muted)"> No monitoring relationships configured.</span>
+                    {% endif %}
+                  </div>
+                  {# Metric collection #}
+                  {% set mc_status = extra.metric_collection_status %}
+                  <div style="margin-bottom:6px">
+                    <strong>Metric collection:</strong>
+                    {% if mc_status == 'unavailable' %}
+                    <span style="color:var(--fg-muted)"> Not available (ITOM Visibility not configured).</span>
+                    {% elif mc_status == 'empty' %}
+                    <span style="color:var(--fg-muted)"> No metrics collected.</span>
+                    {% else %}
+                    {{ extra.metric_collection | join(', ') }}
+                    {% endif %}
+                  </div>
+                  {# Thresholds note #}
+                  <div style="margin-bottom:6px; font-style:italic; font-size:11px">
+                    {{ extra.thresholds_note }}
+                  </div>
+                  {# Additional CMDB matches #}
+                  {% set add_matches = extra.additional_matches or [] %}
+                  {% if add_matches %}
+                  <div>
+                    <strong>Additional CMDB matches ({{ add_matches | length }}):</strong>
+                    <ul style="margin:4px 0 0 0; padding-left:16px">
+                      {% for m in add_matches %}
+                      <li>
+                        <a href="{{ m.url }}" target="_blank" rel="noopener" style="color:var(--accent)">{{ m.name }}</a>
+                        {% if m.class %}<span style="color:var(--fg-muted)"> — {{ m.class }}</span>{% endif %}
+                        {% if m.fqdn %}<span style="color:var(--fg-muted)"> ({{ m.fqdn }})</span>{% endif %}
+                      </li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                  {% endif %}
                 {% elif r.extra %}
                   {% for k, v in r.extra.items() %}
                     {% if v is not none %}<span style="margin-right:8px"><strong>{{ k }}:</strong> {{ v }}</span>{% endif %}

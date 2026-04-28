@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -149,14 +149,14 @@ async def trigger_pipeline(
     except (PipelineProviderError, PipelineUnreachable) as e:
         run.status = "failed"
         run.error = str(e)
-        run.completed_at = datetime.utcnow()
+        run.completed_at = datetime.now(timezone.utc)
         db.flush()
         return run
 
     run.external_id = result.external_id
     run.status = result.status
     run.html_url = result.html_url
-    run.last_polled_at = datetime.utcnow()
+    run.last_polled_at = datetime.now(timezone.utc)
     db.flush()
     return run
 
@@ -180,12 +180,12 @@ async def refresh_run(cfg: Config, db: Session, run: PipelineRun) -> PipelineRun
         )
     except (PipelineProviderError, PipelineUnreachable) as e:
         run.error = str(e)
-        run.last_polled_at = datetime.utcnow()
+        run.last_polled_at = datetime.now(timezone.utc)
         db.flush()
         return run
 
     run.status = result.status
-    run.last_polled_at = datetime.utcnow()
+    run.last_polled_at = datetime.now(timezone.utc)
     if result.started_at and not run.started_at:
         run.started_at = result.started_at
     if result.completed_at and run.status in ("success", "failed", "cancelled", "skipped"):

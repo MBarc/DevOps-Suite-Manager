@@ -1,63 +1,333 @@
 {% extends "base.html" %}
 {% block title %}Docs — DOSM{% endblock %}
+{% block head_extra %}
+<style>
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+  min-height: 60px;
+}
+.folder-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-4) var(--sp-3);
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--fg);
+  transition: border-color .15s, box-shadow .15s;
+  cursor: pointer;
+  text-align: center;
+}
+.folder-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.folder-card svg { color: var(--accent); opacity: .85; }
+.folder-name { font-weight: 600; font-size: .9rem; word-break: break-word; line-height: 1.3; }
+.folder-count { font-size: .8rem; color: var(--fg-muted); }
+.folder-card-creating { cursor: default; border-color: var(--accent); }
+.folder-card-creating:hover { box-shadow: none; }
+.search-wrap { position: relative; display: flex; flex: 1; }
+.search-wrap input { flex: 1; }
+.search-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: #422006;
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  padding: .35em .8em;
+  font-size: .82rem;
+  color: #fde68a;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 50;
+}
+.search-tooltip.show { opacity: 1; }
+.folder-name-input {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: .15em .4em;
+  font-size: .88rem;
+  font-weight: 600;
+  text-align: center;
+  width: 100%;
+  color: var(--fg);
+  outline: none;
+  box-sizing: border-box;
+}
+/* Context menu */
+.ctx-menu {
+  position: fixed;
+  z-index: 9000;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  padding: .3em 0;
+  min-width: 170px;
+  font-size: .87rem;
+  display: none;
+}
+.ctx-item {
+  display: block;
+  width: 100%;
+  padding: .45em 1.1em;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ctx-item:hover { background: var(--accent); color: #fff; }
+.ctx-item-danger { color: var(--red, #ef4444); }
+.ctx-divider { height: 1px; background: var(--border); margin: .3em 0; }
+</style>
+{% endblock %}
 {% block content %}
 <header class="page-header">
   <div>
     <h1>Documentation</h1>
-    <div class="subtitle">Indexed from <code>{{ request.app.state.config.docs_dir }}</code> · embedder <code>{{ status.embedder_name }}</code></div>
+    <div class="subtitle">Indexed from <code>{{ request.app.state.config.docs_dir }}</code></div>
   </div>
   <div class="actions">
-    <form method="post" action="/docs/reindex" class="inline">
-      <button class="btn btn-ghost btn-sm" type="submit" name="force" value="0">Reindex changed</button>
-      <button class="btn btn-sm" type="submit" name="force" value="1">Reindex all</button>
+    <a class="btn btn-ghost btn-sm" href="/docs/new">New doc</a>
+    <a class="btn btn-ghost btn-sm" href="/docs/import">Import</a>
+<form method="post" action="/docs/reindex" class="inline">
+      <button class="btn btn-ghost btn-sm" type="submit" name="force" value="0">Reindex</button>
     </form>
   </div>
 </header>
 
 <section class="card">
-  <form method="get" action="/docs/search" class="search-field">
-    <input type="search" name="q" placeholder="Search your runbooks, playbooks, reference docs…" autofocus />
-    <span class="kbd-hint"><span class="kbd">/</span></span>
-  </form>
-
-  <div class="status-row" style="margin-top: var(--sp-3)">
-    {% if status.running %}
-      <span class="badge badge-blue"><span class="dot info"></span> Indexing {{ status.processed }} / {{ status.total_files }}</span>
-    {% else %}
-      <span class="muted" style="font-size:12.5px">
-        {{ status.indexed }} indexed · {{ status.skipped_unchanged }} unchanged · {{ status.errors }} errors
-        {% if status.finished_at %} · last run {{ status.finished_at.isoformat(timespec='seconds') }}{% endif %}
-      </span>
-    {% endif %}
+  <input type="text" id="docs-search-input" placeholder="Search documentation…" autofocus autocomplete="off" style="width:100%; box-sizing:border-box" />
+  {% if status.running %}
+  <div style="margin-top: var(--sp-2)">
+    <span class="badge badge-blue"><span class="dot info"></span> Indexing {{ status.processed }} / {{ status.total_files }}</span>
   </div>
+  {% endif %}
 </section>
 
+<section class="card" id="docs-explorer">
+  <h2 style="margin-bottom:0">Folders</h2>
+  <div class="folder-grid" id="folder-grid">
+    {% for f in folders %}
+    <a href="/docs/folders/{{ f.slug }}" class="folder-card" data-slug="{{ f.slug }}" data-name="{{ f.name|e }}">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+      </svg>
+      <span class="folder-name">{{ f.name }}</span>
+      <span class="folder-count">{{ counts.get(f.id, 0) }} doc{{ 's' if counts.get(f.id, 0) != 1 else '' }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% if not folders %}
+  <p class="muted" style="font-size:.88rem; margin-top: var(--sp-2)">No folders yet. Right-click to create one.</p>
+  {% endif %}
+</section>
+
+{% if unfiled %}
 <section class="card">
-  <h2>Documents</h2>
-  {% if docs %}
+  <h2>Unfiled</h2>
   <table class="data">
-    <thead><tr><th>Path</th><th>Title</th><th>Chunks</th><th>Status</th><th>Indexed</th></tr></thead>
+    <thead><tr><th>Path</th><th>Title</th><th>Status</th><th>Indexed</th></tr></thead>
     <tbody>
-    {% for d in docs %}
-      <tr>
-        <td><a href="/docs/view?path={{ d.rel_path|urlencode }}"><code>{{ d.rel_path }}</code></a></td>
-        <td>{{ d.title or "" }}</td>
-        <td class="muted">{{ d.chunk_count }}</td>
-        <td>
-          {% if d.status == 'indexed' %}<span class="badge badge-green"><span class="dot ok"></span> indexed</span>
-          {% elif d.status == 'error' %}<span class="badge badge-red" title="{{ d.error }}"><span class="dot err"></span> error</span>
-          {% else %}<span class="badge badge-gray"><span class="dot"></span> {{ d.status }}</span>{% endif %}
-        </td>
-        <td class="muted" style="font-size:12.5px">{{ d.indexed_at.isoformat(timespec='seconds') if d.indexed_at else "—" }}</td>
-      </tr>
+    {% for d in unfiled %}
+    <tr>
+      <td><a href="/docs/view?path={{ d.rel_path|urlencode }}"><code>{{ d.rel_path }}</code></a></td>
+      <td>{{ d.title or "" }}</td>
+      <td>
+        {% if d.status == 'indexed' %}<span class="badge badge-green"><span class="dot ok"></span> indexed</span>
+        {% elif d.status == 'error' %}<span class="badge badge-red" title="{{ d.error }}"><span class="dot err"></span> error</span>
+        {% else %}<span class="badge badge-gray"><span class="dot"></span> {{ d.status }}</span>{% endif %}
+      </td>
+      <td class="muted" style="font-size:12.5px">{{ d.indexed_at.isoformat(timespec='seconds') if d.indexed_at else "—" }}</td>
+    </tr>
     {% endfor %}
     </tbody>
   </table>
-  {% else %}
-    <div class="empty-state">
-      No documents yet. Drop markdown, text, or PDF files into
-      <code>{{ request.app.state.config.docs_dir }}</code> and click <strong>Reindex all</strong>.
-    </div>
-  {% endif %}
 </section>
+{% elif not folders %}
+<section class="card">
+  <div class="empty-state">
+    No documents yet. <a href="/docs/new">Create one</a>, <a href="/docs/import">import a file</a>,
+    or drop markdown/PDF files into <code>{{ request.app.state.config.docs_dir }}</code> and click <strong>Reindex</strong>.
+  </div>
+</section>
+{% endif %}
+
+<!-- Context menu -->
+<div class="ctx-menu" id="ctx-menu">
+  <div id="ctx-bg">
+    <button class="ctx-item" id="ctx-new-folder">New folder</button>
+    <button class="ctx-item" id="ctx-new-doc">New document</button>
+  </div>
+  <div id="ctx-folder" style="display:none">
+    <button class="ctx-item" id="ctx-open">Open</button>
+    <button class="ctx-item" id="ctx-new-in-folder">New document here</button>
+    <div class="ctx-divider"></div>
+    <button class="ctx-item ctx-item-danger" id="ctx-delete">Delete folder</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const menu = document.getElementById('ctx-menu');
+  const bgGroup = document.getElementById('ctx-bg');
+  const folderGroup = document.getElementById('ctx-folder');
+  const explorer = document.getElementById('docs-explorer');
+  const grid = document.getElementById('folder-grid');
+  let activeFolder = null;
+
+  function showMenu(x, y, type) {
+    bgGroup.style.display = type === 'bg' ? '' : 'none';
+    folderGroup.style.display = type === 'folder' ? '' : 'none';
+    menu.style.display = 'block';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    requestAnimationFrame(() => {
+      const r = menu.getBoundingClientRect();
+      if (r.right > window.innerWidth) menu.style.left = (x - r.width) + 'px';
+      if (r.bottom > window.innerHeight) menu.style.top = (y - r.height) + 'px';
+    });
+  }
+
+  function hideMenu() { menu.style.display = 'none'; activeFolder = null; }
+
+  document.addEventListener('click', hideMenu);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); });
+
+  document.addEventListener('contextmenu', function (e) {
+    const card = e.target.closest('.folder-card[data-slug]');
+    if (card) {
+      e.preventDefault();
+      activeFolder = { slug: card.dataset.slug, name: card.dataset.name, el: card };
+      showMenu(e.clientX, e.clientY, 'folder');
+      return;
+    }
+    if (e.target.closest('#docs-explorer')) {
+      e.preventDefault();
+      showMenu(e.clientX, e.clientY, 'bg');
+    }
+  });
+
+  // Background menu actions
+  document.getElementById('ctx-new-folder').addEventListener('click', function () {
+    hideMenu();
+    spawnNewFolderCard();
+  });
+  document.getElementById('ctx-new-doc').addEventListener('click', function () {
+    window.location.href = '/docs/new';
+  });
+
+  // Folder menu actions
+  document.getElementById('ctx-open').addEventListener('click', function () {
+    if (activeFolder) window.location.href = '/docs/folders/' + activeFolder.slug;
+  });
+  document.getElementById('ctx-new-in-folder').addEventListener('click', function () {
+    if (activeFolder) window.location.href = '/docs/new?app=' + activeFolder.slug;
+  });
+  document.getElementById('ctx-delete').addEventListener('click', function () {
+    if (!activeFolder) return;
+    if (!confirm('Delete folder "' + activeFolder.name + '"? Docs will become unfiled.')) return;
+    const f = document.createElement('form');
+    f.method = 'POST';
+    f.action = '/docs/folders/' + activeFolder.slug + '/delete';
+    document.body.appendChild(f);
+    f.submit();
+  });
+
+  // Inline new-folder card (Windows Explorer style)
+  function spawnNewFolderCard() {
+    const card = document.createElement('div');
+    card.className = 'folder-card folder-card-creating';
+    card.innerHTML = `
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+      </svg>
+      <input type="text" class="folder-name-input" placeholder="New folder" autocomplete="off">
+    `;
+    grid.appendChild(card);
+    const input = card.querySelector('.folder-name-input');
+    input.focus();
+    input.select();
+
+    let done = false;
+
+    async function submit() {
+      if (done) return;
+      const name = input.value.trim();
+      if (!name) { card.remove(); return; }
+      done = true;
+      input.disabled = true;
+      const fd = new FormData();
+      fd.append('name', name);
+      try {
+        const resp = await fetch('/docs/folders', { method: 'POST', body: fd, redirect: 'follow' });
+        window.location.href = resp.url || '/docs';
+      } catch {
+        done = false;
+        card.remove();
+      }
+    }
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') { card.remove(); }
+    });
+    // blur → submit after a tick (avoids firing on Escape)
+    input.addEventListener('blur', () => setTimeout(() => { if (!done) submit(); }, 120));
+  }
+})();
+
+// Search input
+(function () {
+  const input = document.getElementById('docs-search-input');
+  if (!input) return;
+  let activeToast = null;
+  let hideTimer = null;
+
+  function showWarning() {
+    if (activeToast) activeToast.remove();
+    const rect = input.getBoundingClientRect();
+    const toast = document.createElement('div');
+    toast.textContent = 'Type something to search';
+    toast.style.cssText = [
+      'position: fixed',
+      'top: ' + (rect.bottom + 6) + 'px',
+      'left: ' + rect.left + 'px',
+      'background: #422006',
+      'border: 1px solid #d97706',
+      'color: #fde68a',
+      'padding: 6px 12px',
+      'border-radius: 6px',
+      'font-size: 13px',
+      'z-index: 99999',
+      'box-shadow: 0 4px 12px rgba(0,0,0,.35)',
+      'pointer-events: none'
+    ].join(';');
+    document.body.appendChild(toast);
+    activeToast = toast;
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { toast.remove(); if (activeToast === toast) activeToast = null; }, 2000);
+  }
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const q = input.value.trim();
+    if (!q) { showWarning(); return; }
+    window.location.href = '/docs/search?q=' + encodeURIComponent(q);
+  });
+})();
+</script>
 {% endblock %}

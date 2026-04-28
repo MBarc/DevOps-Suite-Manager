@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -13,6 +13,7 @@ from dosm.agent.actions import classify_command, get_action
 from dosm.auth.deps import require_user
 from dosm.db import get_session, session_scope
 from dosm.models import AuditLog, ChatMessage, Conversation, Host, PlanCard, User
+from dosm.recording import events as rec_events
 
 router = APIRouter(prefix="/chat")
 
@@ -51,7 +52,18 @@ async def plan_reject(
         raise HTTPException(409, f"plan card is {card.status}")
     card.status = "rejected"
     card.approver_id = user.id
-    card.approved_at = datetime.utcnow()
+    card.approved_at = datetime.now(timezone.utc)
+    try:
+        args_dict = json.loads(card.args)
+    except Exception:
+        args_dict = {}
+    rec_events.record_plan_card_decision(
+        user.id,
+        card.tool,
+        "rejected",
+        args_dict.get("host"),
+        args_dict.get("command"),
+    )
     db.add(
         AuditLog(
             actor_id=user.id,
@@ -83,6 +95,7 @@ async def plan_approve(
         card.status = "failed"
         card.result = json.dumps({"ok": False, "summary": f"unknown tool {card.tool!r}"})
         db.add(AuditLog(actor_id=user.id, action="agent.plan.fail", target=f"plan_card:{card.id}", details="unknown tool"))
+        db.commit()
         return RedirectResponse(f"/chat/{cid}", status_code=303)
 
     # Compute the effective args. Currently only ssh_exec exposes an editable
@@ -112,9 +125,16 @@ async def plan_approve(
     card.effective_args = json.dumps(args)
     card.status = "approved"
     card.approver_id = user.id
-    card.approved_at = datetime.utcnow()
+    card.approved_at = datetime.now(timezone.utc)
     plan_id = card.id
     plan_tool = card.tool
+    rec_events.record_plan_card_decision(
+        user.id,
+        plan_tool,
+        "approved",
+        args.get("host"),
+        args.get("command"),
+    )
     db.add(
         AuditLog(
             actor_id=user.id,
@@ -140,6 +160,7 @@ async def plan_approve(
             stderr=repr(e),
         )
     result_payload = result.to_dict()
+    rec_events.record_plan_card_result(user.id, plan_tool, result.ok, result.summary)
 
     with session_scope() as s2:
         c2 = s2.get(PlanCard, plan_id)
@@ -162,7 +183,7 @@ async def plan_approve(
         )
         c = s2.get(Conversation, cid)
         if c is not None:
-            c.updated_at = datetime.utcnow()
+            c.updated_at = datetime.now(timezone.utc)
         s2.add(
             AuditLog(
                 actor_id=user.id,

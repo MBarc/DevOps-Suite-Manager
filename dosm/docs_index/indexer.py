@@ -16,7 +16,7 @@ from dosm.db import session_scope
 from dosm.docs_index.chunker import Chunk, chunk_text
 from dosm.docs_index.embedder import Embedder, NoEmbedder, make_embedder
 from dosm.docs_index.parsers import ParseError, parse
-from dosm.models import DocChunk, Document
+from dosm.models import DocChunk, Document, Folder
 
 
 @dataclass
@@ -155,12 +155,38 @@ def _index_one(
     mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(tzinfo=None)
     digest = _sha256(path)
 
+    # Read frontmatter metadata for markdown files before opening the DB session,
+    # so the session stays short (no file I/O inside the transaction).
+    app_id: int | None = None
+    fm_title: str | None = None
+    if path.suffix.lower() in {".md", ".markdown"}:
+        try:
+            from dosm.docs_index.vault import parse_frontmatter
+            raw_text = path.read_text(encoding="utf-8", errors="replace")
+            fm, _ = parse_frontmatter(raw_text)
+            fm_title = str(fm["title"])[:255] if fm.get("title") else None
+            _fm_app_slug = fm.get("folder")
+        except Exception:
+            _fm_app_slug = None
+    else:
+        _fm_app_slug = None
+
     with session_scope() as s:
         doc = s.execute(
             select(Document).where(Document.rel_path == rel)
         ).scalar_one_or_none()
         if doc is not None and not force and doc.sha256 == digest and doc.status == "indexed":
             return "unchanged"
+
+        # Resolve folder slug → id inside the session.
+        if _fm_app_slug:
+            folder_row = s.execute(
+                select(Folder).where(Folder.slug == _fm_app_slug)
+            ).scalar_one_or_none()
+            if folder_row is not None:
+                app_id = folder_row.id
+            else:
+                _log(f"unknown folder slug {_fm_app_slug!r} in {rel}")
 
         try:
             text, title = parse(path)
@@ -173,8 +199,10 @@ def _index_one(
             doc.sha256 = digest
             doc.size_bytes = size
             doc.modified_at = mtime
-            doc.indexed_at = datetime.utcnow()
+            doc.indexed_at = datetime.now(timezone.utc)
             doc.chunk_count = 0
+            doc.folder_id = app_id
+            doc.frontmatter_title = fm_title
             s.flush()
             s.execute(delete(DocChunk).where(DocChunk.doc_id == doc.id))
             return "error"
@@ -197,13 +225,14 @@ def _index_one(
                 _log(f"embed failed for {rel}: {e}")
                 vectors = [None] * len(chunks)
 
+        display_title = title or fm_title
         if doc is None:
             doc = Document(
                 rel_path=rel,
                 sha256=digest,
                 size_bytes=size,
                 modified_at=mtime,
-                title=title,
+                title=display_title,
             )
             s.add(doc)
             s.flush()
@@ -211,8 +240,10 @@ def _index_one(
             doc.sha256 = digest
             doc.size_bytes = size
             doc.modified_at = mtime
-            doc.title = title
+            doc.title = display_title
 
+        doc.folder_id = app_id
+        doc.frontmatter_title = fm_title
         s.execute(delete(DocChunk).where(DocChunk.doc_id == doc.id))
         for c, v in zip(chunks, vectors, strict=True):
             s.add(
@@ -228,7 +259,7 @@ def _index_one(
         doc.chunk_count = len(chunks)
         doc.status = "indexed"
         doc.error = None
-        doc.indexed_at = datetime.utcnow()
+        doc.indexed_at = datetime.now(timezone.utc)
     return "indexed"
 
 
@@ -251,7 +282,7 @@ def reindex(cfg: Config, *, force: bool = False) -> IndexStats:
         if _status.running:
             return get_index_status()
         _status.running = True
-        _status.started_at = datetime.utcnow()
+        _status.started_at = datetime.now(timezone.utc)
         _status.finished_at = None
         _status.total_files = 0
         _status.processed = 0
@@ -293,7 +324,7 @@ def reindex(cfg: Config, *, force: bool = False) -> IndexStats:
         if removed:
             _log(f"pruned {removed} deleted files")
     finally:
-        _update(running=False, finished_at=datetime.utcnow())
+        _update(running=False, finished_at=datetime.now(timezone.utc))
     return get_index_status()
 
 

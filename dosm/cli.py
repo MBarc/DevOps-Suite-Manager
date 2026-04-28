@@ -17,7 +17,6 @@ from dosm.db import create_all, init_engine, session_scope
 from dosm.docs_index.indexer import get_index_status, reindex
 from dosm.guacamole.auth_json import KEY_BYTES, load_secret_key
 from dosm.models import Credential, User
-from dosm.modules.loader import discover_modules
 from dosm.secrets import SecretNotFound, get_backend
 
 app = typer.Typer(help="DevOps Operations Suite Manager.", no_args_is_help=True, add_completion=False)
@@ -25,16 +24,18 @@ db_app = typer.Typer(help="Database admin commands.", no_args_is_help=True)
 user_app = typer.Typer(help="Local user management.", no_args_is_help=True)
 secret_app = typer.Typer(help="Manage secrets via the configured backend.", no_args_is_help=True)
 cred_app = typer.Typer(help="Manage credential records (references into the secrets backend).", no_args_is_help=True)
-module_app = typer.Typer(help="Inspect discovered DOSM modules.", no_args_is_help=True)
 docs_app = typer.Typer(help="Documentation index commands.", no_args_is_help=True)
 guac_app = typer.Typer(help="Guacamole integration helpers.", no_args_is_help=True)
+pipelines_app = typer.Typer(help="Pipeline runner commands.", no_args_is_help=True)
+folder_app = typer.Typer(help="Manage doc vault folders (taxonomy).", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
 app.add_typer(cred_app, name="credential")
-app.add_typer(module_app, name="module")
 app.add_typer(docs_app, name="docs")
 app.add_typer(guac_app, name="guacamole")
+app.add_typer(pipelines_app, name="pipelines")
+app.add_typer(folder_app, name="folder")
 
 console = Console()
 
@@ -231,30 +232,77 @@ def credential_list() -> None:
     console.print(table)
 
 
-# ---- module ---------------------------------------------------------------
-
-
-@module_app.command("list")
-def module_list() -> None:
-    """List discovered modules (bundled + user-installed)."""
-    cfg = load_config()
-    discovered = discover_modules(cfg)
-    enabled = set(cfg.enabled_modules)
-    table = Table("Name", "Version", "Source", "Enabled", "OS", "Capabilities", "Description")
-    for d in discovered:
-        table.add_row(
-            d.spec.name,
-            d.spec.version,
-            d.source,
-            "yes" if d.spec.name in enabled else "",
-            ",".join(d.spec.os_constraints) or "any",
-            ",".join(d.spec.capabilities),
-            d.spec.description,
-        )
-    console.print(table)
-
-
 # ---- docs -----------------------------------------------------------------
+
+
+@docs_app.command("new")
+def docs_new(
+    title: str = typer.Argument(..., help="Document title."),
+    app_slug: str = typer.Option("_unfiled", "--app", help="Folder slug."),
+) -> None:
+    """Scaffold a new vault doc and open it in $EDITOR."""
+    import subprocess
+    import sys
+
+    cfg = load_config()
+    init_engine(cfg)
+    from dosm.docs_index.vault import find_unique_slug, save_doc, slugify, UNFILED_SLUG
+
+    slug = find_unique_slug(cfg.docs_dir / app_slug, slugify(title))
+    # Write initial file so the editor has something to open.
+    saved = save_doc(cfg, folder_slug=app_slug, doc_slug=slug, title=title, body_md=f"# {title}\n\n", author="cli")
+    editor = (
+        __import__("os").environ.get("EDITOR")
+        or __import__("os").environ.get("VISUAL")
+        or ("notepad.exe" if sys.platform == "win32" else "vi")
+    )
+    subprocess.call([editor, str(saved)])
+    console.print(f"[green]Saved[/green] {saved.relative_to(cfg.docs_dir)}")
+    console.print("Run [bold]dosm docs reindex[/bold] to update the search index.")
+
+
+@docs_app.command("import")
+def docs_import(
+    source: str = typer.Argument(..., help="Path to .docx, .pdf, .md, or .txt file."),
+    app_slug: str = typer.Option("_unfiled", "--app", help="Folder slug."),
+    title: str | None = typer.Option(None, "--title", help="Override title (defaults to filename)."),
+) -> None:
+    """Convert and import a document into the vault."""
+    from pathlib import Path as _Path
+
+    cfg = load_config()
+    init_engine(cfg)
+    from dosm.docs_index import vault
+
+    src = _Path(source).expanduser().resolve()
+    if not src.exists():
+        console.print(f"[red]File not found:[/red] {src}")
+        raise typer.Exit(1)
+
+    suffix = src.suffix.lower()
+    raw = src.read_bytes()
+    doc_title = title or src.stem
+
+    try:
+        if suffix == ".docx":
+            body_md, warnings = vault.import_docx(raw)
+            if warnings:
+                console.print(f"[yellow]Warnings:[/yellow] {warnings}")
+        elif suffix == ".pdf":
+            body_md = vault.import_pdf(raw)
+        elif suffix in {".md", ".markdown", ".txt"}:
+            body_md = raw.decode("utf-8", errors="replace")
+        else:
+            console.print(f"[red]Unsupported file type:[/red] {suffix}")
+            raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Conversion failed:[/red] {e}")
+        raise typer.Exit(1)
+
+    slug = vault.find_unique_slug(cfg.docs_dir / app_slug, vault.slugify(doc_title))
+    saved = vault.save_doc(cfg, folder_slug=app_slug, doc_slug=slug, title=doc_title, body_md=body_md, author="cli")
+    console.print(f"[green]Imported[/green] {saved.relative_to(cfg.docs_dir)}")
+    console.print("Run [bold]dosm docs reindex[/bold] to update the search index.")
 
 
 @docs_app.command("reindex")
@@ -320,6 +368,82 @@ def guac_keygen(
         "\nPaste this hex value into Guacamole's guacamole.properties as:"
     )
     console.print(f"  json-secret-key: {key.hex()}")
+
+
+# ---- folder ---------------------------------------------------------------
+
+
+@folder_app.command("list")
+def folder_list() -> None:
+    """List all doc vault folders."""
+    _load()
+    from dosm.docs_index import applications as folder_repo
+
+    with session_scope() as s:
+        folders = folder_repo.list_folders(s)
+        rows = [(f.id, f.name, f.slug, f.description or "", folder_repo.doc_count(s, f.id)) for f in folders]
+
+    table = Table("ID", "Name", "Slug", "Description", "Docs")
+    for fid, name, slug, desc, cnt in rows:
+        table.add_row(str(fid), name, slug, desc, str(cnt))
+    console.print(table)
+
+
+@folder_app.command("create")
+def folder_create(
+    name: str = typer.Argument(..., help="Folder name."),
+    slug: str | None = typer.Option(None, "--slug", help="URL slug (auto-derived if omitted)."),
+    description: str | None = typer.Option(None, "--description"),
+) -> None:
+    """Create a new doc vault folder."""
+    _load()
+    from dosm.docs_index import applications as folder_repo
+    from dosm.docs_index.vault import slugify
+
+    final_slug = slug or slugify(name)
+    with session_scope() as s:
+        folder_repo.create_folder(s, name=name, slug=final_slug, description=description)
+    console.print(f"[green]Created folder[/green] {name!r} (slug={final_slug!r})")
+
+
+@folder_app.command("delete")
+def folder_delete(slug: str = typer.Argument(...)) -> None:
+    """Delete a folder. Attached docs become unfiled."""
+    _load()
+    from dosm.docs_index import applications as folder_repo
+
+    with session_scope() as s:
+        folder = folder_repo.get_folder_by_slug(s, slug)
+        if folder is None:
+            console.print(f"[red]No folder with slug {slug!r}[/red]")
+            raise typer.Exit(1)
+        confirm = typer.confirm(f"Delete {folder.name!r}? Attached docs will become unfiled.")
+        if not confirm:
+            raise typer.Exit(0)
+        folder_repo.delete_folder(s, folder)
+    console.print(f"[green]Deleted[/green] folder {slug!r}")
+
+
+# ---- pipelines ------------------------------------------------------------
+
+
+@pipelines_app.command("poll")
+def pipelines_poll() -> None:
+    """Run one background-poller tick synchronously and print stats.
+
+    Useful for smoke-testing the poller without leaving `dosm serve` running.
+    """
+    import asyncio
+
+    cfg = load_config()
+    init_engine(cfg)
+    from dosm.pipelines.poller import poll_tick
+
+    stats = asyncio.run(poll_tick(cfg))
+    console.print(
+        f"polled={stats.polled} transitioned={stats.transitioned} "
+        f"abandoned={stats.abandoned} errors={stats.errors}"
+    )
 
 
 if __name__ == "__main__":

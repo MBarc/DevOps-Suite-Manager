@@ -1,3 +1,10 @@
+"""Point-in-time snapshot of the box DOSM itself runs on.
+
+Used by ``LocalSource`` (and only by it) to feed the resource panel for
+the DOSM host. Was previously the heart of the ``system_info`` module;
+moved into core when modules were retired since this is the lone
+consumer.
+"""
 from __future__ import annotations
 
 import platform

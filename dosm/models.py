@@ -65,8 +65,9 @@ class Credential(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
-    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # ssh_password | ssh_key | rdp_password | api_token
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # login | ssh_key | pat
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(128), nullable=True)
     secret_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -108,7 +109,55 @@ class Host(Base):
     )
 
 
+# ---- Organization graph ---------------------------------------------------
+
+
+class Department(Base):
+    """A team or business unit in the org chart."""
+
+    __tablename__ = "departments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    head: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    parent: Mapped["Department | None"] = relationship(
+        "Department",
+        back_populates="children",
+        remote_side=lambda: [Department.id],
+        foreign_keys=lambda: [Department.parent_id],
+    )
+    children: Mapped[list["Department"]] = relationship(
+        "Department",
+        back_populates="parent",
+        foreign_keys=lambda: [Department.parent_id],
+        lazy="selectin",
+    )
+
+
 # ---- Docs index -----------------------------------------------------------
+
+
+class Folder(Base):
+    """Taxonomy label that groups related documentation (e.g. 'Service Fabric', 'Dynatrace')."""
+
+    __tablename__ = "applications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class Document(Base):
@@ -124,6 +173,12 @@ class Document(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    folder_id: Mapped[int | None] = mapped_column(
+        "application_id", ForeignKey("applications.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    frontmatter_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    folder: Mapped["Folder | None"] = relationship("Folder")
 
 
 class DocChunk(Base):
@@ -325,9 +380,30 @@ class AuditLog(Base):
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class RecordingSession(Base):
+    """One user-initiated session journal (explicit start/stop)."""
+
+    __tablename__ = "recording_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    options_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    # Relative path from $DOSM_HOME to the final finalized journal file.
+    # Null while the recording is still active (journal lives in tmp_dir).
+    journal_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    # active | finalized | aborted
+
+
 __all__ = [
     "Base",
     "User",
+    "Department",
     "Tag",
     "HostTag",
     "Credential",
@@ -342,6 +418,7 @@ __all__ = [
     "PlanCard",
     "Pipeline",
     "PipelineRun",
+    "RecordingSession",
 ]
 
 

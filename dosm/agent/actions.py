@@ -109,9 +109,23 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
             jump_count = len(jump_hops)
         except RuntimeError as e:
             return ActionResult(ok=False, summary=str(e))
+        non_ssh = [h for h in jump_hops if s.get(Host, h.host_id).protocol != "ssh"]
+        if non_ssh:
+            names = ", ".join(f"{h.name!r}" for h in non_ssh)
+            return ActionResult(
+                ok=False,
+                summary=(
+                    f"jump chain has non-SSH hops ({names}); ssh_exec needs an "
+                    f"all-SSH chain."
+                ),
+            )
 
     started = time.monotonic()
     conn = None
+    try:
+        import asyncssh as _asyncssh
+    except ImportError:
+        _asyncssh = None  # type: ignore
     try:
         conn = await connect_through_chain(jump_hops, target)
         res = await asyncio.wait_for(conn.run(command, check=False), timeout=timeout)
@@ -140,9 +154,16 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
             extra={"host": host_label, "command": command, "jumps": jump_count},
         )
     except Exception as e:
+        if _asyncssh is not None and isinstance(e, _asyncssh.PermissionDenied):
+            summary = (
+                f"{host_label}: SSH authentication rejected for user "
+                f"{target.username!r} — check the credential profile"
+            )
+        else:
+            summary = f"{host_label}: {type(e).__name__}: {e}"
         return ActionResult(
             ok=False,
-            summary=f"{host_label}: {type(e).__name__}: {e}",
+            summary=summary,
             stderr=str(e),
             duration_ms=int((time.monotonic() - started) * 1000),
             extra={"host": host_label, "command": command, "jumps": jump_count},

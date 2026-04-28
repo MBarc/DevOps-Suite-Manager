@@ -8,6 +8,8 @@
       <span class="badge badge-blue">{{ host.protocol }}</span>
       <code>{{ host.hostname }}:{{ host.port }}</code>
       {% if host.credential %}· using <code>{{ host.credential.name }}</code>{% endif %}
+      {% if rdgw_host_name %}· via RD Gateway <code>{{ rdgw_host_name }}</code>{% endif %}
+      {% if tunnel_endpoint %}· via SSH tunnel <code>{{ tunnel_endpoint }}</code>{% endif %}
     </div>
   </div>
   <div class="actions">
@@ -29,9 +31,9 @@
 {% else %}
 <section class="card connect-panel">
   <div class="connect-layout">
-    <div class="iframe-host">
-      <iframe id="guac-frame" src="{{ iframe_url }}" allow="clipboard-read; clipboard-write; fullscreen"
-              referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
+    <div class="iframe-host" id="iframe-wrap">
+      <div id="focus-hint">↵ Click inside the terminal to enable keyboard input</div>
+      <iframe id="guac-frame" src="{{ iframe_url }}" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
     </div>
     <aside id="panel" class="resource-panel hidden">
       <h3>Host resources <span id="m-scope" class="badge badge-gray" style="margin-left:6px">—</span></h3>
@@ -52,6 +54,78 @@
 </section>
 <script>
 (function () {
+  // Focus management: Guacamole's keyboard handler only activates after a
+  // click inside the terminal canvas. Auto-focus on load and dismiss the hint
+  // on first click so the user knows what to do.
+  const frame = document.getElementById('guac-frame');
+  const hint  = document.getElementById('focus-hint');
+  const wrap  = document.getElementById('iframe-wrap');
+
+  frame.addEventListener('load', () => {
+    try { frame.contentWindow.focus(); } catch (_) {}
+  });
+
+  // Tab close / navigation away → release DOSM's jump tunnel lease so the
+  // forward and SSH conn don't leak. sendBeacon is the only reliable
+  // unload-time POST (fetch with keepalive is best-effort, XHR may be
+  // cancelled). The TTL backstop on the server handles cases where this
+  // beacon never arrives (browser crash, OS kill).
+  {% if tunnel_session_id %}
+  const tunnelSid = {{ tunnel_session_id|tojson }};
+  const disconnectUrl = `/hosts/{{ host.id }}/disconnect/${encodeURIComponent(tunnelSid)}`;
+  window.addEventListener('pagehide', () => {
+    try { navigator.sendBeacon(disconnectUrl); } catch (_) {}
+  });
+  {% endif %}
+
+  // When Guacamole signals the session closed (exit/disconnect), redirect back
+  // to the host detail page so the user isn't left on the reconnect screen.
+  window.addEventListener('message', function (e) {
+    if (!e.data) return;
+    if (e.data.type === 'guac_disconnect') {
+      window.location.href = '/hosts/{{ host.id }}';
+      return;
+    }
+    // Clipboard events posted from dosm-disconnect.js inside the Guac iframe.
+    if (e.data.type === 'guac_clipboard') {
+      fetch('/recording/event', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          kind: 'clipboard',
+          direction: e.data.direction || '{{ host.protocol }} clipboard',
+          content: e.data.content || '',
+        }),
+      }).catch(() => {});
+      return;
+    }
+
+    // Keystroke lines from the Guac iframe — redact client-side before sending
+    // so the server never receives a potential password in plaintext.
+    if (e.data.type === 'guac_keystroke_line') {
+      var line = e.data.maybe_password ? '******' : (e.data.line || '');
+      if (line) {
+        fetch('/recording/event', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            kind: 'guac_keystroke',
+            direction: '{{ host.protocol }}',
+            content: line,
+            meta: '{{ host.name }}',
+          }),
+        }).catch(() => {});
+      }
+    }
+  });
+
+  wrap.addEventListener('click', function dismissHint() {
+    hint.style.opacity = '0';
+    setTimeout(() => hint.remove(), 400);
+    try { frame.contentWindow.focus(); } catch (_) {}
+    wrap.removeEventListener('click', dismissHint);
+  });
+
   const panel = document.getElementById('panel');
   const toggle = document.getElementById('panel-toggle');
   if (localStorage.getItem('dosm.resource_panel') === 'open') panel.classList.remove('hidden');
@@ -108,12 +182,29 @@
     min-width: 0;
     background: #000;
     border-radius: 0 0 0 var(--r-md);
+    position: relative;
   }
   .iframe-host iframe {
     width: 100%;
     height: 100%;
     border: 0;
     display: block;
+  }
+  #focus-hint {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,.75);
+    color: #e0e0e0;
+    font-size: 12px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,.15);
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+    transition: opacity .4s;
   }
   .resource-panel { border-left: 1px solid var(--border); border-radius: 0 0 var(--r-md) 0; }
 </style>

@@ -45,18 +45,52 @@
   </div>
 </div>
 
+{% if certs %}
+<div style="display:flex; align-items:center; margin-bottom:12px">
+  <div style="position:relative; display:flex; align-items:center; width:100%; max-width:520px;
+              border:1px solid var(--divider); border-radius:8px;
+              background:var(--surface-raised,rgba(255,255,255,.05)); overflow:visible">
+    <!-- Find-by pill -->
+    <button id="cert-filter-btn" type="button"
+            style="display:flex; align-items:center; gap:4px; padding:6px 10px 6px 12px;
+                   font-size:12px; font-weight:600; white-space:nowrap; border:none;
+                   border-right:1px solid var(--divider); border-radius:8px 0 0 8px;
+                   background:transparent; color:var(--fg-muted); cursor:pointer">
+      <span id="cert-filter-label">Any field</span>
+      <span style="font-size:10px; opacity:.6">▾</span>
+    </button>
+    <ul id="cert-filter-menu"
+        style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:180px;
+               background:var(--surface,#1e1e2e); border:1px solid var(--divider); border-radius:6px;
+               list-style:none; margin:0; padding:4px 0; z-index:300; box-shadow:0 4px 16px rgba(0,0,0,.3)">
+      <li data-field="" style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Any field</li>
+      <li data-field="cn" style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Common Name (CN)</li>
+      <li data-field="thumb" style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Thumbprint</li>
+    </ul>
+    <!-- Search input -->
+    <input id="cert-search" type="text" placeholder="Search certificates…" autocomplete="off"
+           style="flex:1; padding:6px 32px 6px 10px; font-size:13px; border:none;
+                  background:transparent; color:var(--fg); outline:none" />
+    <!-- Clear -->
+    <button id="cert-clear" type="button"
+            style="display:none; position:absolute; right:8px; background:none; border:none;
+                   color:var(--fg-muted); cursor:pointer; font-size:16px; line-height:1; padding:0">×</button>
+  </div>
+</div>
+{% endif %}
+
 <section class="card" style="padding:0; overflow:hidden">
   {% if certs %}
   <div style="overflow-x:auto">
-    <table style="width:100%; border-collapse:collapse; font-size:13px">
+    <table id="cert-table" style="width:100%; border-collapse:collapse; font-size:13px">
       <thead>
         <tr style="border-bottom:1px solid var(--divider); text-align:left">
-          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Status</th>
-          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Subject</th>
-          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Issuer</th>
-          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Expires</th>
-          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Days</th>
-          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Source</th>
+          <th data-col="0" style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Status<span class="sort-icon"></span></th>
+          <th data-col="1" style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Subject<span class="sort-icon"></span></th>
+          <th data-col="2" style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Issuer<span class="sort-icon"></span></th>
+          <th data-col="3" style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Expires<span class="sort-icon"></span></th>
+          <th data-col="4" style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Days<span class="sort-icon"></span></th>
+          <th data-col="5" style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Source<span class="sort-icon"></span></th>
         </tr>
       </thead>
       <tbody>
@@ -78,8 +112,9 @@
           {% set badge_color = '#16a34a' %}
           {% set days_color = 'var(--fg-muted)' %}
         {% endif %}
-        <tr style="border-top:1px solid var(--divider); background:{{ row_bg }}; cursor:pointer" onclick="window.location='/certs/{{ cert.thumbprint }}'">
-          <td style="padding:10px 16px">
+        <tr style="border-top:1px solid var(--divider); background:{{ row_bg }}; cursor:pointer" onclick="window.location='/certs/{{ cert.thumbprint }}'"
+            data-cn="{{ cert.subject_cn | lower }}" data-thumb="{{ cert.thumbprint | lower }}">
+          <td style="padding:10px 16px" data-val="{{ {'expired': 0, 'critical': 1, 'warn': 2, 'ok': 3}[cert.status] }}">
             <span style="display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; text-transform:uppercase; background:{{ badge_color }}22; color:{{ badge_color }}">
               {{ cert.status }}
             </span>
@@ -97,7 +132,7 @@
           <td style="padding:10px 16px; white-space:nowrap; color:var(--fg-muted)">
             {{ cert.not_after.strftime('%Y-%m-%d') }}
           </td>
-          <td style="padding:10px 16px; font-weight:600; color:{{ days_color }}; white-space:nowrap">
+          <td style="padding:10px 16px; font-weight:600; color:{{ days_color }}; white-space:nowrap" data-val="{{ cert.days_remaining }}">
             {% if cert.days_remaining < 0 %}
               {{ cert.days_remaining|abs }}d ago
             {% else %}
@@ -122,4 +157,117 @@
   </div>
   {% endif %}
 </section>
+
+<script>
+(function () {
+  /* ── Search / filter ─────────────────────────────────────── */
+  var filterBtn   = document.getElementById('cert-filter-btn');
+  var filterLabel = document.getElementById('cert-filter-label');
+  var filterMenu  = document.getElementById('cert-filter-menu');
+  var searchInput = document.getElementById('cert-search');
+  var clearBtn    = document.getElementById('cert-clear');
+  var activeField = '';   // '' = any, 'cn', 'thumb'
+
+  if (filterBtn) {
+    filterBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      filterMenu.style.display = filterMenu.style.display === 'none' ? 'block' : 'none';
+    });
+
+    Array.from(filterMenu.children).forEach(function (li) {
+      li.addEventListener('mouseenter', function () { li.style.background = 'var(--accent,#6366f1)'; li.style.color = '#fff'; });
+      li.addEventListener('mouseleave', function () { li.style.background = ''; li.style.color = 'var(--fg)'; });
+      li.addEventListener('click', function () {
+        activeField = li.getAttribute('data-field');
+        filterLabel.textContent = li.textContent;
+        filterBtn.style.color = activeField ? 'var(--accent,#6366f1)' : 'var(--fg-muted)';
+        filterMenu.style.display = 'none';
+        searchInput.value = '';
+        clearBtn.style.display = 'none';
+        applyFilter('');
+        searchInput.focus();
+      });
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!filterBtn.contains(e.target) && !filterMenu.contains(e.target))
+        filterMenu.style.display = 'none';
+    });
+
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value;
+      clearBtn.style.display = q ? 'block' : 'none';
+      applyFilter(q.toLowerCase());
+    });
+
+    clearBtn.addEventListener('click', function () {
+      searchInput.value = '';
+      clearBtn.style.display = 'none';
+      applyFilter('');
+      searchInput.focus();
+    });
+  }
+
+  function applyFilter(q) {
+    var table = document.getElementById('cert-table');
+    if (!table) return;
+    Array.from(table.querySelector('tbody').rows).forEach(function (row) {
+      var match = true;
+      if (q) {
+        if (activeField === 'cn')    match = (row.getAttribute('data-cn')    || '').includes(q);
+        else if (activeField === 'thumb') match = (row.getAttribute('data-thumb') || '').includes(q);
+        else match = (row.getAttribute('data-cn') || '').includes(q) ||
+                     (row.getAttribute('data-thumb') || '').includes(q);
+      }
+      row.style.display = match ? '' : 'none';
+    });
+  }
+})();
+
+(function () {
+  /* ── Column sort ─────────────────────────────────────────── */
+  var table = document.getElementById('cert-table');
+  if (!table) return;
+  var tbody = table.querySelector('tbody');
+  var headers = table.querySelectorAll('th[data-col]');
+  var sortCol = -1, sortAsc = true;
+
+  headers.forEach(function (th) {
+    th.style.cursor = 'pointer';
+    th.style.userSelect = 'none';
+    var ic = th.querySelector('.sort-icon');
+    if (ic) { ic.textContent = ' ↕'; ic.style.opacity = '0.4'; ic.style.fontSize = '10px'; }
+    th.addEventListener('click', function () {
+      var col = parseInt(th.getAttribute('data-col'), 10);
+      sortAsc = sortCol === col ? !sortAsc : true;
+      sortCol = col;
+      headers.forEach(function (h) {
+        var ic = h.querySelector('.sort-icon');
+        if (ic) { ic.textContent = ' ↕'; ic.style.opacity = '0.4'; ic.style.fontSize = '10px'; }
+      });
+      var ic = th.querySelector('.sort-icon');
+      if (ic) { ic.textContent = sortAsc ? ' ▲' : ' ▼'; ic.style.opacity = '1'; ic.style.fontSize = ''; }
+      sortTable(col, sortAsc);
+    });
+  });
+
+  function cellVal(row, col) {
+    var td = row.cells[col];
+    if (!td) return '';
+    var dv = td.getAttribute('data-val');
+    if (dv !== null) return parseFloat(dv);
+    return td.textContent.trim().toLowerCase();
+  }
+
+  function sortTable(col, asc) {
+    Array.from(tbody.rows)
+      .sort(function (a, b) {
+        var av = cellVal(a, col), bv = cellVal(b, col);
+        if (typeof av === 'number' && typeof bv === 'number') return asc ? av - bv : bv - av;
+        return asc ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+      })
+      .forEach(function (r) { tbody.appendChild(r); });
+  }
+})();
+</script>
 {% endblock %}

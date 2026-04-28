@@ -23,6 +23,12 @@ services:
   guacd:
     image: guacamole/guacd:1.5.5
     restart: unless-stopped
+    # Resolve `host.docker.internal` from inside guacd uniformly across
+    # Docker Desktop (Win/Mac) and native Linux Docker. Needed when DOSM
+    # runs on the host (not in this compose stack) and guacd has to reach
+    # DOSM's jump-tunnel listener via the host gateway.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [guac]
 
   guacamole-db:

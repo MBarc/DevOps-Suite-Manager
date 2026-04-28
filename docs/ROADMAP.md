@@ -16,7 +16,7 @@ changelog; this is the one-line summary.
 |-------|--------------|---------|
 | 1     | `ea177d8`    | Scaffold: FastAPI + Typer CLI + `$DOSM_HOME` bootstrap. |
 | 2     | `a78ddd3`    | SQLite + bcrypt auth + secrets backend (Local Fernet, Vault) + Hosts inventory. |
-| 3     | `8d663a3`    | Module loader contract + bundled `system_info` module. |
+| 3     | `8d663a3`    | ~~Module loader contract + bundled `system_info` module.~~ Retired — modules system was only ever consumed by the example `system_info` plug-in; integrations live in core under `dosm/monitoring/adapters/`, `dosm/pipelines/`, `dosm/metrics/`. |
 | 4     | `89e7626`    | In-app terminals (admin-only), xterm.js + PTY bridge, asciinema recording, resource panel. |
 | 5     | `b5b2a41`    | Local docs index (md/txt/pdf), fastembed embeddings, RAG search with citations + LIKE fallback. |
 | —     | `9b3416a`    | UI polish: sidebar shell + design tokens. |
@@ -28,26 +28,32 @@ changelog; this is the one-line summary.
 | 9     | `f44c65f`    | Jump-host chains + credential profiles UI + WAL + idempotent migrations. |
 | 10    | `1e60b94`    | Settings page + DevOps CLI catalog (15 tools, toggle into Terminals). |
 | 11    | `21e35ae`    | Pipeline runner core + GitHub Actions adapter + `run_pipeline` agent action. |
+| 11b   | (pending)    | Pipeline background poller: age-based cadence (5s→300s), asyncio.gather with bounded concurrency, run abandonment after configurable hours, auto-refresh meta tag on run detail page, `dosm pipelines poll` CLI debug command. |
 | 12+13 | `2b1d1f9`    | Monitoring integrations (Dynatrace / Datadog / ServiceNow adapters, host-check page, fleet coverage matrix, 60s cache) + Certificate inventory (Windows cert stores + Linux PEM/DER walk, expiry coloring, 5-min cache). |
+| 12d   | (shipped)    | Prometheus adapter: host-presence check via `up{instance=~"^hostname(:.+)?$"}`, bearer/basic/no-auth, plugs into coverage matrix. |
+| 9b    | (shipped)    | RD Gateway support: RDP→RDP jump chains via Microsoft Remote Desktop Gateway. Auto-derived from protocol pairing (RDP target + RDP jumpbox = RD Gateway path). `Credential.domain` added for Windows domain auth. guacd handles the hop natively via `gateway-*` Guacamole params — no DOSM tunnel needed. |
+| 12e   | (shipped)    | ServiceNow extended monitoring detail: discovery source/timestamp, monitoring relationships (cmdb_rel_ci), metric collection (metric_instance with ITOM Visibility fallback), thresholds note, multiple CMDB match surfacing. |
 
 ## Open backlog (recommended order)
 
 | Phase | Title | Why this order |
 |-------|-------|----------------|
-| **10.5** | **Tests + CI** | Smoke tests aren't a regression net. As the surface grows, refactoring becomes scary. Strong recommendation: do this before any more features. Pytest around `agent.actions`, `secrets`, `jumps`, `pipelines.repo`, route handlers — even ~50 tests would protect a lot. Add lint + type-check + smoke run on push. |
-| 11b | Pipeline background poller | Runs currently update only on manual refresh. A small async task that polls non-terminal runs every N seconds finishes the v1 pipeline experience. |
-| 11c | Azure DevOps adapter | Different auth (PAT or service principal), different status model (queued/inProgress/completed + result). Plug-in shape already proven. |
-| 11d | Octopus Deploy adapter | REST API + API key. |
-| 11e | Ansible/AWX adapter | AWX REST. |
-| 11f | Terraform Cloud adapter | TFC REST + workspace runs. |
+| ~~9b~~ | ~~RD Gateway~~ | Shipped — see phase log above. |
+| ~~10.5~~ | ~~Tests + CI~~ | Shipped. 89 pytest tests across auth, hosts, docs, agent, secrets, and unit utils. GitHub Actions CI on every push. Also caught and fixed two pre-existing bugs: `vault.py` used undefined `app_dir` (every doc save would crash), and `markdown.py` passed conflicting `link_rel`+`rel` to nh3 (preview/view 500s). |
+| ~~11b~~ | ~~Pipeline background poller~~ | Shipped — see phase log above. |
+| ~~11c~~ | ~~Azure DevOps adapter~~ | Shipped. |
+| ~~11d~~ | ~~Octopus Deploy adapter~~ | Shipped. |
+| ~~11e~~ | ~~Ansible/AWX adapter~~ | Shipped. |
+| ~~11f~~ | ~~Terraform Cloud adapter~~ | Shipped. |
 | ~~12~~ | ~~Monitoring integrations~~ | Shipped — see phase log above. |
 | ~~12b~~ | ~~Dynatrace adapter~~ | Shipped — see phase log above. |
 | ~~12c~~ | ~~Datadog adapter~~ | Shipped — see phase log above. |
 | ~~12d~~ | ~~ServiceNow adapter~~ | Shipped — see phase log above. |
 | ~~13~~ | ~~Certificate inventory~~ | Shipped — see phase log above. |
+| ~~8d~~ | ~~Session recordings browser~~ | Shipped. |
 | 14 | Organization graph | Departments + AD sync (`ldap3`). List view + tree view (D3). Description text feeds the docs index so the agent can answer "who do I talk to about X". |
-| 15 | Documentation vault & importer | Extends `docs_index/` with PDF/Word→markdown import (mammoth for Word, pypdf for PDF), in-UI markdown editor, per-application taxonomy. |
-| 8d | Session recordings browser | Last because it's most useful once there's actually history to browse — the user explicitly asked for this to be near the end. |
+| 16 | AI Agent enhancements | Expand the agent beyond `ssh_exec` + `run_pipeline`. Planned actions: `query_monitoring` (read live alerts), `search_docs` (RAG lookup without full chat), `cert_check` (on-demand cert status for a host), `host_metrics` (pull current CPU/mem/disk). Improve plan card UX once validated against a real Ollama model: streaming rationale, multi-step plan previews, conversation-level approval history. |
+| ~~15~~ | ~~Documentation vault & importer~~ | Shipped. Application taxonomy model, YAML frontmatter, in-UI markdown editor with live preview, .docx/.pdf/.md/.txt importer (mammoth + pypdf), rendered markdown view, stale-edit conflict detection, `dosm docs new/import` + `dosm application` CLI commands. |
 
 ## Design notes
 
@@ -127,13 +133,6 @@ When you add a feature that needs a remote SSH session through a jumped
 host, prefer `connect_through_chain(jump_hops, target)` from
 `dosm.jumps.connections` — it does the right thing for a one-shot, and the
 manager handles long-lived multi-target cases.
-
-### Modular integrations
-
-`dosm/modules/builtin/` for first-party (currently just `system_info`).
-`$DOSM_HOME/modules/` for user-installed. Each module has a `module.yaml`
-with name, version, OS constraints, capabilities, optional Python deps. The
-loader filters by OS, imports the package, calls `register(app, cfg)`.
 
 ### Idempotent column migrations
 
@@ -217,6 +216,5 @@ limitations). Preserve this.
 - Add new pipeline adapters following the existing `PipelineAdapter`
   pattern
 - Add new metrics sources following the existing `MetricsSource` pattern
-- Add new bundled modules under `dosm/modules/builtin/`
 - Apply minor UI polish where it doesn't change behavior
 - Fix bugs the smoke tests reveal

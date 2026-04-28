@@ -181,3 +181,12 @@ def get_by_thumbprint(thumbprint: str) -> CertInfo | None:
         if c.thumbprint == thumbprint:
             return c
     return None
+
+
+def peek_cached() -> tuple[list[CertInfo], datetime] | None:
+    """Return the cached scan result without triggering a fresh scan.
+
+    The dashboard reads this so it never pays the cost of a cert scan on
+    page load. Callers that actually want the data should use ``scan_all``.
+    """
+    return _cache

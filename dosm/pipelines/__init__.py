@@ -1,6 +1,5 @@
 """Pipeline runner: trigger CI/CD pipelines, watch run status, integrate with
-the agent action loop. v1 ships GitHub Actions; Azure DevOps / Octopus /
-AWX / Terraform Cloud are planned as adapters in 11b/c/d.
+the agent action loop.
 """
 from dosm.pipelines.adapters import (
     PipelineAdapter,
@@ -11,6 +10,7 @@ from dosm.pipelines.adapters import (
     get_adapter,
     list_providers,
 )
+from dosm.pipelines.poller import pipeline_poll_loop, poll_tick
 from dosm.pipelines.routes import router as pipelines_router
 
 __all__ = [
@@ -21,5 +21,7 @@ __all__ = [
     "TriggerResult",
     "get_adapter",
     "list_providers",
+    "pipeline_poll_loop",
+    "poll_tick",
     "pipelines_router",
 ]

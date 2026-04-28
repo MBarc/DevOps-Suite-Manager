@@ -11,6 +11,17 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
+@dataclass
+class FieldSpec:
+    """Describes one config field that a provider exposes in the form UI."""
+    name: str          # HTML <input name="...">
+    config_key: str    # key in the normalized config dict
+    label: str
+    placeholder: str = ""
+    hint: str = ""
+    default: str = ""
+
+
 class PipelineProviderError(RuntimeError):
     """Provider rejected the call (auth, missing entity, malformed config)."""
 
@@ -52,6 +63,17 @@ class PipelineAdapter(ABC):
     """Stateless contract — instances are reused across calls."""
 
     provider: str
+    display_name: str = ""
+    credential_hint: str = "API credential for this provider."
+
+    @classmethod
+    def field_schema(cls) -> list[FieldSpec]:
+        """Ordered config fields rendered in the pipeline form."""
+        return []
+
+    def target_summary(self, config: dict) -> str:
+        """Short human-readable identifier for list/detail views."""
+        return ""
 
     @abstractmethod
     def validate_config(self, config: dict) -> dict:

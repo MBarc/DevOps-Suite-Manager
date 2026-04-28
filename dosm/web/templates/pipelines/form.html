@@ -21,36 +21,31 @@
     <label>Name
       <input type="text" name="name" required value="{{ pipeline.name if pipeline else '' }}" placeholder="deploy-japan-model" />
     </label>
+
     <label>Provider
       <select name="provider" id="provider-select">
         {% for prov in providers %}
-        <option value="{{ prov }}" {% if pipeline and pipeline.provider == prov %}selected{% elif not pipeline and prov == 'github_actions' %}selected{% endif %}>{{ prov }}</option>
+        <option value="{{ prov }}" {% if prov == selected_provider %}selected{% endif %}>{{ provider_names[prov] }}</option>
         {% endfor %}
       </select>
     </label>
 
-    <fieldset id="config-github_actions" style="border:1px solid var(--border); border-radius:6px; padding:12px">
-      <legend class="muted" style="padding: 0 6px; font-size:12px">GitHub Actions configuration</legend>
+    {% for prov in providers %}
+    <fieldset class="provider-config" data-provider="{{ prov }}"
+              style="border:1px solid var(--border); border-radius:6px; padding:12px">
+      <legend class="muted" style="padding:0 6px; font-size:12px">{{ provider_names[prov] }} configuration</legend>
       <div class="stack">
-        <label>Owner
-          <input type="text" name="gh_owner" value="{{ cfg.get('owner','') }}" placeholder="my-org" />
+        {% for f in field_schemas[prov] %}
+        <label>{{ f.label }}
+          <input type="text" name="{{ f.name }}"
+                 value="{{ cfg.get(f.config_key, '') if prov == selected_provider else '' }}"
+                 placeholder="{{ f.placeholder }}" />
+          {% if f.hint %}<span class="field-hint">{{ f.hint }}</span>{% endif %}
         </label>
-        <label>Repo
-          <input type="text" name="gh_repo" value="{{ cfg.get('repo','') }}" placeholder="my-repo" />
-        </label>
-        <label>Workflow file
-          <input type="text" name="gh_workflow" value="{{ cfg.get('workflow','') }}" placeholder="deploy.yml" />
-          <span class="field-hint">Filename or numeric workflow id.</span>
-        </label>
-        <label>Ref (branch/tag/SHA)
-          <input type="text" name="gh_ref" value="{{ cfg.get('ref','main') }}" placeholder="main" />
-        </label>
-        <label>API base (optional)
-          <input type="text" name="gh_api_base" value="{{ cfg.get('api_base','') or '' }}" placeholder="https://api.github.com" />
-          <span class="field-hint">Override for GitHub Enterprise Server.</span>
-        </label>
+        {% endfor %}
       </div>
     </fieldset>
+    {% endfor %}
 
     <label>Credential profile
       <select name="credential_id">
@@ -61,7 +56,9 @@
         </option>
         {% endfor %}
       </select>
-      <span class="field-hint">Token with <code>repo</code> + <code>workflow</code> scopes for GitHub Actions.</span>
+      {% for prov in providers %}
+      <span class="field-hint cred-hint" data-provider="{{ prov }}">{{ cred_hints[prov] | safe }}</span>
+      {% endfor %}
     </label>
 
     <label>Description
@@ -71,7 +68,7 @@
     <label>Inputs schema (one input name per line)
       <textarea name="inputs_schema" rows="3" placeholder="environment&#10;version">{% if schema %}{% for s in schema %}{{ s.name }}
 {% endfor %}{% endif %}</textarea>
-      <span class="field-hint">Free-form list. v1 just hints which keys to fill; type validation lands later.</span>
+      <span class="field-hint">Free-form list of expected input names. Not used by Terraform Cloud (set variables on the workspace instead).</span>
     </label>
 
     <div class="row" style="margin-top:var(--sp-2)">
@@ -79,4 +76,20 @@
     </div>
   </form>
 </section>
+
+<script>
+(function () {
+  var sel = document.getElementById('provider-select');
+  function showProvider(prov) {
+    document.querySelectorAll('.provider-config').forEach(function (el) {
+      el.style.display = el.dataset.provider === prov ? '' : 'none';
+    });
+    document.querySelectorAll('.cred-hint').forEach(function (el) {
+      el.style.display = el.dataset.provider === prov ? '' : 'none';
+    });
+  }
+  sel.addEventListener('change', function () { showProvider(this.value); });
+  showProvider(sel.value);
+}());
+</script>
 {% endblock %}

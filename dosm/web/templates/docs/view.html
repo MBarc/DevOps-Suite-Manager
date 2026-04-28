@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — DOSM Docs{% endblock %}
+{% block head_extra %}
+<style>
+.rendered-md { line-height: 1.65; color: var(--fg); }
+.rendered-md h1,.rendered-md h2,.rendered-md h3 { color: var(--fg-strong); margin: 1.4em 0 .5em; }
+.rendered-md h1 { font-size: 1.55rem; border-bottom: 1px solid var(--border); padding-bottom: .35em; }
+.rendered-md h2 { font-size: 1.25rem; }
+.rendered-md h3 { font-size: 1.05rem; }
+.rendered-md p { margin: .75em 0; }
+.rendered-md code { background: var(--bg-alt); padding: .15em .35em; border-radius: 4px; font-size: .87em; }
+.rendered-md pre { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: var(--sp-3); overflow-x: auto; }
+.rendered-md pre code { background: none; padding: 0; }
+.rendered-md blockquote { border-left: 3px solid var(--accent); margin: .75em 0; padding: .25em var(--sp-3); color: var(--fg-muted); }
+.rendered-md table { border-collapse: collapse; width: 100%; font-size: .92em; }
+.rendered-md th,.rendered-md td { border: 1px solid var(--border); padding: .45em .7em; text-align: left; }
+.rendered-md th { background: var(--bg-alt); font-weight: 600; }
+.rendered-md hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.rendered-md ul,.rendered-md ol { padding-left: 1.5em; margin: .5em 0; }
+.rendered-md a { color: var(--accent); }
+.rendered-md img { max-width: 100%; border-radius: 4px; }
+</style>
+{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>{{ title }}</h1>
+    {% if doc and doc.folder %}
+    <div class="subtitle">
+      <a href="/docs/folders/{{ doc.folder.slug }}">{{ doc.folder.name }}</a>
+      · <code>{{ path }}</code>
+    </div>
+    {% else %}
+    <div class="subtitle"><code>{{ path }}</code></div>
+    {% endif %}
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost btn-sm" href="/docs/edit?path={{ path|urlencode }}">Edit</a>
+    <a class="btn btn-ghost btn-sm" href="/docs/view?path={{ path|urlencode }}&raw=1">Raw</a>
+    <a class="btn btn-ghost" href="/docs">Back</a>
+  </div>
+</header>
+
+<section class="card">
+  <div class="rendered-md">{{ rendered_html | safe }}</div>
+</section>
+
+{% if doc %}
+<section class="card" style="font-size: 12.5px; color: var(--fg-muted);">
+  {{ doc.chunk_count }} chunks · indexed {{ doc.indexed_at.isoformat(timespec='seconds') if doc.indexed_at else '—' }}
+  · <a href="/docs/view?path={{ path|urlencode }}&raw=1" style="color:inherit">view raw</a>
+</section>
+{% endif %}
+{% endblock %}

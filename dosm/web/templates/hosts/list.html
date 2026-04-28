@@ -30,15 +30,48 @@
   {% endfor %}
 </div>
 
+<div style="margin-bottom:12px">
+  <div style="position:relative; display:flex; align-items:center; max-width:520px;
+              border:1px solid var(--divider); border-radius:8px;
+              background:var(--surface-raised,rgba(255,255,255,.05)); overflow:visible">
+    <button id="host-filter-btn" type="button"
+            style="display:flex; align-items:center; gap:4px; padding:6px 10px 6px 12px;
+                   font-size:12px; font-weight:600; white-space:nowrap; border:none;
+                   border-right:1px solid var(--divider); border-radius:8px 0 0 8px;
+                   background:transparent; color:var(--fg-muted); cursor:pointer">
+      <span id="host-filter-label">Any field</span>
+      <span style="font-size:10px; opacity:.6">▾</span>
+    </button>
+    <ul id="host-filter-menu"
+        style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:180px;
+               background:var(--surface,#1e1e2e); border:1px solid var(--divider); border-radius:6px;
+               list-style:none; margin:0; padding:4px 0; z-index:300; box-shadow:0 4px 16px rgba(0,0,0,.3)">
+      <li data-field=""      style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Any field</li>
+      <li data-field="name"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Hostname</li>
+      <li data-field="ip"    style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">IP Address</li>
+      <li data-field="proto" style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Type</li>
+      <li data-field="cred"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Credential</li>
+      <li data-field="jump"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Jump Host</li>
+      <li data-field="tags"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Tag</li>
+    </ul>
+    <input id="host-search" type="text" placeholder="Search hosts…" autocomplete="off"
+           style="flex:1; padding:6px 32px 6px 10px; font-size:13px; border:none;
+                  background:transparent; color:var(--fg); outline:none" />
+    <button id="host-clear" type="button"
+            style="display:none; position:absolute; right:8px; background:none; border:none;
+                   color:var(--fg-muted); cursor:pointer; font-size:16px; line-height:1; padding:0">×</button>
+  </div>
+</div>
+
 <section class="card" style="padding:0; overflow:hidden">
   {% if hosts %}
-  <table style="width:100%; border-collapse:collapse; font-size:13px">
+  <table id="host-table" style="width:100%; border-collapse:collapse; font-size:13px">
     <thead>
       <tr style="border-bottom:1px solid var(--divider); text-align:left; background:var(--surface-raised,rgba(255,255,255,.03))">
-        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Address</th>
+        <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Name</th>
         <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Type</th>
         <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Credential</th>
-        <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Jump</th>
+        <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Jump Host</th>
         <th style="padding:10px 14px; font-weight:600; color:var(--fg-muted)">Tags</th>
         <th style="padding:10px 14px"></th>
       </tr>
@@ -46,15 +79,21 @@
     <tbody>
     {% for h in hosts %}
       {% set proto_color = {'ssh': '#16a34a', 'rdp': '#3b82f6', 'vnc': '#8b5cf6'}[h.protocol] %}
-      <tr style="border-top:1px solid var(--divider)">
+      <tr style="border-top:1px solid var(--divider)"
+          data-name="{{ h.name | lower }}"
+          data-ip="{{ h.hostname | lower }}"
+          data-proto="{{ h.protocol | lower }}"
+          data-cred="{{ (h.credential.name if h.credential else '') | lower }}"
+          data-jump="{{ (h.jump_host.name if h.jump_host else 'direct') | lower }}"
+          data-tags="{{ h.tags | map(attribute='name') | join(' ') | lower }}">
         <td style="padding:10px 16px">
           <div style="display:flex; align-items:center; gap:8px">
-            <a href="/hosts/{{ h.id }}" style="font-family:monospace; font-weight:500; color:var(--fg-strong); text-decoration:none">{{ h.hostname }}:{{ h.port }}</a>
+            <a href="/hosts/{{ h.id }}" style="font-weight:500; color:var(--fg-strong); text-decoration:none">{{ h.name }}</a>
             {% if h.is_jumpbox %}
             <span style="display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; letter-spacing:.04em; background:#f59e0b; color:#000">JUMP</span>
             {% endif %}
           </div>
-          <div style="font-size:11px; color:var(--fg-muted); margin-top:2px">{{ h.name }}</div>
+          <div style="font-size:11px; color:var(--fg-muted); margin-top:2px; font-family:monospace">{{ h.hostname }}:{{ h.port }}</div>
         </td>
         <td style="padding:10px 14px">
           <span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600">
@@ -178,6 +217,78 @@
 </section>
 
 <script>
+(function () {
+  /* ── Host search / filter ────────────────────────────────── */
+  var filterBtn   = document.getElementById('host-filter-btn');
+  var filterLabel = document.getElementById('host-filter-label');
+  var filterMenu  = document.getElementById('host-filter-menu');
+  var searchInput = document.getElementById('host-search');
+  var clearBtn    = document.getElementById('host-clear');
+  var activeField = '';
+
+  if (filterBtn) {
+    filterBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      filterMenu.style.display = filterMenu.style.display === 'none' ? 'block' : 'none';
+    });
+
+    Array.from(filterMenu.children).forEach(function (li) {
+      li.addEventListener('mouseenter', function () { li.style.background = 'var(--accent,#6366f1)'; li.style.color = '#fff'; });
+      li.addEventListener('mouseleave', function () { li.style.background = ''; li.style.color = 'var(--fg)'; });
+      li.addEventListener('click', function () {
+        activeField = li.getAttribute('data-field');
+        filterLabel.textContent = li.textContent;
+        filterBtn.style.color = activeField ? 'var(--accent,#6366f1)' : 'var(--fg-muted)';
+        filterMenu.style.display = 'none';
+        searchInput.value = '';
+        clearBtn.style.display = 'none';
+        applyFilter('');
+        searchInput.focus();
+      });
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!filterBtn.contains(e.target) && !filterMenu.contains(e.target))
+        filterMenu.style.display = 'none';
+    });
+
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value;
+      clearBtn.style.display = q ? 'block' : 'none';
+      applyFilter(q.toLowerCase());
+    });
+
+    clearBtn.addEventListener('click', function () {
+      searchInput.value = '';
+      clearBtn.style.display = 'none';
+      applyFilter('');
+      searchInput.focus();
+    });
+  }
+
+  var DATA_ATTRS = ['data-name','data-ip','data-proto','data-cred','data-jump','data-tags'];
+
+  function applyFilter(q) {
+    var table = document.getElementById('host-table');
+    if (!table) return;
+    Array.from(table.querySelector('tbody').rows).forEach(function (row) {
+      if (!row.hasAttribute('data-name')) return; // skip inline edit rows
+      var match = true;
+      if (q) {
+        if (activeField) {
+          match = (row.getAttribute('data-' + activeField) || '').includes(q);
+        } else {
+          match = DATA_ATTRS.some(function (a) { return (row.getAttribute(a) || '').includes(q); });
+        }
+      }
+      row.style.display = match ? '' : 'none';
+      var editRow = row.nextElementSibling;
+      if (editRow && editRow.id && editRow.id.startsWith('edit-') && !match)
+        editRow.style.display = 'none';
+    });
+  }
+})();
+
 (function () {
   var DEFAULTS = {ssh: 22, rdp: 3389, vnc: 5900};
 

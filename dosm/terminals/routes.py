@@ -12,6 +12,11 @@ from sqlalchemy.orm import Session
 from dosm.auth.deps import _NotAuthenticated, get_current_user, require_user
 from dosm.db import get_session
 from dosm.models import AuditLog, User
+from dosm.recording.events import (
+    TerminalJournalHook,
+    record_terminal_close,
+    record_terminal_open,
+)
 from dosm.terminals.discover import discover_shells, find_shell
 from dosm.terminals.pty_bridge import open_pty
 from dosm.terminals.recorder import AsciinemaRecorder, recording_path
@@ -76,6 +81,7 @@ async def terminals_runas(
             details=f"target_user={target_user} token={token}",
         )
     )
+    db.commit()
     return RedirectResponse(f"/terminals/{token}?record={int(bool(record))}", status_code=303)
 
 
@@ -152,6 +158,9 @@ async def terminals_ws(
     session_id = uuid.uuid4().hex[:12]
     pty = open_pty(shell.command, env=shell.env, cwd=shell.cwd, rows=rows, cols=cols)
 
+    jnl_hook = TerminalJournalHook(user_id, shell.name)
+    record_terminal_open(user_id, shell.name)
+
     recorder: AsciinemaRecorder | None = None
     if record and cfg.terminals.record_by_default or record:
         # Always record when the query param is set; config default only
@@ -191,6 +200,7 @@ async def terminals_ws(
                 break
             if recorder is not None:
                 recorder.record_output(data)
+            jnl_hook.on_output(data.decode("utf-8", errors="replace"))
             try:
                 await websocket.send_text(
                     json.dumps({"type": "output", "data": data.decode("utf-8", errors="replace")})
@@ -216,6 +226,7 @@ async def terminals_ws(
                 data = obj.get("data", "").encode("utf-8")
                 if recorder is not None:
                     recorder.record_input(data)
+                jnl_hook.on_input(obj.get("data", ""))
                 pty.write(data)
             elif kind == "resize":
                 r = int(obj.get("rows", 24))
@@ -231,6 +242,8 @@ async def terminals_ws(
         pty.close()
         if recorder is not None:
             recorder.close()
+        jnl_hook.flush()
+        record_terminal_close(user_id, shell.name)
         try:
             await websocket.send_text(json.dumps({"type": "exit"}))
         except Exception:

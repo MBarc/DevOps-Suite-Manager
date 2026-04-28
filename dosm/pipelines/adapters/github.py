@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from dosm.pipelines.adapters.base import (
+    FieldSpec,
     PipelineAdapter,
     PipelineProviderError,
     PipelineUnreachable,
@@ -57,10 +58,32 @@ def _map_status(status: str | None, conclusion: str | None) -> str:
 
 class GitHubActionsAdapter(PipelineAdapter):
     provider = "github_actions"
+    display_name = "GitHub Actions"
+    credential_hint = "Personal Access Token with <code>repo</code> + <code>workflow</code> scopes."
 
     DEFAULT_API_BASE = "https://api.github.com"
     POST_DISPATCH_POLL_TRIES = 8
     POST_DISPATCH_POLL_DELAY = 0.5
+
+    @classmethod
+    def field_schema(cls) -> list[FieldSpec]:
+        return [
+            FieldSpec("gh_owner", "owner", "Owner", "my-org"),
+            FieldSpec("gh_repo", "repo", "Repo", "my-repo"),
+            FieldSpec("gh_workflow", "workflow", "Workflow file", "deploy.yml",
+                      "Filename or numeric workflow id."),
+            FieldSpec("gh_ref", "ref", "Ref (branch/tag/SHA)", "main",
+                      "", "main"),
+            FieldSpec("gh_api_base", "api_base", "API base (optional)",
+                      "https://api.github.com",
+                      "Override for GitHub Enterprise Server."),
+        ]
+
+    def target_summary(self, config: dict) -> str:
+        owner = config.get("owner", "?")
+        repo = config.get("repo", "?")
+        wf = config.get("workflow", "?")
+        return f"{owner}/{repo} · {wf}"
 
     def validate_config(self, config: dict) -> dict:
         for key in ("owner", "repo", "workflow"):

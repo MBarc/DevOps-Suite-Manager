@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 from dosm.auth.deps import require_user
 from dosm.db import get_session
 from dosm.hosts import repo as hosts_repo  # for credential helpers reuse
-from dosm.models import AuditLog, Credential, User
+from dosm.models import AuditLog, User
 from dosm.pipelines import repo
-from dosm.pipelines.adapters import PipelineProviderError, list_providers
+from dosm.pipelines.adapters import PipelineProviderError, get_adapter, list_providers
+from dosm.recording import events as rec_events
 
 router = APIRouter(prefix="/pipelines")
 
@@ -34,11 +35,20 @@ def _form_context(db: Session, user: User, pipeline=None, error: str | None = No
                 schema = json.loads(pipeline.inputs_schema) or []
             except json.JSONDecodeError:
                 schema = []
+    providers = list_providers()
+    field_schemas = {p: get_adapter(p).field_schema() for p in providers}
+    cred_hints = {p: get_adapter(p).credential_hint for p in providers}
+    provider_names = {p: get_adapter(p).display_name or p for p in providers}
+    selected = pipeline.provider if pipeline else (providers[0] if providers else "")
     return {
         "pipeline": pipeline,
         "cfg_parsed": cfg,
         "schema_parsed": schema,
-        "providers": list_providers(),
+        "providers": providers,
+        "provider_names": provider_names,
+        "field_schemas": field_schemas,
+        "cred_hints": cred_hints,
+        "selected_provider": selected,
         "credentials": hosts_repo.list_credentials(db),
         "user": user,
         "error": error,
@@ -70,16 +80,15 @@ def _decode_inputs(raw: str) -> dict:
 
 
 def _decode_config_form(provider: str, form: dict) -> dict:
-    """Pull provider-specific config fields out of the form."""
-    if provider == "github_actions":
-        return {
-            "owner": (form.get("gh_owner") or "").strip(),
-            "repo": (form.get("gh_repo") or "").strip(),
-            "workflow": (form.get("gh_workflow") or "").strip(),
-            "ref": (form.get("gh_ref") or "main").strip(),
-            "api_base": (form.get("gh_api_base") or "").strip() or None,
-        }
-    return {}
+    """Pull provider-specific config fields out of the form using field_schema."""
+    try:
+        adapter = get_adapter(provider)
+    except PipelineProviderError:
+        return {}
+    return {
+        f.config_key: (form.get(f.name) or "").strip() or None
+        for f in adapter.field_schema()
+    }
 
 
 def _parse_int_or_none(v: str) -> int | None:
@@ -97,7 +106,14 @@ async def pipelines_list(
     for p in pipelines:
         latest = repo.list_runs(db, p.id, limit=1)
         cfg = json.loads(p.config or "{}")
-        enriched.append({"p": p, "latest": latest[0] if latest else None, "cfg": cfg})
+        try:
+            adapter = get_adapter(p.provider)
+            summary = adapter.target_summary(cfg)
+            provider_name = adapter.display_name or p.provider
+        except Exception:
+            summary = ""
+            provider_name = p.provider
+        enriched.append({"p": p, "latest": latest[0] if latest else None, "cfg": cfg, "summary": summary, "provider_name": provider_name})
     return _templates(request).TemplateResponse(
         request, "pipelines/list.html", {"rows": enriched, "user": user}
     )
@@ -177,10 +193,18 @@ async def pipelines_detail(
     runs_view = [
         {"r": r, "inputs": json.loads(r.inputs) if r.inputs else {}} for r in runs
     ]
+    try:
+        adapter = get_adapter(p.provider)
+        target_summary = adapter.target_summary(cfg)
+        provider_name = adapter.display_name or p.provider
+    except Exception:
+        target_summary = ""
+        provider_name = p.provider
     return _templates(request).TemplateResponse(
         request,
         "pipelines/detail.html",
-        {"p": p, "cfg": cfg, "schema": schema, "runs": runs_view, "user": user},
+        {"p": p, "cfg": cfg, "schema": schema, "runs": runs_view, "user": user,
+         "target_summary": target_summary, "provider_name": provider_name},
     )
 
 
@@ -241,6 +265,7 @@ async def pipelines_update(
             status_code=400,
         )
     db.add(AuditLog(actor_id=user.id, action="pipeline.update", target=f"pipeline:{p.id}"))
+    db.commit()
     return RedirectResponse(f"/pipelines/{p.id}", status_code=303)
 
 
@@ -255,6 +280,7 @@ async def pipelines_delete(
         raise HTTPException(404)
     repo.delete_pipeline(db, p)
     db.add(AuditLog(actor_id=user.id, action="pipeline.delete", target=f"pipeline:{pid}"))
+    db.commit()
     return RedirectResponse("/pipelines", status_code=303)
 
 
@@ -272,6 +298,7 @@ async def pipelines_trigger(
     cfg = request.app.state.config
     inputs = _decode_inputs(inputs_text)
     run = await repo.trigger_pipeline(cfg, db, p, inputs=inputs, user_id=user.id)
+    rec_events.record_pipeline_triggered(user.id, p.name, run.id, p.provider)
     db.add(
         AuditLog(
             actor_id=user.id,
@@ -317,7 +344,11 @@ async def pipelines_run_refresh(
     if run is None:
         raise HTTPException(404)
     cfg = request.app.state.config
+    old_status = run.status
     await repo.refresh_run(cfg, db, run)
+    p_for_rec = repo.get_pipeline(db, run.pipeline_id)
+    if p_for_rec and run.status != old_status:
+        rec_events.record_pipeline_status(user.id, p_for_rec.name, run.id, run.status)
     db.add(
         AuditLog(
             actor_id=user.id,

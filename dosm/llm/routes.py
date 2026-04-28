@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -95,6 +95,7 @@ async def chat_delete(
         raise HTTPException(404)
     db.delete(conv)
     db.add(AuditLog(actor_id=user.id, action="chat.delete", target=f"conversation:{cid}"))
+    db.commit()
     return RedirectResponse("/chat", status_code=303)
 
 
@@ -194,7 +195,7 @@ async def chat_post_message(
     user_msg_id = msg.id
     if conv.title == "New chat" or not existing:
         conv.title = _auto_title(content)
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = datetime.now(timezone.utc)
     return RedirectResponse(f"/chat/{cid}?reply_to={user_msg_id}", status_code=303)
 
 
@@ -333,7 +334,7 @@ async def chat_stream(
 
             conv = s.get(Conversation, conv_id)
             if conv is not None:
-                conv.updated_at = datetime.utcnow()
+                conv.updated_at = datetime.now(timezone.utc)
                 if not conv.model:
                     conv.model = cfg.llm.model
             s.add(

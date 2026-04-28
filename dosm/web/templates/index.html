@@ -12,50 +12,118 @@
 </header>
 
 <div class="stat-grid">
-  <div class="stat">
-    <div class="label">DOSM_HOME</div>
-    <div class="value"><code>{{ home }}</code></div>
-  </div>
-  <div class="stat">
-    <div class="label">LLM model</div>
-    <div class="value"><code>{{ llm_model }}</code></div>
-    <div class="note">Configured in <code>config.yaml</code> under <code>llm</code>.</div>
-  </div>
-  <div class="stat">
-    <div class="label">Secrets backend</div>
-    <div class="value"><code>{{ secrets_backend }}</code></div>
-  </div>
-  <div class="stat">
-    <div class="label">Modules loaded</div>
-    <div class="value">{{ loaded_modules|length }}
-      {% if module_errors %}<span class="badge badge-red" style="margin-left:8px">{{ module_errors|length }} error{{ '' if module_errors|length == 1 else 's' }}</span>{% endif %}
-    </div>
-    <div class="note"><a href="/modules">Manage modules →</a></div>
-  </div>
+  <a class="stat" href="/hosts">
+    <div class="label">Hosts</div>
+    <div class="value">{{ host_count }}</div>
+    <div class="note">{{ jumpbox_count }} jump host{{ '' if jumpbox_count == 1 else 's' }}</div>
+  </a>
+  <a class="stat" href="/pipelines">
+    <div class="label">Pipelines · last 24h</div>
+    <div class="value">{{ pipeline_24h_total }}{% if pipeline_24h_failed %} <span class="badge badge-red" style="margin-left:6px; vertical-align:middle">{{ pipeline_24h_failed }} failed</span>{% endif %}</div>
+    <div class="note">runs triggered</div>
+  </a>
+  <a class="stat" href="/certs">
+    <div class="label">Certificates</div>
+    {% if cert_total is not none %}
+      <div class="value">{{ cert_total }}{% if cert_attention %} <span class="badge badge-amber" style="margin-left:6px; vertical-align:middle">{{ cert_attention }} need attention</span>{% endif %}</div>
+      <div class="note">in cached scan</div>
+    {% else %}
+      <div class="value muted" style="font-size:15px; font-weight:500">— not yet scanned</div>
+      <div class="note">Run scan →</div>
+    {% endif %}
+  </a>
 </div>
 
-<section class="card">
-  <h2>Active modules</h2>
-  {% if loaded_modules %}
-    <ul style="list-style:none; padding:0; margin:0">
-    {% for m in loaded_modules %}
-      <li style="padding:8px 0; border-top:1px solid var(--divider)">
-        <a href="/modules/{{ m.spec.name }}" style="color:var(--fg-strong); font-weight:500">{{ m.spec.name }}</a>
-        <span class="muted" style="margin-left:8px">v{{ m.spec.version }}</span>
-        <div class="muted" style="font-size:13px">{{ m.spec.description }}</div>
-      </li>
-    {% endfor %}
-    </ul>
-  {% else %}
-    <div class="empty-state">No modules loaded. <a href="/modules">Browse available modules</a>.</div>
-  {% endif %}
-  {% if module_errors %}
-    <h2 style="margin-top:16px; color:var(--danger)">Errors</h2>
-    <ul>
-    {% for name, err in module_errors.items() %}
-      <li><code>{{ name }}</code>: <span class="error">{{ err }}</span></li>
-    {% endfor %}
-    </ul>
-  {% endif %}
-</section>
+<div class="dash-cols">
+  <section class="card">
+    <h2>Recent activity</h2>
+    {% if recent_activity %}
+      <ul class="activity-list">
+      {% for item in recent_activity %}
+        <li>
+          <span class="ts" title="{{ item.ts.strftime('%Y-%m-%d %H:%M:%S UTC') }}">{{ item.ago }}</span>
+          <span class="badge badge-{{ item.color }}">{{ item.action }}</span>
+          {% if item.actor %}<code class="actor">{{ item.actor }}</code>{% else %}<span class="muted">system</span>{% endif %}
+          {% if item.target %}<span class="muted">·</span> <span class="target">{{ item.target }}</span>{% endif %}
+          {% if item.details %}<div class="muted details">{{ item.details }}</div>{% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <div class="empty-state">No activity yet — connect to a host or run a pipeline to populate the audit log.</div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Recently opened hosts</h2>
+    {% if recent_hosts %}
+      <ul class="host-list">
+      {% for h in recent_hosts %}
+        <li>
+          <div class="host-row-main">
+            <a href="/hosts/{{ h.host.id }}" class="host-name">{{ h.host.name }}</a>
+            <span class="badge badge-blue">{{ h.host.protocol }}</span>
+          </div>
+          <div class="muted host-row-sub">
+            <code>{{ h.host.hostname }}:{{ h.host.port }}</code>
+            <span class="ago">{{ h.ago }}</span>
+          </div>
+        </li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <div class="empty-state">No host connections recorded yet. <a href="/hosts">Browse hosts</a>.</div>
+    {% endif %}
+  </section>
+</div>
+
+<style>
+  .dash-cols {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: var(--sp-4);
+  }
+  @media (max-width: 1000px) {
+    .dash-cols { grid-template-columns: 1fr; }
+  }
+  a.stat { color: inherit; text-decoration: none; transition: border-color 120ms ease; }
+  a.stat:hover { border-color: var(--accent); }
+
+  .activity-list, .host-list { list-style: none; padding: 0; margin: 0; }
+  .activity-list li {
+    padding: 9px 0;
+    border-top: 1px solid var(--divider);
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+    font-size: 13px;
+  }
+  .activity-list li:first-child, .host-list li:first-child { border-top: 0; }
+  .activity-list .ts {
+    color: var(--fg-dim); font-size: 11.5px; min-width: 56px;
+    font-variant-numeric: tabular-nums;
+  }
+  .activity-list .actor { font-size: 12px; }
+  .activity-list .target {
+    font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted);
+    word-break: break-all;
+  }
+  .activity-list .details {
+    flex-basis: 100%;
+    font-size: 12px;
+    margin-left: 64px;
+    word-break: break-all;
+    color: var(--fg-dim);
+  }
+
+  .host-list li {
+    padding: 9px 0;
+    border-top: 1px solid var(--divider);
+  }
+  .host-row-main { display: flex; align-items: center; gap: 8px; }
+  .host-row-sub {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 2px; font-size: 12px;
+  }
+  .host-list .host-name { font-weight: 500; color: var(--fg-strong); }
+  .host-list .ago { font-variant-numeric: tabular-nums; color: var(--fg-dim); }
+</style>
 {% endblock %}

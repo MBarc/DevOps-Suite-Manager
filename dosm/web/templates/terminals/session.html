@@ -57,10 +57,32 @@
   const wsUrl = `${proto}://${location.host}/terminals/ws/{{ shell.id }}?record=${record}&cols=${term.cols}&rows=${term.rows}`;
   const ws = new WebSocket(wsUrl);
 
+  function postRecEvent(kind, direction, content) {
+    fetch('/recording/event', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({kind, direction, content}),
+    }).catch(() => {});
+  }
+
   ws.onopen = () => {
-    term.onData(d => ws.send(JSON.stringify({type: 'input', data: d})));
+    term.onData(d => {
+      ws.send(JSON.stringify({type: 'input', data: d}));
+      // Detect paste: xterm delivers a paste as a single onData call with
+      // multiple characters. Single keystrokes or short escape sequences
+      // are typically ≤6 bytes.
+      if (d.length > 6 && !d.startsWith('\x1b')) {
+        postRecEvent('paste', 'terminal paste', d);
+      }
+    });
     term.onResize(size => ws.send(JSON.stringify({type: 'resize', rows: size.rows, cols: size.cols})));
   };
+
+  // Capture terminal copy (user selects text + Ctrl+C / right-click copy).
+  document.getElementById('term').addEventListener('copy', function () {
+    var sel = term.getSelection ? term.getSelection() : '';
+    if (sel) postRecEvent('copy', 'terminal copy', sel);
+  });
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'output') term.write(msg.data);

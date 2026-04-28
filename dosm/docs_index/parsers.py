@@ -43,11 +43,22 @@ def _strip_markdown(text: str) -> str:
     return "\n".join(out_lines)
 
 
+def _strip_frontmatter(text: str) -> str:
+    """Remove YAML frontmatter block so it is not indexed as content."""
+    if not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text
+    return text[end + 4:].lstrip("\n")
+
+
 def parse_markdown(path: Path) -> tuple[str, str | None]:
     raw = _read_text(path)
-    # First H1 or first non-empty line becomes the title.
+    body = _strip_frontmatter(raw)
+    # First H1 or first non-empty line of body becomes the title.
     title: str | None = None
-    for line in raw.splitlines():
+    for line in body.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
@@ -56,7 +67,7 @@ def parse_markdown(path: Path) -> tuple[str, str | None]:
             break
         title = stripped[:120]
         break
-    return _strip_markdown(raw), title
+    return _strip_markdown(body), title
 
 
 def parse_txt(path: Path) -> tuple[str, str | None]:

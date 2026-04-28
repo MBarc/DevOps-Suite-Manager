@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ dept.name }} — DOSM Org{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <div class="subtitle" style="margin-bottom:var(--sp-1)">
+      <a href="/org">Org</a>
+      {% if dept.parent %} / <a href="/org/{{ dept.parent.slug }}">{{ dept.parent.name }}</a>{% endif %}
+      / {{ dept.name }}
+    </div>
+    <h1>{{ dept.name }}</h1>
+  </div>
+  <div class="actions">
+    <a href="/org/{{ dept.slug }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+    <a href="/org" class="btn btn-ghost btn-sm">Back</a>
+  </div>
+</header>
+
+<div style="display:grid; grid-template-columns:2fr 1fr; gap:var(--sp-4); align-items:start">
+  <section class="card">
+    {% if dept.description %}
+    <div class="rendered-md">{{ dept.description | replace('\n', '<br>') | safe }}</div>
+    {% else %}
+    <p class="muted">No description yet. <a href="/org/{{ dept.slug }}/edit">Add one</a> so the agent can answer questions about this team.</p>
+    {% endif %}
+  </section>
+
+  <aside style="display:flex; flex-direction:column; gap:var(--sp-3)">
+    <section class="card">
+      <h2 style="margin-bottom:var(--sp-2)">Details</h2>
+      <dl style="display:grid; grid-template-columns:auto 1fr; gap:var(--sp-1) var(--sp-3); font-size:.9rem; margin:0">
+        {% if dept.head %}
+        <dt class="muted">Head</dt><dd>{{ dept.head }}</dd>
+        {% endif %}
+        {% if dept.email %}
+        <dt class="muted">Contact</dt><dd><a href="mailto:{{ dept.email }}">{{ dept.email }}</a></dd>
+        {% endif %}
+        {% if dept.parent %}
+        <dt class="muted">Parent</dt><dd><a href="/org/{{ dept.parent.slug }}">{{ dept.parent.name }}</a></dd>
+        {% endif %}
+        <dt class="muted">Slug</dt><dd><code>{{ dept.slug }}</code></dd>
+      </dl>
+    </section>
+
+    {% if dept.children %}
+    <section class="card">
+      <h2 style="margin-bottom:var(--sp-2)">Sub-departments</h2>
+      <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:var(--sp-1)">
+        {% for child in dept.children %}
+        <li><a href="/org/{{ child.slug }}">{{ child.name }}</a>
+          {% if child.head %}<span class="muted" style="font-size:.83rem"> — {{ child.head }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

@@ -5,12 +5,8 @@
   <div>
     <h1>{{ p.name }}</h1>
     <div class="subtitle">
-      <span class="tag">{{ p.provider }}</span>
-      {% if p.provider == 'github_actions' %}
-        · <code>{{ cfg.get('owner','?') }}/{{ cfg.get('repo','?') }}</code>
-        · <code>{{ cfg.get('workflow','?') }}</code>
-        · ref <code>{{ cfg.get('ref','main') }}</code>
-      {% endif %}
+      <span class="tag">{{ provider_name }}</span>
+      {% if target_summary %}· <code>{{ target_summary }}</code>{% endif %}
       {% if p.credential %}· using <code>{{ p.credential.name }}</code>{% endif %}
     </div>
   </div>
@@ -40,7 +36,6 @@ version=1.2.3{% endif %}">{% if schema %}{% for s in schema %}{{ s.name }}=
     </label>
     <div>
       <button type="submit">Run</button>
-      <span class="muted" style="font-size:12.5px; margin-left:8px">Press Run, then Refresh on the run page to update status.</span>
     </div>
   </form>
 </section>

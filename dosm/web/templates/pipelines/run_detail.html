@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Run #{{ run.id }} — DOSM{% endblock %}
+{% block head_extra %}
+{% if run.status in ('queued', 'running', 'unknown') %}
+<meta http-equiv="refresh" content="10">
+{% endif %}
+{% endblock %}
 {% block content %}
 {% set s = run.status %}
 {% set badge = 'badge-blue' if s in ('queued','running')

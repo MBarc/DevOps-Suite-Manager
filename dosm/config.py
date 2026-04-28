@@ -117,6 +117,26 @@ class CertsConfig(BaseModel):
     windows_stores: list[str] = Field(default_factory=lambda: ["MY", "ROOT", "CA"])
 
 
+class RecordingConfig(BaseModel):
+    """Session journal recording settings."""
+
+    enabled: bool = True
+    # Relative to $DOSM_HOME. Finalized journals land here so the docs indexer
+    # picks them up automatically on next reindex.
+    sessions_dir: str = "docs/sessions"
+    # Temp directory for in-progress journals (not indexed until finalized).
+    tmp_dir: str = "data/recording_tmp"
+
+
+class PipelinesConfig(BaseModel):
+    """Background run-status poller settings."""
+
+    poller_enabled: bool = True
+    poller_tick_seconds: float = 5.0
+    poller_max_concurrent: int = 4
+    poller_abandon_after_hours: int = 24
+
+
 class SSHPolicyConfig(BaseModel):
     """Governs what `ssh_exec` actions can run without elevated confirmation.
 
@@ -160,15 +180,16 @@ class Config(BaseModel):
     secrets: SecretsConfig = SecretsConfig()
     auth: AuthConfig = AuthConfig()
     terminals: TerminalsConfig = TerminalsConfig()
+    recording: RecordingConfig = RecordingConfig()
     docs_index: DocsIndexConfig = DocsIndexConfig()
     guacamole: GuacamoleConfig = GuacamoleConfig()
     metrics: MetricsConfig = MetricsConfig()
     certs: CertsConfig = CertsConfig()
+    pipelines: PipelinesConfig = PipelinesConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     # cli_tools is a flat {tool_id: bool} map — Settings page toggles for
     # the CLI catalog. Enabled tools surface on the Terminals page.
     cli_tools: dict[str, bool] = Field(default_factory=dict)
-    enabled_modules: list[str] = Field(default_factory=list)
 
     @property
     def docs_dir(self) -> Path:
@@ -177,10 +198,6 @@ class Config(BaseModel):
     @property
     def scripts_dir(self) -> Path:
         return self.home / "scripts"
-
-    @property
-    def modules_dir(self) -> Path:
-        return self.home / "modules"
 
     @property
     def resources_dir(self) -> Path:

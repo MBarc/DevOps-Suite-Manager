@@ -24,6 +24,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="M12 12l8-8M16 8l3 3"/></svg>
         Credentials
       </a>
+      <a href="/org" class="{% if path.startswith('/org') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><path d="M12 7.5v3"/><path d="M7.5 10.5H4a1 1 0 0 0-1 1v2.5h3.5v-.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v.5H21v-2.5a1 1 0 0 0-1-1h-3.5"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/></svg>
+        Org
+      </a>
       <a href="/docs" class="{% if path.startswith('/docs') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M15 3v4h4"/><path d="M9 13h6M9 17h6M9 9h3"/></svg>
         Docs
@@ -52,10 +56,6 @@
       {% endif %}
 
       <div class="sidebar-section-label">Platform</div>
-      <a href="/modules" class="{% if path.startswith('/modules') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5 12 3 3 7.5v9L12 21l9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 21V12"/></svg>
-        Modules
-      </a>
       {% if user is defined and user and user.role == 'admin' %}
       <a href="/settings" class="{% if path.startswith('/settings') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
@@ -90,4 +90,238 @@
     </div>
   </main>
 </div>
+
+<!-- ── Session recording widget ──────────────────────────────────────────── -->
+<div id="rec-widget" style="position:fixed;bottom:20px;right:20px;z-index:1000;font-size:13px;font-family:inherit"></div>
+
+<style>
+.rec-btn { display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border,#3f3f46);background:var(--surface,#18181b);color:var(--text,#e4e4e7);cursor:pointer;font-size:13px;line-height:1; }
+.rec-btn:hover { background:var(--surface-hover,#27272a); }
+.rec-btn.active { border-color:#f43f5e;background:#1a0a0e; color:#fda4af; }
+.rec-dot { width:8px;height:8px;border-radius:50%;background:#f43f5e;animation:rec-pulse 1.2s ease-in-out infinite; }
+@keyframes rec-pulse { 0%,100%{opacity:1}50%{opacity:.35} }
+.rec-popover { position:absolute;bottom:calc(100% + 8px);right:0;min-width:260px;background:var(--surface,#18181b);border:1px solid var(--border,#3f3f46);border-radius:10px;padding:14px;box-shadow:0 8px 32px rgba(0,0,0,.5); }
+.rec-popover h4 { margin:0 0 10px;font-size:13px;font-weight:600;color:var(--text,#e4e4e7); }
+.rec-popover label { display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer;color:var(--text-muted,#a1a1aa);font-size:12px; }
+.rec-popover label:hover { color:var(--text,#e4e4e7); }
+.rec-popover input[type=number] { width:60px;background:var(--input-bg,#27272a);border:1px solid var(--border,#3f3f46);border-radius:4px;color:var(--text,#e4e4e7);padding:2px 6px;font-size:12px; }
+.rec-popover .rec-actions { display:flex;gap:8px;margin-top:12px; }
+.rec-popover .rec-actions button { flex:1;padding:6px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:600; }
+.rec-start-btn { background:#6366f1;color:#fff; }
+.rec-start-btn:hover { background:#4f46e5; }
+.rec-stop-btn { background:#f43f5e;color:#fff; }
+.rec-stop-btn:hover { background:#e11d48; }
+</style>
+
+<script>
+(function () {
+  const widget = document.getElementById('rec-widget');
+  let state = { active: false, elapsed: 0, options: null, popoverOpen: false };
+  let timer = null;
+
+  const DEFAULT_OPTS = {
+    timestamps: true, pipelines: true, host_opens: true,
+    commands: true, terminal_output: true, clipboard: true,
+    plan_cards: true, monitoring: true, navigation: false, output_cap_kb: 10,
+  };
+
+  function savedOpts() {
+    try { return JSON.parse(localStorage.getItem('dosm.rec_opts') || 'null') || DEFAULT_OPTS; }
+    catch { return DEFAULT_OPTS; }
+  }
+
+  function fmtElapsed(s) {
+    const m = Math.floor(s / 60), sec = s % 60;
+    return `${m}:${String(sec).padStart(2,'0')}`;
+  }
+
+  function render() {
+    if (!state.active) {
+      widget.innerHTML = `<div style="position:relative">
+        <button class="rec-btn" id="rec-idle-btn" title="Start session journal">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
+          Record session
+        </button>
+        ${state.popoverOpen ? renderIdlePopover() : ''}
+      </div>`;
+      document.getElementById('rec-idle-btn').onclick = () => {
+        state.popoverOpen = !state.popoverOpen; render();
+      };
+      if (state.popoverOpen) wireIdlePopover();
+    } else {
+      widget.innerHTML = `<div style="position:relative">
+        <button class="rec-btn active" id="rec-active-btn">
+          <span class="rec-dot"></span>
+          ${fmtElapsed(state.elapsed)}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:2px"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        ${state.popoverOpen ? renderActivePopover() : ''}
+      </div>`;
+      document.getElementById('rec-active-btn').onclick = () => {
+        state.popoverOpen = !state.popoverOpen; render();
+      };
+      if (state.popoverOpen) wireActivePopover();
+    }
+  }
+
+  function renderIdlePopover() {
+    const o = savedOpts();
+    return `<div class="rec-popover">
+      <h4>Session journal options</h4>
+      ${optRow('timestamps','Timestamps', o.timestamps)}
+      ${optRow('pipelines','Pipelines', o.pipelines)}
+      ${optRow('host_opens','Host opens / closes', o.host_opens)}
+      ${optRow('commands','Commands typed', o.commands)}
+      ${optRow('terminal_output','Terminal output', o.terminal_output)}
+      ${optRow('clipboard','Copy / paste', o.clipboard)}
+      ${optRow('plan_cards','Agent plan cards', o.plan_cards)}
+      ${optRow('monitoring','Monitoring queries', o.monitoring)}
+      ${optRow('navigation','Page navigation', o.navigation)}
+      ${optRow('guac_ssh_keystrokes','Keystrokes — Guac SSH ⚠ passwords may appear', o.guac_ssh_keystrokes)}
+      ${optRow('guac_rdp_keystrokes','Keystrokes — Guac RDP ⚠ high noise', o.guac_rdp_keystrokes)}
+      <label>Output cap (KB) <input type="number" id="opt-output_cap_kb" value="${o.output_cap_kb}" min="0" style="margin-left:auto"></label>
+      <div class="rec-actions">
+        <button class="rec-start-btn" id="rec-start-btn">▶ Start recording</button>
+      </div>
+    </div>`;
+  }
+
+  function renderActivePopover() {
+    const o = state.options || savedOpts();
+    return `<div class="rec-popover">
+      <h4>Recording options (live)</h4>
+      ${optRow('timestamps','Timestamps', o.timestamps)}
+      ${optRow('pipelines','Pipelines', o.pipelines)}
+      ${optRow('host_opens','Host opens / closes', o.host_opens)}
+      ${optRow('commands','Commands typed', o.commands)}
+      ${optRow('terminal_output','Terminal output', o.terminal_output)}
+      ${optRow('clipboard','Copy / paste', o.clipboard)}
+      ${optRow('plan_cards','Agent plan cards', o.plan_cards)}
+      ${optRow('monitoring','Monitoring queries', o.monitoring)}
+      ${optRow('navigation','Page navigation', o.navigation)}
+      ${optRow('guac_ssh_keystrokes','Keystrokes — Guac SSH ⚠ passwords may appear', o.guac_ssh_keystrokes)}
+      ${optRow('guac_rdp_keystrokes','Keystrokes — Guac RDP ⚠ high noise', o.guac_rdp_keystrokes)}
+      <label>Output cap (KB) <input type="number" id="opt-output_cap_kb" value="${o.output_cap_kb}" min="0" style="margin-left:auto"></label>
+      <div class="rec-actions">
+        <button class="rec-stop-btn" id="rec-stop-btn">■ Stop &amp; save</button>
+      </div>
+    </div>`;
+  }
+
+  function optRow(key, label, checked) {
+    return `<label><input type="checkbox" id="opt-${key}" ${checked ? 'checked' : ''}> ${label}</label>`;
+  }
+
+  function collectOpts() {
+    const keys = ['timestamps','pipelines','host_opens','commands','terminal_output',
+                  'clipboard','plan_cards','monitoring','navigation',
+                  'guac_ssh_keystrokes','guac_rdp_keystrokes'];
+    const o = {};
+    keys.forEach(k => {
+      const el = document.getElementById(`opt-${k}`);
+      if (el) o[k] = el.checked;
+    });
+    const capEl = document.getElementById('opt-output_cap_kb');
+    if (capEl) o.output_cap_kb = parseInt(capEl.value) || 0;
+    return o;
+  }
+
+  function wireIdlePopover() {
+    const btn = document.getElementById('rec-start-btn');
+    if (!btn) return;
+    btn.onclick = async () => {
+      const opts = collectOpts();
+      localStorage.setItem('dosm.rec_opts', JSON.stringify(opts));
+      const res = await fetch('/recording/start', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({options: opts}),
+      });
+      if (res.ok) {
+        state.popoverOpen = false;
+        await checkStatus();
+        startTimer();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert('Could not start recording: ' + (d.detail || res.status));
+      }
+    };
+  }
+
+  function wireActivePopover() {
+    const stopBtn = document.getElementById('rec-stop-btn');
+    if (stopBtn) stopBtn.onclick = async () => {
+      const res = await fetch('/recording/stop', {method:'POST'});
+      if (res.ok) {
+        const d = await res.json();
+        state = { active: false, elapsed: 0, options: null, popoverOpen: false };
+        stopTimer();
+        render();
+        showToast(`Journal saved → Docs › ${d.journal_path}`);
+      }
+    };
+
+    // Live option toggles — debounce to one PUT per 600ms.
+    let debounce = null;
+    const popover = widget.querySelector('.rec-popover');
+    if (popover) {
+      popover.addEventListener('change', () => {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          const opts = collectOpts();
+          state.options = opts;
+          fetch('/recording/options', {
+            method: 'PUT',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({options: opts}),
+          });
+        }, 600);
+      });
+    }
+  }
+
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;bottom:72px;right:20px;background:#18181b;border:1px solid #3f3f46;color:#e4e4e7;padding:10px 16px;border-radius:8px;font-size:12px;z-index:1001;max-width:320px;word-break:break-all;box-shadow:0 4px 16px rgba(0,0,0,.5)';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 6000);
+  }
+
+  async function checkStatus() {
+    try {
+      const res = await fetch('/recording/status');
+      if (!res.ok) return;
+      const d = await res.json();
+      state.active = d.active;
+      state.elapsed = d.elapsed_seconds || 0;
+      state.options = d.options || null;
+    } catch {}
+    render();
+  }
+
+  function startTimer() {
+    if (timer) return;
+    timer = setInterval(() => {
+      if (state.active) { state.elapsed++; render(); }
+    }, 1000);
+  }
+
+  function stopTimer() {
+    clearInterval(timer); timer = null;
+  }
+
+  // Close popover when clicking outside.
+  document.addEventListener('click', e => {
+    if (!widget.contains(e.target) && state.popoverOpen) {
+      state.popoverOpen = false; render();
+    }
+  });
+
+  // Bootstrap.
+  checkStatus().then(() => { if (state.active) startTimer(); });
+  // Re-check every 30s to handle multi-tab scenarios.
+  setInterval(checkStatus, 30000);
+})();
+</script>
 {% endblock %}

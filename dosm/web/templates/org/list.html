@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Organization — DOSM{% endblock %}
+{% block head_extra %}
+<style>
+.view-toggle { display:flex; gap:var(--sp-1); }
+.view-toggle button { padding:.35em .9em; border-radius:6px; border:1px solid var(--border); background:var(--bg-alt); color:var(--fg-muted); font-size:.85rem; cursor:pointer; }
+.view-toggle button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+#tree-container { width:100%; overflow-x:auto; min-height:200px; }
+#tree-container svg text { font-family:inherit; }
+.dept-row td:first-child { font-weight:500; }
+</style>
+{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Organization</h1>
+    <div class="subtitle">{{ depts|length }} department{{ 's' if depts|length != 1 else '' }}</div>
+  </div>
+  <div class="actions">
+    <a href="/org/new" class="btn btn-ghost btn-sm">New department</a>
+  </div>
+</header>
+
+{% if not depts %}
+<section class="card">
+  <div class="empty-state">No departments yet. <a href="/org/new">Create one</a> to start building the org chart.</div>
+</section>
+{% else %}
+
+<section class="card">
+  <div class="row-between" style="margin-bottom:var(--sp-3)">
+    <h2 style="margin:0">Departments</h2>
+    <div class="view-toggle">
+      <button id="btn-list" class="active">List</button>
+      <button id="btn-tree">Tree</button>
+    </div>
+  </div>
+
+  <!-- List view -->
+  <div id="view-list">
+    <table class="data">
+      <thead>
+        <tr><th>Name</th><th>Head</th><th>Parent</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+      {% for d in depts %}
+      <tr class="dept-row">
+        <td><a href="/org/{{ d.slug }}">{{ d.name }}</a></td>
+        <td class="muted">{{ d.head or "—" }}</td>
+        <td class="muted">{{ d.parent.name if d.parent else "—" }}</td>
+        <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          {{ (d.description or "")[:100] }}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Tree view -->
+  <div id="view-tree" style="display:none">
+    <div id="tree-container"><span class="muted" style="font-size:.85rem">Loading…</span></div>
+  </div>
+</section>
+{% endif %}
+
+<script>
+(function () {
+  const btnList = document.getElementById('btn-list');
+  const btnTree = document.getElementById('btn-tree');
+  const viewList = document.getElementById('view-list');
+  const viewTree = document.getElementById('view-tree');
+  if (!btnList) return;
+
+  let treeLoaded = false;
+
+  function showList() {
+    viewList.style.display = '';
+    viewTree.style.display = 'none';
+    btnList.classList.add('active');
+    btnTree.classList.remove('active');
+  }
+
+  function showTree() {
+    viewList.style.display = 'none';
+    viewTree.style.display = '';
+    btnTree.classList.add('active');
+    btnList.classList.remove('active');
+    if (!treeLoaded) { treeLoaded = true; loadTree(); }
+  }
+
+  btnList.addEventListener('click', showList);
+  btnTree.addEventListener('click', showTree);
+
+  async function loadTree() {
+    const container = document.getElementById('tree-container');
+    // Load D3 lazily
+    await loadScript('https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js');
+    let data;
+    try {
+      const res = await fetch('/org/tree.json');
+      data = await res.json();
+    } catch (e) {
+      container.innerHTML = '<span class="muted">Could not load tree data.</span>';
+      return;
+    }
+    container.innerHTML = '';
+    renderD3Tree(container, data);
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) return resolve();
+      const s = document.createElement('script');
+      s.src = src; s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function renderD3Tree(container, data) {
+    const root = d3.hierarchy(data);
+    const nodeCount = root.descendants().length;
+
+    const marginX = 20, marginY = 60;
+    const W = Math.max(container.clientWidth - 4, 600);
+    const H = Math.max(nodeCount * 56 + marginY * 2, 240);
+
+    const treeLayout = d3.tree()
+      .size([W - marginX * 2, H - marginY * 2])
+      .separation((a, b) => (a.parent === b.parent ? 1 : 1.4));
+
+    treeLayout(root);
+
+    const svg = d3.create('svg')
+      .attr('width', W)
+      .attr('height', H)
+      .attr('style', 'display:block; font-size:12px;');
+
+    const g = svg.append('g').attr('transform', `translate(${marginX},${marginY})`);
+
+    // Links
+    g.append('g')
+      .attr('fill', 'none')
+      .attr('stroke', 'var(--border, #3f3f46)')
+      .attr('stroke-width', 1.5)
+      .selectAll('path')
+      .data(root.links())
+      .join('path')
+      .attr('d', d3.linkVertical().x(d => d.x).y(d => d.y));
+
+    // Nodes
+    const node = g.append('g')
+      .selectAll('g')
+      .data(root.descendants())
+      .join('g')
+      .attr('transform', d => `translate(${d.x},${d.y})`);
+
+    node.append('circle')
+      .attr('r', 7)
+      .attr('fill', d => d.depth === 0 ? 'var(--accent, #6366f1)' : 'var(--bg-alt, #27272a)')
+      .attr('stroke', 'var(--accent, #6366f1)')
+      .attr('stroke-width', 1.5);
+
+    // Name label above
+    node.append('text')
+      .attr('dy', '-14')
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'var(--fg-strong, #fff)')
+      .attr('font-weight', '500')
+      .style('cursor', d => d.data.slug ? 'pointer' : 'default')
+      .text(d => d.data.name)
+      .on('click', (_, d) => { if (d.data.slug) window.location.href = '/org/' + d.data.slug; });
+
+    // Head label below
+    node.filter(d => d.data.head)
+      .append('text')
+      .attr('dy', '22')
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'var(--fg-muted, #71717a)')
+      .attr('font-size', '11')
+      .text(d => d.data.head);
+
+    container.appendChild(svg.node());
+  }
+})();
+</script>
+{% endblock %}

@@ -5,7 +5,7 @@ USER root
 
 # Download and install the auth-json extension at build time.
 # The tar.gz contains guacamole-auth-json-1.5.5/guacamole-auth-json-1.5.5.jar.
-RUN apt-get update && apt-get install -y --no-install-recommends curl tar \
+RUN apt-get update && apt-get install -y --no-install-recommends curl tar unzip zip \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /etc/guacamole/extensions \
     && curl -fsSL \
@@ -15,6 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl tar \
     && cp /tmp/guacamole-auth-json-1.5.5/guacamole-auth-json-1.5.5.jar \
           /etc/guacamole/extensions/ \
     && rm -rf /tmp/auth-json.tar.gz /tmp/guacamole-auth-json-1.5.5
+
+COPY dosm-disconnect.js /tmp/dosm-disconnect.js
+RUN cd /tmp && \
+    unzip /opt/guacamole/guacamole.war index.html && \
+    sed -i 's|</body>|<script src="dosm-disconnect.js"></script></body>|' index.html && \
+    zip /opt/guacamole/guacamole.war index.html dosm-disconnect.js && \
+    rm index.html
 
 COPY docker-entrypoint.sh /dosm-entrypoint.sh
 RUN chmod +x /dosm-entrypoint.sh

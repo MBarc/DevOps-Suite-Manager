@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Health — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Health</h1>
+    <div class="subtitle">
+      Status:
+      {% if overall_ok %}
+        <span class="badge badge-green"><span class="dot ok"></span> ok</span>
+      {% else %}
+        <span class="badge badge-amber"><span class="dot warn"></span> degraded</span>
+      {% endif %}
+      · DOSM v{{ version }}
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/health" target="_blank" rel="noopener">View JSON</a>
+    <button class="btn btn-subtle" type="button" onclick="window.location.reload()">Refresh</button>
+  </div>
+</header>
+
+<section class="card">
+  <h2>Subsystems</h2>
+  <table class="data">
+    <thead>
+      <tr><th style="width:30%">Subsystem</th><th>Status</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Database</strong></td>
+        <td>
+          {% if db_ok %}
+            <span class="badge badge-green"><span class="dot ok"></span> reachable</span>
+          {% else %}
+            <span class="badge badge-red"><span class="dot err"></span> error</span>
+          {% endif %}
+        </td>
+        <td class="muted">
+          SQLite at <code>{{ home }}/data/app.db</code>
+          {% if db_error %}<div class="error" style="margin-top:4px">{{ db_error }}</div>{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Secrets backend</strong></td>
+        <td><span class="badge badge-blue">{{ secrets_backend }}</span></td>
+        <td class="muted">Configured in <code>config.yaml</code> under <code>secrets.backend</code></td>
+      </tr>
+      <tr>
+        <td><strong>Jump tunnels</strong></td>
+        <td>
+          {% if tunnel_stats.open_jump_connections == 0 %}
+            <span class="badge badge-gray"><span class="dot"></span> idle</span>
+          {% else %}
+            <span class="badge badge-blue"><span class="dot ok"></span> {{ tunnel_stats.open_jump_connections }} open</span>
+          {% endif %}
+        </td>
+        <td class="muted">
+          {{ tunnel_stats.open_forwards }} forward{{ '' if tunnel_stats.open_forwards == 1 else 's' }} ·
+          {{ tunnel_stats.active_sessions }} browser session{{ '' if tunnel_stats.active_sessions == 1 else 's' }}
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Guacamole</strong></td>
+        <td>
+          {% if guacamole_enabled %}
+            <span class="badge badge-green"><span class="dot ok"></span> enabled</span>
+          {% else %}
+            <span class="badge badge-gray"><span class="dot"></span> disabled</span>
+          {% endif %}
+        </td>
+        <td class="muted">Browser SSH/RDP/VNC sessions {% if guacamole_enabled %}available{% else %}not configured{% endif %}</td>
+      </tr>
+      <tr>
+        <td><strong>LLM model</strong></td>
+        <td><span class="badge badge-blue">{{ llm_model }}</span></td>
+        <td class="muted">Configured under <code>llm</code> in <code>config.yaml</code></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Environment</h2>
+  <dl class="kv">
+    <dt>DOSM_HOME</dt><dd><code>{{ home }}</code></dd>
+    <dt>Version</dt><dd><code>v{{ version }}</code></dd>
+  </dl>
+</section>
+{% endblock %}

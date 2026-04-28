@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Import doc — DOSM Docs{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Import document</h1>
+    <div class="subtitle">Upload a file to convert and add to the vault</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/docs">Cancel</a>
+  </div>
+</header>
+
+<section class="card">
+  {% if error %}
+  <div class="error" style="margin-bottom: var(--sp-3)">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/docs/import" enctype="multipart/form-data">
+    <label class="field">
+      File
+      <input type="file" name="file" required accept=".docx,.pdf,.md,.markdown,.txt">
+      <span class="field-hint">Supported: <code>.docx</code> <code>.pdf</code> <code>.md</code> <code>.txt</code> · Max 25 MiB</span>
+    </label>
+    <label class="field">
+      Folder
+      <select name="app_slug">
+        <option value="_unfiled">— Unfiled —</option>
+        {% for a in folders %}
+        <option value="{{ a.slug }}">{{ a.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      Title override
+      <input type="text" name="title_override" placeholder="Leave blank to use the filename">
+      <span class="field-hint">If blank, the filename is used as the title.</span>
+    </label>
+    <div style="margin-top: var(--sp-3)">
+      <button type="submit">Convert &amp; review</button>
+    </div>
+  </form>
+</section>
+
+<section class="card" style="font-size:.9rem; color: var(--fg-muted)">
+  <h2>Notes</h2>
+  <ul>
+    <li><strong>.docx</strong> — converted to markdown via mammoth. Complex layouts (multi-column, text boxes) may not convert cleanly. Images are not imported.</li>
+    <li><strong>.pdf</strong> — text is extracted page by page. Scanned or image-only PDFs produce empty or garbled output. Review the preview before saving.</li>
+    <li><strong>.md / .txt</strong> — used as-is. No conversion performed.</li>
+    <li>After conversion you will see the result in the editor before anything is saved. Click <strong>Save</strong> there to commit the file to the vault.</li>
+  </ul>
+</section>
+{% endblock %}

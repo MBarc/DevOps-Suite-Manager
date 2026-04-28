@@ -60,4 +60,5 @@ async def logout(request: Request, db: Session = Depends(get_session)):
     request.session.clear()
     if uid is not None:
         db.add(AuditLog(actor_id=uid, action="auth.logout", target=f"user:{uid}"))
+        db.commit()
     return RedirectResponse("/login", status_code=303)

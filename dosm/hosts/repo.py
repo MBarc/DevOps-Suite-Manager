@@ -26,13 +26,8 @@ def get_or_create_tag(db: Session, name: str) -> Tag:
     return tag
 
 
-def list_hosts(db: Session, *, kind: str | None = None) -> list[Host]:
-    """List hosts, optionally filtered by role.
-
-    kind=None        — all hosts (default)
-    kind='servers'   — only is_jumpbox=False
-    kind='jumpboxes' — only is_jumpbox=True
-    """
+def list_hosts(db: Session, *, kind: str | None = None, tag: str | None = None) -> list[Host]:
+    """List hosts, optionally filtered by role and/or tag."""
     stmt = (
         select(Host)
         .options(
@@ -46,6 +41,14 @@ def list_hosts(db: Session, *, kind: str | None = None) -> list[Host]:
         stmt = stmt.where(Host.is_jumpbox.is_(True))
     elif kind == "servers":
         stmt = stmt.where(Host.is_jumpbox.is_(False))
+    if tag:
+        stmt = stmt.where(
+            Host.id.in_(
+                select(HostTag.host_id)
+                .join(Tag, HostTag.tag_id == Tag.id)
+                .where(Tag.name == tag)
+            )
+        )
     return list(db.execute(stmt).scalars())
 
 
@@ -66,12 +69,20 @@ def list_credentials(db: Session) -> list[Credential]:
 
 
 def list_tags(db: Session) -> list[Tag]:
-    return list(db.execute(select(Tag).order_by(Tag.name)).scalars())
+    stmt = (
+        select(Tag)
+        .where(Tag.id.in_(select(HostTag.tag_id)))
+        .order_by(Tag.name)
+    )
+    return list(db.execute(stmt).scalars())
 
 
 def list_jump_candidates(db: Session, exclude_host_id: int | None = None) -> list[Host]:
-    """Hosts eligible to act as a jump box: flagged is_jumpbox, SSH protocol,
-    not the host itself."""
+    """Hosts eligible to act as a jump box: flagged is_jumpbox, not the host
+    itself. Protocol isn't filtered — DOSM's tunnel mechanism currently only
+    works with SSH hops, but the inventory accepts RDP/VNC jumpboxes for
+    operators who model their environment that way (the connect route
+    surfaces a clear error if the chain can't be tunneled)."""
     stmt = (
         select(Host)
         .where(Host.is_jumpbox.is_(True))

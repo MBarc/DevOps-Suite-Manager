@@ -48,9 +48,11 @@ without outbound traffic.
 - **Audit log everything that mutates state.** Insert an `AuditLog` row in
   the same DB session as the change. Look at any existing route for the
   pattern.
-- **Plug-in surface for integrations is `dosm/modules/`** with `module.yaml`
-  contracts. Anything that's *not* a built-in capability of DOSM (Service
-  Fabric, Dynatrace, etc.) belongs there, not in the core.
+- **Integrations live in core, organized by domain.** Monitoring adapters
+  in `dosm/monitoring/adapters/`, pipeline adapters in `dosm/pipelines/`,
+  metrics sources in `dosm/metrics/`. Each domain has its own ABC; new
+  integrations slot in there. (The pluggable `dosm/modules/` system was
+  retired — it had only ever shipped one example module.)
 - **Don't push to `main`** without explicit user permission. The working
   branch is `claude/devops-suite-llm-design-ZJ2aU`.
 - **Honor `dosm/migrations.py` for schema changes.** It's an idempotent

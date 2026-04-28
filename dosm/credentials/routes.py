@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -15,7 +16,18 @@ from dosm.secrets import SecretNotFound, get_backend
 
 router = APIRouter(prefix="/credentials")
 
-CRED_KINDS = ("ssh_password", "ssh_key", "rdp_password", "vnc_password", "api_token")
+CRED_KINDS = ("login", "ssh_key", "pat")
+
+KIND_LABELS = {
+    "login": "Login (username + password)",
+    "ssh_key": "SSH Key",
+    "pat": "Personal Access Token (PAT)",
+}
+
+
+def _auto_secret_ref(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
+    return f"credentials/{slug}"
 
 
 def _templates(request: Request):
@@ -54,6 +66,7 @@ def _form_context(host=None, error: str | None = None, secret_present: bool = Fa
     base = {
         "cred": host,
         "kinds": list(CRED_KINDS),
+        "kind_labels": KIND_LABELS,
         "error": error,
         "secret_present": secret_present,
     }
@@ -79,14 +92,15 @@ async def credentials_create(
     name: str = Form(...),
     kind: str = Form(...),
     username: str = Form(""),
-    secret_ref: str = Form(...),
+    domain: str = Form(""),
+    secret_ref: str = Form(""),
     secret_value: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
     cfg = request.app.state.config
     name = name.strip()
-    secret_ref = secret_ref.strip()
+    secret_ref = secret_ref.strip() or _auto_secret_ref(name)
     if kind not in CRED_KINDS:
         return _templates(request).TemplateResponse(
             request,
@@ -94,17 +108,18 @@ async def credentials_create(
             _form_context(user=user, error=f"unknown kind {kind!r}"),
             status_code=400,
         )
-    if not name or not secret_ref:
+    if not name:
         return _templates(request).TemplateResponse(
             request,
             "credentials/form.html",
-            _form_context(user=user, error="name and secret_ref are required"),
+            _form_context(user=user, error="Profile name is required."),
             status_code=400,
         )
     cred = Credential(
         name=name,
         kind=kind,
         username=username.strip() or None,
+        domain=domain.strip() or None,
         secret_ref=secret_ref,
     )
     db.add(cred)
@@ -203,7 +218,7 @@ async def credentials_update(
     name: str = Form(...),
     kind: str = Form(...),
     username: str = Form(""),
-    secret_ref: str = Form(...),
+    domain: str = Form(""),
     secret_value: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
@@ -222,8 +237,9 @@ async def credentials_update(
     cred.name = name.strip()
     cred.kind = kind
     cred.username = username.strip() or None
-    cred.secret_ref = secret_ref.strip()
-    cred.updated_at = datetime.utcnow()
+    cred.domain = domain.strip() or None
+    # secret_ref is immutable after creation — keeps existing value
+    cred.updated_at = datetime.now(timezone.utc)
     try:
         db.flush()
     except IntegrityError as e:
@@ -269,4 +285,5 @@ async def credentials_delete(
     name = cred.name
     db.delete(cred)
     db.add(AuditLog(actor_id=user.id, action="credential.delete", target=f"credential:{cred_id}", details=f"name={name}"))
+    db.commit()
     return RedirectResponse("/credentials", status_code=303)

@@ -15,11 +15,52 @@
 </header>
 
 <section class="card">
-  <form method="get" action="/docs/search" class="search-field">
-    <input type="search" name="q" value="{{ q }}" placeholder="Search documents…" autofocus />
-    <span class="kbd-hint"><span class="kbd">/</span></span>
-  </form>
+  <input type="text" id="docs-search-input" value="{{ q }}" placeholder="Search documentation…" autofocus autocomplete="off" style="width:100%; box-sizing:border-box" />
 </section>
+
+<script>
+(function () {
+  const input = document.getElementById('docs-search-input');
+  if (!input) return;
+  if (input.value) { const l = input.value.length; input.setSelectionRange(l, l); }
+  let activeToast = null;
+  let hideTimer = null;
+
+  function showWarning() {
+    if (activeToast) activeToast.remove();
+    const rect = input.getBoundingClientRect();
+    const toast = document.createElement('div');
+    toast.textContent = 'Type something to search';
+    toast.style.cssText = [
+      'position: fixed',
+      'top: ' + (rect.bottom + 6) + 'px',
+      'left: ' + rect.left + 'px',
+      'background: #422006',
+      'border: 1px solid #d97706',
+      'color: #fde68a',
+      'padding: 6px 12px',
+      'border-radius: 6px',
+      'font-size: 13px',
+      'z-index: 99999',
+      'box-shadow: 0 4px 12px rgba(0,0,0,.35)',
+      'pointer-events: none'
+    ].join(';');
+    document.body.appendChild(toast);
+    activeToast = toast;
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { toast.remove(); if (activeToast === toast) activeToast = null; }, 2000);
+  }
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const q = input.value.trim();
+    if (!q) { showWarning(); return; }
+    window.location.href = '/docs/search?q=' + encodeURIComponent(q);
+  });
+})();
+</script>
 
 {% if q %}
 <section class="card">

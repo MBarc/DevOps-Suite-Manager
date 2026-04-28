@@ -42,7 +42,7 @@ def _cache_clear_host(hostname: str) -> None:
         if key[0] == k:
             del _result_cache[key]
 
-TOOL_CHOICES = ["dynatrace", "datadog", "servicenow"]
+TOOL_CHOICES = ["dynatrace", "datadog", "servicenow", "prometheus"]
 DD_SITES = ["datadoghq.com", "datadoghq.eu", "us3.datadoghq.com", "us5.datadoghq.com", "ap1.datadoghq.com", "ddog-gov.com"]
 
 

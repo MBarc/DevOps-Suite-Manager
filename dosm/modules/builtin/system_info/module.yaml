@@ -1,8 +1,0 @@
-name: system_info
-version: 0.1.0
-description: Host snapshot — uptime, CPU, memory, disks — for the box DOSM is running on.
-capabilities:
-  - inventory
-  - health
-python_deps:
-  - psutil>=6.1

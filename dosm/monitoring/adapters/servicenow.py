@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from dosm.monitoring.adapters.base import HostCheckResult, MonitoringAdapter
+
+_THRESHOLDS_NOTE = "Threshold values are not available via the ServiceNow API"
 
 
 class ServiceNowAdapter(MonitoringAdapter):
@@ -14,42 +18,128 @@ class ServiceNowAdapter(MonitoringAdapter):
         self.username = username
         self.password = password
 
-    async def check_host(self, hostname: str) -> HostCheckResult:
-        url = f"{self.base_url}/api/now/table/cmdb_ci_server"
-        params = {
-            "sysparm_query": f"name={hostname}",
-            "sysparm_limit": "5",
-            "sysparm_fields": "sys_id,name,fqdn,operational_status,sys_class_name",
-        }
+    async def _fetch_cmdb(self, client: httpx.AsyncClient, hostname: str) -> list[dict]:
+        resp = await client.get(
+            f"{self.base_url}/api/now/table/cmdb_ci_server",
+            params={
+                "sysparm_query": f"name={hostname}",
+                "sysparm_limit": "5",
+                "sysparm_fields": (
+                    "sys_id,name,fqdn,operational_status,sys_class_name,"
+                    "discovery_source,last_discovered,monitor"
+                ),
+                "sysparm_display_value": "true",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("result", [])
+
+    async def _fetch_relationships(self, client: httpx.AsyncClient, sys_id: str) -> list[dict]:
         try:
-            async with httpx.AsyncClient(
-                timeout=10, auth=(self.username, self.password)
-            ) as client:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-            results = data.get("result", [])
-            if not results:
+            resp = await client.get(
+                f"{self.base_url}/api/now/table/cmdb_rel_ci",
+                params={
+                    "sysparm_query": f"child={sys_id}^type.nameLIKEMonitor",
+                    "sysparm_limit": "10",
+                    "sysparm_fields": "parent,type",
+                    "sysparm_display_value": "true",
+                },
+            )
+            resp.raise_for_status()
+            return [
+                {
+                    "name": r.get("parent", ""),
+                    "rel_type": r.get("type", ""),
+                }
+                for r in resp.json().get("result", [])
+                if r.get("parent")
+            ]
+        except Exception:
+            return []
+
+    async def _fetch_metrics(self, client: httpx.AsyncClient, sys_id: str) -> dict:
+        try:
+            resp = await client.get(
+                f"{self.base_url}/api/now/table/metric_instance",
+                params={
+                    "sysparm_query": f"ci={sys_id}",
+                    "sysparm_limit": "50",
+                    "sysparm_fields": "definition",
+                    "sysparm_display_value": "true",
+                },
+            )
+            if resp.status_code in (403, 404):
+                return {"status": "unavailable", "items": []}
+            resp.raise_for_status()
+            items = [
+                r.get("definition", "")
+                for r in resp.json().get("result", [])
+                if r.get("definition")
+            ]
+            return {"status": "available" if items else "empty", "items": items}
+        except Exception:
+            return {"status": "unavailable", "items": []}
+
+    async def check_host(self, hostname: str) -> HostCheckResult:
+        async with httpx.AsyncClient(
+            timeout=10, auth=(self.username, self.password)
+        ) as client:
+            try:
+                ci_list = await self._fetch_cmdb(client, hostname)
+            except Exception as exc:
+                return HostCheckResult(
+                    source_id=self.source_id, source_name=self.source_name,
+                    tool="servicenow", found=False, error=str(exc),
+                )
+
+            if not ci_list:
                 return HostCheckResult(
                     source_id=self.source_id, source_name=self.source_name,
                     tool="servicenow", found=False,
                 )
-            ci = results[0]
-            sys_id = ci.get("sys_id", "")
-            return HostCheckResult(
-                source_id=self.source_id, source_name=self.source_name,
-                tool="servicenow", found=True,
-                entity_id=sys_id,
-                entity_name=ci.get("name", hostname),
-                entity_url=f"{self.base_url}/nav_to.do?uri=cmdb_ci_server.do?sys_id={sys_id}",
-                extra={
-                    "operational_status": ci.get("operational_status"),
-                    "class": ci.get("sys_class_name"),
-                    "fqdn": ci.get("fqdn"),
-                },
+
+            primary = ci_list[0]
+            sys_id = primary.get("sys_id", "")
+
+            relationships, metrics = await asyncio.gather(
+                self._fetch_relationships(client, sys_id),
+                self._fetch_metrics(client, sys_id),
             )
-        except Exception as exc:
-            return HostCheckResult(
-                source_id=self.source_id, source_name=self.source_name,
-                tool="servicenow", found=False, error=str(exc),
-            )
+
+        monitor_raw = primary.get("monitor")
+        monitor_enabled = monitor_raw in (True, "true", "1")
+
+        return HostCheckResult(
+            source_id=self.source_id,
+            source_name=self.source_name,
+            tool="servicenow",
+            found=True,
+            entity_id=sys_id,
+            entity_name=primary.get("name", hostname),
+            entity_url=f"{self.base_url}/nav_to.do?uri=cmdb_ci_server.do?sys_id={sys_id}",
+            extra={
+                "operational_status": primary.get("operational_status") or None,
+                "class": primary.get("sys_class_name") or None,
+                "fqdn": primary.get("fqdn") or None,
+                "discovery_source": primary.get("discovery_source") or None,
+                "last_discovered": primary.get("last_discovered") or None,
+                "monitor_enabled": monitor_enabled,
+                "monitoring_relationships": relationships,
+                "metric_collection_status": metrics["status"],
+                "metric_collection": metrics["items"],
+                "thresholds_note": _THRESHOLDS_NOTE,
+                "additional_matches": [
+                    {
+                        "name": ci.get("name", ""),
+                        "sys_id": ci.get("sys_id", ""),
+                        "class": ci.get("sys_class_name", ""),
+                        "fqdn": ci.get("fqdn", ""),
+                        "url": (
+                            f"{self.base_url}/nav_to.do"
+                            f"?uri=cmdb_ci_server.do?sys_id={ci.get('sys_id', '')}"
+                        ),
+                    }
+                    for ci in ci_list[1:]
+                ],
+            },
+        )

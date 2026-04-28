@@ -2,8 +2,8 @@
 
 The same panel UI is reused for the DOSM host (Terminals page) and remote
 hosts (Guacamole connect page). Each source returns the same dict shape as
-``system_info.snapshot_dict`` so the frontend doesn't care where the data
-came from.
+``local_snapshot.snapshot_dict`` so the frontend doesn't care where the
+data came from.
 """
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from dosm.config import Config
+from dosm.metrics.local_snapshot import snapshot_dict
 from dosm.models import Credential, Host
-from dosm.modules.builtin.system_info.snapshot import snapshot_dict
 from dosm.secrets import SecretNotFound, get_backend
 
 

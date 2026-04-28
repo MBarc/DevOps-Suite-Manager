@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}{% if path %}Edit{% else %}New doc{% endif %} — DOSM Docs{% endblock %}
+{% block head_extra %}
+<style>
+.editor-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: var(--sp-3); }
+.editor-tab { padding: .45em 1.1em; cursor: pointer; font-size: .9rem; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; color: var(--fg-muted); }
+.editor-tab.active { background: var(--bg); border-color: var(--border); color: var(--fg-strong); margin-bottom: -1px; }
+.editor-pane { display: none; }
+.editor-pane.active { display: block; }
+#md-textarea { width: 100%; min-height: 480px; font-family: var(--font-mono, monospace); font-size: .87rem; resize: vertical; box-sizing: border-box; padding: var(--sp-3); background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); line-height: 1.55; }
+.rendered-md h1,.rendered-md h2,.rendered-md h3 { color: var(--fg-strong); margin: 1.2em 0 .4em; }
+.rendered-md h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+.rendered-md code { background: var(--bg-alt); padding: .1em .3em; border-radius: 3px; font-size: .87em; }
+.rendered-md pre { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: var(--sp-3); overflow-x: auto; }
+.rendered-md pre code { background: none; padding: 0; }
+.rendered-md blockquote { border-left: 3px solid var(--accent); margin: .6em 0; padding: .2em var(--sp-3); color: var(--fg-muted); }
+.rendered-md table { border-collapse: collapse; width: 100%; font-size: .92em; }
+.rendered-md th,.rendered-md td { border: 1px solid var(--border); padding: .4em .65em; text-align: left; }
+.rendered-md th { background: var(--bg-alt); font-weight: 600; }
+.rendered-md ul,.rendered-md ol { padding-left: 1.4em; margin: .4em 0; }
+.rendered-md a { color: var(--accent); }
+.conflict-banner { background: #7c2d12; color: #fef3c7; padding: var(--sp-2) var(--sp-3); border-radius: 6px; margin-bottom: var(--sp-3); font-size: .9rem; }
+.import-warn { background: #1c1917; border: 1px solid #78350f; color: #fef3c7; padding: var(--sp-2) var(--sp-3); border-radius: 6px; margin-bottom: var(--sp-3); font-size: .88rem; }
+.folder-search { position: relative; }
+.folder-dropdown { position: absolute; top: calc(100% + 3px); left: 0; right: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.25); z-index: 200; max-height: 200px; overflow-y: auto; display: none; }
+.folder-option { padding: .45em .75em; cursor: pointer; font-size: .9rem; color: var(--fg); }
+.folder-option:hover { background: var(--accent); color: #fff; }
+</style>
+{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>{% if path %}Edit doc{% else %}New doc{% endif %}</h1>
+    {% if path %}<div class="subtitle"><code>{{ path }}</code></div>{% endif %}
+  </div>
+  <div class="actions">
+    <button type="button" class="btn btn-ghost" id="btn-import-file">Import file</button>
+    <input type="file" id="file-import-input" accept=".docx,.pdf,.md,.markdown,.txt" style="display:none">
+    <a class="btn btn-ghost" href="/docs">Cancel</a>
+  </div>
+</header>
+
+<section class="card">
+  {% if import_warnings %}
+  <div class="import-warn">
+    <strong>Import notes:</strong> {{ import_warnings }}<br>
+    <small>Review the converted content below. Images were not imported. Click Save when ready.</small>
+  </div>
+  {% endif %}
+  {% if error %}
+  <div class="{% if conflict %}conflict-banner{% else %}error{% endif %}" style="margin-bottom: var(--sp-3)">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/docs/save">
+    <input type="hidden" name="path" value="{{ path }}">
+    <input type="hidden" name="original_mtime" value="{{ original_mtime }}">
+
+    <div class="form-row" style="display:grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-bottom: var(--sp-3)">
+      <label class="field">
+        Title
+        <input type="text" name="title" value="{{ title }}" required placeholder="Document title" autofocus>
+      </label>
+      <label class="field">
+        Folder
+        <div class="folder-search">
+          <input type="text" id="folder-search-input" autocomplete="off"
+                 placeholder="— Unfiled —"
+                 value="{% if app_slug != '_unfiled' %}{% for a in folders %}{% if a.slug == app_slug %}{{ a.name }}{% endif %}{% endfor %}{% endif %}">
+          <input type="hidden" name="app_slug" id="folder-slug-value" value="{{ app_slug }}">
+          <div class="folder-dropdown" id="folder-dropdown">
+            <div class="folder-option" data-slug="_unfiled">— Unfiled —</div>
+            {% for a in folders %}
+            <div class="folder-option" data-slug="{{ a.slug }}">{{ a.name }}</div>
+            {% endfor %}
+          </div>
+        </div>
+        {% if path %}<span class="field-hint">Changing the folder updates the doc's tag; the file is not moved.</span>{% endif %}
+      </label>
+    </div>
+
+    <div class="editor-tabs">
+      <span class="editor-tab active" data-tab="write">Write</span>
+      <span class="editor-tab" data-tab="preview">Preview</span>
+    </div>
+
+    <div id="pane-write" class="editor-pane active">
+      <textarea id="md-textarea" name="body" placeholder="Write markdown here…">{{ body }}</textarea>
+    </div>
+    <div id="pane-preview" class="editor-pane rendered-md" style="min-height:200px; padding: var(--sp-3) 0">
+      <em class="muted">Click Preview tab to render.</em>
+    </div>
+
+    <div style="margin-top: var(--sp-3); display:flex; gap: var(--sp-2)">
+      <button type="submit">Save</button>
+      {% if path %}
+      <button type="button" id="btn-delete" class="btn btn-ghost" style="margin-left:auto; color: var(--red, #ef4444)">Delete doc</button>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if path %}
+  <form id="form-delete" method="post" action="/docs/delete" style="display:none">
+    <input type="hidden" name="path" value="{{ path }}">
+  </form>
+  {% endif %}
+</section>
+
+<script>
+(function() {
+  const tabs = document.querySelectorAll('.editor-tab');
+  const panes = { write: document.getElementById('pane-write'), preview: document.getElementById('pane-preview') };
+  tabs.forEach(t => t.addEventListener('click', async () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    Object.values(panes).forEach(p => p.classList.remove('active'));
+    t.classList.add('active');
+    const name = t.dataset.tab;
+    panes[name].classList.add('active');
+    if (name === 'preview') {
+      const body = document.getElementById('md-textarea').value;
+      const fd = new FormData(); fd.append('body', body);
+      const res = await fetch('/docs/preview', { method: 'POST', body: fd });
+      const data = await res.json();
+      panes.preview.innerHTML = data.html || '<em class="muted">Nothing to preview.</em>';
+    }
+  }));
+  const delBtn = document.getElementById('btn-delete');
+  if (delBtn) {
+    delBtn.addEventListener('click', () => {
+      if (confirm('Permanently delete this doc? This cannot be undone.')) {
+        document.getElementById('form-delete').submit();
+      }
+    });
+  }
+
+  // Folder search combobox
+  const folderInput = document.getElementById('folder-search-input');
+  const folderSlug = document.getElementById('folder-slug-value');
+  const folderDropdown = document.getElementById('folder-dropdown');
+  if (folderInput && folderDropdown) {
+    const opts = Array.from(folderDropdown.querySelectorAll('.folder-option'));
+
+    function filterOpts(q) {
+      const lq = q.toLowerCase();
+      opts.forEach(o => { o.style.display = (!lq || o.textContent.toLowerCase().includes(lq)) ? '' : 'none'; });
+      folderDropdown.style.display = 'block';
+    }
+
+    folderInput.addEventListener('focus', () => filterOpts(folderInput.value));
+    folderInput.addEventListener('input', () => filterOpts(folderInput.value));
+
+    opts.forEach(o => {
+      o.addEventListener('mousedown', e => {
+        e.preventDefault();
+        folderSlug.value = o.dataset.slug;
+        folderInput.value = o.dataset.slug === '_unfiled' ? '' : o.textContent;
+        folderDropdown.style.display = 'none';
+      });
+    });
+
+    folderInput.addEventListener('blur', () => {
+      setTimeout(() => { folderDropdown.style.display = 'none'; }, 150);
+      // If left empty or unrecognised, reset to unfiled
+      const match = opts.find(o => o.textContent.trim() === folderInput.value.trim());
+      if (!folderInput.value.trim() || !match) {
+        folderSlug.value = '_unfiled';
+        folderInput.value = '';
+      }
+    });
+  }
+
+  // Import file into editor
+  const importBtn = document.getElementById('btn-import-file');
+  const fileInput = document.getElementById('file-import-input');
+  if (importBtn && fileInput) {
+    importBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async function () {
+      if (!this.files.length) return;
+      const file = this.files[0];
+      this.value = '';
+      importBtn.textContent = 'Converting…';
+      importBtn.disabled = true;
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const resp = await fetch('/docs/convert', { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (data.error) { alert('Import failed: ' + data.error); return; }
+        const titleInput = document.querySelector('input[name="title"]');
+        const body = document.getElementById('md-textarea');
+        if (titleInput && !titleInput.value.trim()) titleInput.value = data.title;
+        if (body) {
+          if (!body.value.trim() || confirm('Replace current content with the imported file?')) {
+            body.value = data.body_md;
+          }
+        }
+        if (data.warnings) {
+          let warn = document.getElementById('import-warn-dynamic');
+          if (!warn) {
+            warn = document.createElement('div');
+            warn.id = 'import-warn-dynamic';
+            warn.className = 'import-warn';
+            document.querySelector('.card').prepend(warn);
+          }
+          warn.innerHTML = '<strong>Import notes:</strong> ' + data.warnings;
+        }
+      } catch (e) {
+        alert('Import failed: ' + e.message);
+      } finally {
+        importBtn.textContent = 'Import file';
+        importBtn.disabled = false;
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

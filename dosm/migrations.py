@@ -57,4 +57,42 @@ def run_migrations(engine: Engine) -> list[str]:
                 "SELECT DISTINCT jump_host_id FROM hosts WHERE jump_host_id IS NOT NULL)"
             ))
         applied.append("hosts.is_jumpbox")
+    # Credential kind consolidation: collapse protocol-specific kinds into
+    # protocol-agnostic ones (ssh_password/rdp_password/vnc_password → login,
+    # api_token → pat). The UPDATEs are no-ops if already migrated.
+    with engine.begin() as conn:
+        r1 = conn.execute(text(
+            "UPDATE credentials SET kind = 'login'"
+            " WHERE kind IN ('ssh_password', 'rdp_password', 'vnc_password')"
+        ))
+        r2 = conn.execute(text(
+            "UPDATE credentials SET kind = 'pat' WHERE kind = 'api_token'"
+        ))
+    if r1.rowcount + r2.rowcount > 0:
+        applied.append("credentials.kind_rename")
+    # RD Gateway support — Windows domain for RDP credentials
+    if _add_column_if_missing(
+        engine,
+        "credentials",
+        "domain",
+        "domain VARCHAR(128)",
+    ):
+        applied.append("credentials.domain")
+    # Phase 15 — Documentation vault: application taxonomy on documents
+    # Note: SQLite ALTER TABLE ADD COLUMN does not enforce FK constraints;
+    # the ORM relationship provides the association at the Python level.
+    if _add_column_if_missing(
+        engine,
+        "documents",
+        "application_id",
+        "application_id INTEGER REFERENCES applications(id) ON DELETE SET NULL",
+    ):
+        applied.append("documents.application_id")
+    if _add_column_if_missing(
+        engine,
+        "documents",
+        "frontmatter_title",
+        "frontmatter_title VARCHAR(255)",
+    ):
+        applied.append("documents.frontmatter_title")
     return applied
