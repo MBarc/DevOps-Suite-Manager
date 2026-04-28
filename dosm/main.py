@@ -70,10 +70,9 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(credentials_router)
     app.include_router(hosts_router)
-    if cfg.guacamole.enabled:
-        # Mounts /hosts/{id}/connect — must register after hosts_router so the
-        # other /hosts/* routes still take precedence over a broader match.
-        app.include_router(guacamole_router)
+    # Always mount /hosts/{id}/connect; the route itself handles the
+    # guacamole.enabled=false case with a friendly error page.
+    app.include_router(guacamole_router)
     app.include_router(docs_router)
     app.include_router(pipelines_router)
     app.include_router(certs_router)

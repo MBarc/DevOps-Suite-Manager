@@ -36,12 +36,26 @@ async def host_connect(
     cfg = request.app.state.config
     gc = cfg.guacamole
 
-    if not gc.enabled:
-        raise HTTPException(404, "Guacamole integration is not enabled in config.yaml")
-
     host = db.get(Host, host_id)
     if host is None:
         raise HTTPException(404)
+
+    if not gc.enabled:
+        return _templates(request).TemplateResponse(
+            request,
+            "guacamole/connect.html",
+            {
+                "host": host,
+                "iframe_url": None,
+                "error": (
+                    "Guacamole is not enabled. Set guacamole.enabled: true in config.yaml "
+                    "and point guacamole.base_url at your Guacamole instance."
+                ),
+                "user": user,
+                "jump_chain": [],
+                "tunnel_endpoint": None,
+            },
+        )
 
     chain = resolve_jump_chain(db, host)
 

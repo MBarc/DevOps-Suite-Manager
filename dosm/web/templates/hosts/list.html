@@ -77,9 +77,7 @@
           {% for t in h.tags %}<span class="tag">{{ t.name }}</span>{% endfor %}
         </td>
         <td style="padding:10px 14px; text-align:right; white-space:nowrap">
-          {% if guacamole_enabled %}
           <a href="/hosts/{{ h.id }}/connect" class="btn btn-sm">Connect</a>
-          {% endif %}
           <button type="button" onclick="toggleEdit({{ h.id }})" class="btn btn-ghost btn-sm">Edit</button>
           <form method="post" action="/hosts/{{ h.id }}/delete" style="display:inline"
                 onsubmit="return confirm('Delete {{ h.name }}?')">

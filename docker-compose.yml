@@ -10,14 +10,14 @@ services:
     environment:
       POSTGRES_DB: guacamole
       POSTGRES_USER: guacamole
-      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?set GUACAMOLE_DB_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole to generate .env}
     volumes:
       - guac-db:/var/lib/postgresql/data
       - ./guacamole/initdb:/docker-entrypoint-initdb.d:ro
     networks: [guac]
 
   guacamole:
-    image: guacamole/guacamole:1.5.5
+    build: ./guacamole
     restart: unless-stopped
     depends_on: [guacd, guacamole-db]
     environment:
@@ -25,16 +25,14 @@ services:
       POSTGRES_HOSTNAME: guacamole-db
       POSTGRES_DATABASE: guacamole
       POSTGRES_USER: guacamole
-      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?set GUACAMOLE_DB_PASSWORD in .env}
-      # auth-json: the same hex secret DOSM signs blobs with.
-      JSON_SECRET_KEY: ${GUACAMOLE_JSON_SECRET_KEY:?set GUACAMOLE_JSON_SECRET_KEY (`dosm guacamole keygen`)}
-      # Comma-separated trusted networks allowed to submit signed blobs.
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole to generate .env}
+      # Passed to docker-entrypoint.sh which appends these to guacamole.properties
+      # after start.sh generates it.  Run `dosm guacamole keygen` to get the value.
+      JSON_SECRET_KEY: ${GUACAMOLE_JSON_SECRET_KEY:?run scripts/setup-guacamole to generate .env}
       JSON_TRUSTED_NETWORKS: ${GUACAMOLE_JSON_TRUSTED_NETWORKS:-127.0.0.1,::1,172.16.0.0/12}
     ports:
       - "${GUACAMOLE_PORT:-8080}:8080"
     volumes:
-      # Session recordings land here. DOSM points its `recordings_dir` at the
-      # same host path so the wrapper page knows where to look.
       - ${GUACAMOLE_RECORDINGS_HOST_DIR:-./.dosm-home/data/guacamole_recordings}:/recordings
     networks: [guac]
 
