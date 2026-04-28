@@ -17,8 +17,9 @@ env/
 .env.*
 !.env.example
 
-# Local DOSM_HOME used for dev/smoke tests
+# DOSM home directories (local dev and Docker bind-mount)
 .dosm-home/
+dosm-home/
 
 # Runtime files produced by start scripts
 .dosm.pid

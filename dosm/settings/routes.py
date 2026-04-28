@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import asyncio
+from functools import partial
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -29,7 +32,9 @@ async def settings_home(
     user: User = Depends(_require_admin),
 ):
     cfg = request.app.state.config
-    detected = detect_all(with_version=True)
+    detected = await asyncio.get_event_loop().run_in_executor(
+        None, partial(detect_all, with_version=True)
+    )
     enabled = cfg.cli_tools or {}
     rows = [
         {
@@ -62,7 +67,9 @@ async def settings_save(
     """
     form = await request.form()
     submitted = set(form.getlist("enabled"))
-    detected = detect_all(with_version=False)
+    detected = await asyncio.get_event_loop().run_in_executor(
+        None, partial(detect_all, with_version=False)
+    )
     new_map = {d.spec.id: (d.spec.id in submitted) for d in detected}
 
     cfg = request.app.state.config
@@ -81,3 +88,48 @@ async def settings_save(
         )
     )
     return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+@router.get("/integrations", response_class=HTMLResponse, include_in_schema=False)
+async def integrations_page(
+    request: Request,
+    user: User = Depends(_require_admin),
+):
+    cfg = request.app.state.config
+    return _templates(request).TemplateResponse(
+        request,
+        "settings/integrations.html",
+        {"user": user, "cfg": cfg},
+    )
+
+
+@router.post("/integrations", include_in_schema=False)
+async def integrations_save(
+    request: Request,
+    guacamole_enabled: str | None = Form(None),
+    guacamole_base_url: str = Form(""),
+    db: Session = Depends(get_session),
+    user: User = Depends(_require_admin),
+):
+    cfg = request.app.state.config
+    enabled = guacamole_enabled is not None
+    base_url = guacamole_base_url.strip() or cfg.guacamole.base_url
+
+    update_config_yaml(cfg.home, {
+        "guacamole": {
+            **cfg.guacamole.model_dump(),
+            "enabled": enabled,
+            "base_url": base_url,
+        }
+    })
+    cfg.guacamole.enabled = enabled
+    cfg.guacamole.base_url = base_url
+
+    db.add(AuditLog(
+        actor_id=user.id,
+        action="settings.integrations.update",
+        target="guacamole",
+        details=f"enabled={enabled} base_url={base_url}",
+    ))
+    db.commit()
+    return RedirectResponse("/settings/integrations?saved=1", status_code=303)

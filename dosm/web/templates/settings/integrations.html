@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Settings — Integrations — DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Settings</h1>
+  </div>
+</header>
+
+<div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider)">
+  <a href="/settings" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-muted); border-bottom:2px solid transparent; margin-bottom:-1px">CLI Tools</a>
+  <a href="/settings/integrations" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-strong); border-bottom:2px solid var(--accent,#6366f1); margin-bottom:-1px">Integrations</a>
+</div>
+
+{% if request.query_params.get('saved') %}
+<section class="card" style="border-left:3px solid var(--success); padding-top:var(--sp-3); padding-bottom:var(--sp-3)">
+  <span class="badge badge-green"><span class="dot ok"></span> Saved</span>
+  <span class="muted" style="margin-left:var(--sp-2)">Changes will take effect on the next request.</span>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Apache Guacamole</h2>
+  <p class="muted" style="font-size:13px; margin-bottom:16px">
+    Browser-based SSH / RDP / VNC sessions via an embedded Guacamole iframe.
+    Run <code>scripts/setup-guacamole.ps1</code> (Windows) or
+    <code>scripts/setup-guacamole.sh</code> (Linux/Mac) to provision the stack,
+    then enable it here.
+  </p>
+  <form method="post" action="/settings/integrations">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px">
+      <label class="toggle" style="display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="checkbox" name="guacamole_enabled" value="1"
+               {% if cfg.guacamole.enabled %}checked{% endif %}
+               style="width:16px; height:16px; cursor:pointer" />
+        <span style="font-weight:500">Enable Guacamole integration</span>
+      </label>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">
+        Guacamole base URL
+      </label>
+      <input type="url" name="guacamole_base_url"
+             value="{{ cfg.guacamole.base_url }}"
+             placeholder="http://127.0.0.1:8080/guacamole"
+             style="width:380px; box-sizing:border-box" />
+      <div class="muted" style="font-size:11px; margin-top:4px">
+        The URL DOSM uses to reach the Guacamole webapp (server-side token exchange).
+        Default: <code>http://127.0.0.1:8080/guacamole</code>
+      </div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--surface-raised,rgba(255,255,255,.03)); border-radius:6px; border:1px solid var(--divider); margin-bottom:16px; font-size:12px">
+      <span style="color:var(--fg-muted)">Secret key:</span>
+      <code style="font-size:11px">{{ cfg.guacamole.secret_key_file }}</code>
+      <span class="muted">·</span>
+      <span class="muted">Run <code>dosm guacamole keygen</code> to generate if missing.</span>
+    </div>
+
+    <button type="submit" class="btn">Save</button>
+  </form>
+</section>
+{% endblock %}

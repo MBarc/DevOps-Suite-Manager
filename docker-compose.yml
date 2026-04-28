@@ -1,4 +1,24 @@
 services:
+
+  # ── DOSM ────────────────────────────────────────────────────────────────
+  dosm:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${DOSM_PORT:-8765}:8765"
+    volumes:
+      # Bind-mount so config, DB, secrets, and docs survive rebuilds and are
+      # readable from the host (needed by setup-guacamole scripts).
+      - ./dosm-home:/dosm-home
+    environment:
+      DOSM_HOME: /dosm-home
+      # Set a strong password here before first boot.  The entrypoint creates
+      # the admin account on first run; subsequent runs ignore this variable.
+      DOSM_ADMIN_PASSWORD: ${DOSM_ADMIN_PASSWORD:-changeme}
+    networks: [guac]
+    depends_on: [guacd]
+
+  # ── Guacamole stack ──────────────────────────────────────────────────────
   guacd:
     image: guacamole/guacd:1.5.5
     restart: unless-stopped
@@ -10,7 +30,7 @@ services:
     environment:
       POSTGRES_DB: guacamole
       POSTGRES_USER: guacamole
-      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole to generate .env}
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole}
     volumes:
       - guac-db:/var/lib/postgresql/data
       - ./guacamole/initdb:/docker-entrypoint-initdb.d:ro
@@ -25,15 +45,13 @@ services:
       POSTGRES_HOSTNAME: guacamole-db
       POSTGRES_DATABASE: guacamole
       POSTGRES_USER: guacamole
-      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole to generate .env}
-      # Passed to docker-entrypoint.sh which appends these to guacamole.properties
-      # after start.sh generates it.  Run `dosm guacamole keygen` to get the value.
-      JSON_SECRET_KEY: ${GUACAMOLE_JSON_SECRET_KEY:?run scripts/setup-guacamole to generate .env}
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole}
+      JSON_SECRET_KEY: ${GUACAMOLE_JSON_SECRET_KEY:?run scripts/setup-guacamole}
       JSON_TRUSTED_NETWORKS: ${GUACAMOLE_JSON_TRUSTED_NETWORKS:-127.0.0.1,::1,172.16.0.0/12}
     ports:
       - "${GUACAMOLE_PORT:-8080}:8080"
     volumes:
-      - ${GUACAMOLE_RECORDINGS_HOST_DIR:-./.dosm-home/data/guacamole_recordings}:/recordings
+      - ./dosm-home/data/guacamole_recordings:/recordings
     networks: [guac]
 
 networks:

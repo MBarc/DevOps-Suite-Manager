@@ -45,6 +45,11 @@ class GuacamoleConfig(BaseModel):
 
     enabled: bool = False
     base_url: str = "http://127.0.0.1:8080/guacamole"
+    # public_url: browser-facing URL used for the iframe src. Defaults to
+    # base_url. Set this when DOSM runs in Docker and base_url uses a service
+    # name (e.g. http://guacamole:8080/guacamole) that the user's browser
+    # cannot resolve — point public_url at the host-reachable address instead.
+    public_url: str | None = None
     secret_key_file: str = "config/guacamole.key"
     session_ttl_seconds: int = 1800
     recordings_dir: str = "data/guacamole_recordings"

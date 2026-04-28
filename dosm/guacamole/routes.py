@@ -100,7 +100,8 @@ async def host_connect(
             error = str(e)
         else:
             cid = build_connection_id(connection.name, source="json")
-            iframe_url = f"{gc.base_url.rstrip('/')}/#/client/{cid}?token={token}"
+            public = (gc.public_url or gc.base_url).rstrip("/")
+            iframe_url = f"{public}/#/client/{cid}?token={token}"
     except GuacamoleBuildError as e:
         error = str(e)
 
