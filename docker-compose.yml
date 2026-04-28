@@ -12,9 +12,10 @@ services:
       - ./dosm-home:/dosm-home
     environment:
       DOSM_HOME: /dosm-home
-      # Set a strong password here before first boot.  The entrypoint creates
-      # the admin account on first run; subsequent runs ignore this variable.
       DOSM_ADMIN_PASSWORD: ${DOSM_ADMIN_PASSWORD:-changeme}
+      # Browser-facing Guacamole URL used for the iframe — must be reachable
+      # from the user's browser, not from inside Docker.
+      GUACAMOLE_PUBLIC_URL: ${GUACAMOLE_PUBLIC_URL:-http://localhost:8888/guacamole}
     networks: [guac]
     depends_on: [guacd]
 
@@ -49,7 +50,7 @@ services:
       JSON_SECRET_KEY: ${GUACAMOLE_JSON_SECRET_KEY:?run scripts/setup-guacamole}
       JSON_TRUSTED_NETWORKS: ${GUACAMOLE_JSON_TRUSTED_NETWORKS:-127.0.0.1,::1,172.16.0.0/12}
     ports:
-      - "${GUACAMOLE_PORT:-8080}:8080"
+      - "${GUACAMOLE_PORT:-8888}:8080"
     volumes:
       - ./dosm-home/data/guacamole_recordings:/recordings
     networks: [guac]

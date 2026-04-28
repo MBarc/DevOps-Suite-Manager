@@ -15,9 +15,6 @@
 set -euo pipefail
 
 GUAC_VERSION="1.5.5"
-JAR_NAME="guacamole-auth-json-${GUAC_VERSION}.jar"
-JAR_URL="https://downloads.apache.org/guacamole/${GUAC_VERSION}/binary/${JAR_NAME}"
-JAR_PATH="guacamole/extensions/${JAR_NAME}"
 INITDB_SQL="guacamole/initdb/001-initdb.sql"
 KEY_FILE="dosm-home/config/guacamole.key"
 
@@ -32,7 +29,7 @@ command -v docker >/dev/null 2>&1 || error "docker not found — install Docker 
 # 1. Generate Guacamole shared secret
 # ---------------------------------------------------------------------------
 
-mkdir -p dosm-home/config guacamole/extensions guacamole/initdb
+mkdir -p dosm-home/config guacamole/initdb
 
 if [ -f "$KEY_FILE" ]; then
     warn "Key file already exists at $KEY_FILE — using existing key."
@@ -49,25 +46,7 @@ fi
 HEX_KEY=$(tr -d '[:space:]' < "$KEY_FILE")
 
 # ---------------------------------------------------------------------------
-# 2. Download auth-json extension
-# ---------------------------------------------------------------------------
-
-if [ -f "$JAR_PATH" ]; then
-    warn "$JAR_PATH already present — skipping download."
-else
-    info "Downloading ${JAR_NAME}..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$JAR_PATH" "$JAR_URL"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$JAR_PATH" "$JAR_URL"
-    else
-        error "curl or wget required to download the extension JAR."
-    fi
-    info "Saved to $JAR_PATH"
-fi
-
-# ---------------------------------------------------------------------------
-# 3. Generate Postgres init SQL
+# 2. Generate Postgres init SQL
 # ---------------------------------------------------------------------------
 
 if [ -f "$INITDB_SQL" ]; then

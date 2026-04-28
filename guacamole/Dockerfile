@@ -1,14 +1,21 @@
 FROM guacamole/guacamole:1.5.5
 
-# The auth-json JAR is placed here by scripts/setup-guacamole.sh before the
-# first `docker-compose up --build`.
-COPY extensions/ /etc/guacamole/extensions/
+# The guacamole image runs as a non-root user; switch to root for package ops.
+USER root
 
-# Custom entrypoint: guacamole's start.sh generates guacamole.properties from
-# env vars and then exec's catalina.sh to start Tomcat.  We shim catalina.sh
-# so we can append the auth-json settings right after properties are written
-# but before Tomcat accepts connections.
+# Download and install the auth-json extension at build time.
+# The tar.gz contains guacamole-auth-json-1.5.5/guacamole-auth-json-1.5.5.jar.
+RUN apt-get update && apt-get install -y --no-install-recommends curl tar \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/guacamole/extensions \
+    && curl -fsSL \
+       https://downloads.apache.org/guacamole/1.5.5/binary/guacamole-auth-json-1.5.5.tar.gz \
+       -o /tmp/auth-json.tar.gz \
+    && tar -xzf /tmp/auth-json.tar.gz -C /tmp \
+    && cp /tmp/guacamole-auth-json-1.5.5/guacamole-auth-json-1.5.5.jar \
+          /etc/guacamole/extensions/ \
+    && rm -rf /tmp/auth-json.tar.gz /tmp/guacamole-auth-json-1.5.5
+
 COPY docker-entrypoint.sh /dosm-entrypoint.sh
 RUN chmod +x /dosm-entrypoint.sh
-
 ENTRYPOINT ["/dosm-entrypoint.sh"]

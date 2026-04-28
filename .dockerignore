@@ -16,7 +16,6 @@ dosm-home/
 .dosm-home/
 .env
 .env.*
-docker/
 guacamole/
 scripts/
 docs/

@@ -23,9 +23,11 @@ p = home / "config.yaml"
 cfg = yaml.safe_load(p.read_text()) or {}
 
 cfg.setdefault("server", {})["host"] = "0.0.0.0"
+import os
+public_url = os.environ.get("GUACAMOLE_PUBLIC_URL", "http://localhost:8888/guacamole")
 cfg.setdefault("guacamole", {}).update({
     "base_url":            "http://guacamole:8080/guacamole",
-    "public_url":          "http://localhost:8080/guacamole",
+    "public_url":          public_url,
     "dosm_reachable_host": "dosm",
     "tunnel_bind_host":    "0.0.0.0",
 })
