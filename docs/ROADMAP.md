@@ -33,6 +33,7 @@ changelog; this is the one-line summary.
 | 12d   | (shipped)    | Prometheus adapter: host-presence check via `up{instance=~"^hostname(:.+)?$"}`, bearer/basic/no-auth, plugs into coverage matrix. |
 | 9b    | (shipped)    | RD Gateway support: RDP→RDP jump chains via Microsoft Remote Desktop Gateway. Auto-derived from protocol pairing (RDP target + RDP jumpbox = RD Gateway path). `Credential.domain` added for Windows domain auth. guacd handles the hop natively via `gateway-*` Guacamole params — no DOSM tunnel needed. |
 | 12e   | (shipped)    | ServiceNow extended monitoring detail: discovery source/timestamp, monitoring relationships (cmdb_rel_ci), metric collection (metric_instance with ITOM Visibility fallback), thresholds note, multiple CMDB match surfacing. |
+| 14    | (shipped)    | Organisation directory: AD-backed via WinRM jumpbox + PowerShell `ActiveDirectory` cmdlets (no direct LDAP). Empty-state configure flow, mock adapter for dev/test, manager-chain hierarchy inference, per-member manager capture. Unified directory list (departments + people) with hosts-style search bar (field selector + clear), pan/zoom D3 tree, disabled accounts shown with strikethrough + tooltip. Each dept's roster is written to `docs/org/{slug}.md` so the agent can answer "who do I talk to about X". |
 
 ## Open backlog (recommended order)
 
@@ -51,7 +52,7 @@ changelog; this is the one-line summary.
 | ~~12d~~ | ~~ServiceNow adapter~~ | Shipped — see phase log above. |
 | ~~13~~ | ~~Certificate inventory~~ | Shipped — see phase log above. |
 | ~~8d~~ | ~~Session recordings browser~~ | Shipped. |
-| 14 | Organization graph | Departments + AD sync (`ldap3`). List view + tree view (D3). Description text feeds the docs index so the agent can answer "who do I talk to about X". |
+| ~~14~~ | ~~Organisation directory~~ | Shipped — see phase log above. Pivoted from direct `ldap3` to WinRM-via-jumpbox so DOSM-in-Docker doesn't need to be domain-joined. |
 | 16 | AI Agent enhancements | Expand the agent beyond `ssh_exec` + `run_pipeline`. Planned actions: `query_monitoring` (read live alerts), `search_docs` (RAG lookup without full chat), `cert_check` (on-demand cert status for a host), `host_metrics` (pull current CPU/mem/disk). Improve plan card UX once validated against a real Ollama model: streaming rationale, multi-step plan previews, conversation-level approval history. |
 | ~~15~~ | ~~Documentation vault & importer~~ | Shipped. Application taxonomy model, YAML frontmatter, in-UI markdown editor with live preview, .docx/.pdf/.md/.txt importer (mammoth + pypdf), rendered markdown view, stale-edit conflict detection, `dosm docs new/import` + `dosm application` CLI commands. |
 
@@ -89,6 +90,39 @@ place, and let the agent answer questions about it.
 **Dependencies to add:** `httpx` is already present. No new deps needed for
 Dynatrace or Datadog. ServiceNow OAuth may need `authlib` if basic auth
 isn't sufficient in the target environment.
+
+### Phase 14 — Organisation directory: AD via jumpbox
+
+The original plan was to bind LDAP directly from DOSM. The blocker: DOSM
+runs in Docker, containers aren't domain-joined, and we didn't want to
+require a stored bind password. We pivoted to a Windows jumpbox sidecar
+pattern:
+
+- **Adapter contract** — `AdDirectorySource` ABC in
+  `dosm/directory/adapters/__init__.py` with `test_connection`,
+  `resolve_group`, `resolve_user`, `sync_group`. Implementations:
+  - `WinRMJumpboxSource` — opens a `winrm.Session` to a configured host,
+    runs PowerShell `ActiveDirectory` cmdlets, returns parsed JSON. One
+    round trip per group sync; per-member manager DNs resolved in the same
+    script via a hashtable lookup pass.
+  - `MockSource` — fixture-backed Acme org chart for dev/tests so the UI
+    can be exercised without a real domain.
+- **Config** — single global `directory.ad_jumpbox_host_id` in
+  `config.yaml`; the bind identity is whatever credential profile is
+  attached to that host. `directory.adapter = "mock"` toggles the mock for
+  testing.
+- **Hierarchy inference** — at sync time, the manager chain (capped at 20
+  hops) is walked against `Department.manager_dn`; the first match wins
+  and becomes `parent_id`. Auto-derived only — no manual override.
+- **Members** — a separate `department_members` table with
+  `(department_id, user_dn)` unique. Disabled AD accounts cached with
+  `enabled=false` and rendered with strikethrough + "Account disabled"
+  tooltip rather than hidden, so historical association is preserved.
+
+**When to add a new directory adapter**: drop a class implementing the ABC
+into `dosm/directory/adapters/`, register it in the factory at
+`dosm/directory/adapters/__init__.py:get_directory_source`. Match the
+pattern of monitoring/pipeline adapters elsewhere.
 
 ## Design decisions worth preserving
 

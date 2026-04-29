@@ -16,38 +16,42 @@
   <div class="error" style="margin-bottom:var(--sp-3)">{{ error }}</div>
   {% endif %}
 
-  <form method="post" action="{% if dept %}/org/{{ dept.slug }}/edit{% else %}/org/new{% endif %}">
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-3); margin-bottom:var(--sp-3)">
-      <label class="field">
-        Name <span style="color:var(--red,#ef4444)">*</span>
-        <input type="text" name="name" value="{{ dept.name if dept else '' }}" required placeholder="Engineering" autofocus>
-      </label>
-      <label class="field">
-        Parent department
-        <select name="parent_id">
-          <option value="">— None (top level) —</option>
-          {% for p in parents %}
-          <option value="{{ p.id }}" {% if dept and dept.parent_id == p.id %}selected{% endif %}>{{ p.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    </div>
+  {% set name_v = form.name if form.name is defined else (dept.name if dept else '') %}
+  {% set group_v = form.ad_group if form.ad_group is defined else (dept.ad_group_name if dept else '') %}
+  {% set mgr_v = form.manager if form.manager is defined else (dept.manager_input if dept else '') %}
+  {% set desc_v = form.description if form.description is defined else (dept.description if dept else '') %}
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-3); margin-bottom:var(--sp-3)">
-      <label class="field">
-        Department head
-        <input type="text" name="head" value="{{ dept.head or '' if dept else '' }}" placeholder="Jane Smith">
-      </label>
-      <label class="field">
-        Contact email
-        <input type="email" name="email" value="{{ dept.email or '' if dept else '' }}" placeholder="engineering@company.com">
-      </label>
-    </div>
+  <form method="post" action="{% if dept %}/org/{{ dept.slug }}/edit{% else %}/org/new{% endif %}">
+    <label class="field" style="margin-bottom:var(--sp-3)">
+      Display name <span style="color:var(--red,#ef4444)">*</span>
+      <input type="text" name="name" value="{{ name_v }}" required placeholder="Engineering" autofocus>
+      <span class="field-hint">Shown in the org chart and search. Doesn't have to match the AD group name.</span>
+    </label>
+
+    <label class="field" style="margin-bottom:var(--sp-3)">
+      AD group <span style="color:var(--red,#ef4444)">*</span>
+      <input type="text" name="ad_group" value="{{ group_v }}" required placeholder="Engineering" spellcheck="false">
+      <span class="field-hint">
+        sAMAccountName, common name (CN), or full distinguished name. DOSM
+        validates this on save by running <code>Get-ADGroup</code> on the
+        configured jumpbox.
+      </span>
+    </label>
+
+    <label class="field" style="margin-bottom:var(--sp-3)">
+      Manager <span style="color:var(--red,#ef4444)">*</span>
+      <input type="text" name="manager" value="{{ mgr_v }}" required placeholder="alice or alice@acme.local" spellcheck="false">
+      <span class="field-hint">
+        sAMAccountName, display name, or email. The manager's own
+        <code>manager</code> attribute is what DOSM uses to derive the
+        parent department in the org chart.
+      </span>
+    </label>
 
     <label class="field" style="margin-bottom:var(--sp-3)">
       Description
-      <span class="field-hint">Written to the docs index so the AI agent can answer questions about this team.</span>
-      <textarea name="description" rows="6" placeholder="What this department does, who to contact for what, key systems they own…">{{ dept.description or '' if dept else '' }}</textarea>
+      <span class="field-hint">Free-text notes — responsibilities, on-call rotation, runbook pointers. Indexed for the agent.</span>
+      <textarea name="description" rows="6" placeholder="What this team owns, who to contact for what, key systems…">{{ desc_v }}</textarea>
     </label>
 
     <div style="display:flex; gap:var(--sp-2); align-items:center">

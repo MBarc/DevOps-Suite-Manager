@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Configure AD jumpbox — DOSM Org{% endblock %}
+{% block head_extra %}
+<style>
+.mode-toggle { display:flex; gap:var(--sp-2); margin-bottom:var(--sp-3); }
+.mode-toggle label {
+  flex:1; padding:var(--sp-3); border:1px solid var(--border); border-radius:8px;
+  cursor:pointer; transition:border-color .12s, background .12s;
+}
+.mode-toggle label.selected {
+  border-color:var(--accent,#6366f1);
+  background:rgba(99,102,241,0.08);
+}
+.mode-toggle input[type=radio] { margin-right:var(--sp-2); }
+.mode-toggle .mode-title { font-weight:500; }
+.mode-toggle .mode-hint { font-size:.8rem; color:var(--fg-muted); margin-top:4px; }
+.host-section[data-disabled=true] { opacity:.4; pointer-events:none; }
+</style>
+{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <div class="subtitle" style="margin-bottom:var(--sp-1)">
+      <a href="/org">Org</a> / Configure
+    </div>
+    <h1>Active Directory source</h1>
+  </div>
+  <div class="actions">
+    <a href="/org" class="btn btn-ghost btn-sm">Back</a>
+  </div>
+</header>
+
+<section class="card">
+  <p class="muted" style="font-size:13px; margin-top:0">
+    DOSM doesn't speak LDAP directly. In production, it opens a WinRM session
+    to a Windows jumpbox (domain-joined, with RSAT-AD-PowerShell) and runs
+    PowerShell <code>ActiveDirectory</code> cmdlets there. For development or
+    when you don't have a jumpbox yet, use the mock source — it returns a
+    canned org chart so you can exercise the whole UI.
+  </p>
+
+  {% if request.query_params.get('saved') %}
+  <div class="badge badge-green" style="margin-bottom:var(--sp-3)">
+    <span class="dot ok"></span> Saved
+  </div>
+  {% endif %}
+
+  {% if error %}
+  <div class="error" style="margin-bottom:var(--sp-3)">{{ error }}</div>
+  {% endif %}
+
+  {% if test_result %}
+  <div class="card" style="margin-bottom:var(--sp-3); border-left:3px solid {{ '#22c55e' if test_result.ok else '#ef4444' }}">
+    <strong>{{ 'Test passed' if test_result.ok else 'Test failed' }}</strong>
+    <div class="muted" style="font-size:.88rem; margin-top:4px">{{ test_result.message }}</div>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/org/configure">
+    <div class="mode-toggle">
+      <label id="lbl-real">
+        <input type="radio" name="use_mock" value="" {% if not use_mock %}checked{% endif %}>
+        <span class="mode-title">Windows jumpbox</span>
+        <div class="mode-hint">Production. Connects to a real domain-joined Windows host over WinRM.</div>
+      </label>
+      <label id="lbl-mock">
+        <input type="radio" name="use_mock" value="1" {% if use_mock %}checked{% endif %}>
+        <span class="mode-title">Mock data (testing)</span>
+        <div class="mode-hint">Returns a fixture org (Engineering, Platform, Helpdesk, etc.) — no domain access needed.</div>
+      </label>
+    </div>
+
+    <div class="host-section" id="host-section" data-disabled="{{ 'true' if use_mock else 'false' }}">
+      <label class="field" style="margin-bottom:var(--sp-3)">
+        Windows jumpbox host
+        <select name="host_id">
+          <option value="">— None —</option>
+          {% for h in candidates %}
+          <option value="{{ h.id }}" {% if selected_id == h.id %}selected{% endif %}>
+            {{ h.name }} ({{ h.hostname }}{% if h.credential %} · {{ h.credential.name }}{% else %} · NO CREDENTIAL{% endif %})
+          </option>
+          {% endfor %}
+        </select>
+        <span class="field-hint">
+          Only hosts flagged as jumpboxes appear here. Mark a host as a
+          jumpbox and attach a credential on the <a href="/hosts">Hosts</a>
+          page first.
+        </span>
+      </label>
+    </div>
+
+    <div style="display:flex; gap:var(--sp-2)">
+      <button type="submit">Save</button>
+      {% if current or use_mock %}
+      <button type="submit" formaction="/org/configure/test" class="btn btn-ghost">Test connection</button>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if current %}
+  <div class="muted" style="font-size:.85rem; margin-top:var(--sp-3)">
+    Current: <code>{{ current.name }}</code>
+    {% if current.credential %}with credential <code>{{ current.credential.name }}</code>{% endif %}
+  </div>
+  {% elif use_mock %}
+  <div class="muted" style="font-size:.85rem; margin-top:var(--sp-3)">
+    Current: <code>mock</code> (fixture data)
+  </div>
+  {% endif %}
+</section>
+
+<script>
+(function () {
+  const lblReal = document.getElementById('lbl-real');
+  const lblMock = document.getElementById('lbl-mock');
+  const hostSection = document.getElementById('host-section');
+  const radios = document.querySelectorAll('input[name=use_mock]');
+
+  function refresh() {
+    const isMock = document.querySelector('input[name=use_mock]:checked').value === '1';
+    hostSection.dataset.disabled = isMock ? 'true' : 'false';
+    lblReal.classList.toggle('selected', !isMock);
+    lblMock.classList.toggle('selected', isMock);
+  }
+  radios.forEach(r => r.addEventListener('change', refresh));
+  refresh();
+})();
+</script>
+{% endblock %}

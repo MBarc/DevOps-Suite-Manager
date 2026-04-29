@@ -28,6 +28,7 @@ docs_app = typer.Typer(help="Documentation index commands.", no_args_is_help=Tru
 guac_app = typer.Typer(help="Guacamole integration helpers.", no_args_is_help=True)
 pipelines_app = typer.Typer(help="Pipeline runner commands.", no_args_is_help=True)
 folder_app = typer.Typer(help="Manage doc vault folders (taxonomy).", no_args_is_help=True)
+org_app = typer.Typer(help="Organisation directory (AD-backed) commands.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
@@ -36,6 +37,7 @@ app.add_typer(docs_app, name="docs")
 app.add_typer(guac_app, name="guacamole")
 app.add_typer(pipelines_app, name="pipelines")
 app.add_typer(folder_app, name="folder")
+app.add_typer(org_app, name="org")
 
 console = Console()
 
@@ -444,6 +446,165 @@ def pipelines_poll() -> None:
         f"polled={stats.polled} transitioned={stats.transitioned} "
         f"abandoned={stats.abandoned} errors={stats.errors}"
     )
+
+
+# ---- org -----------------------------------------------------------------
+
+
+@org_app.command("test-ad")
+def org_test_ad() -> None:
+    """Verify the configured AD jumpbox is reachable and AD cmdlets work."""
+    cfg = load_config()
+    init_engine(cfg)
+    if cfg.directory.ad_jumpbox_host_id is None:
+        console.print("[red]AD jumpbox not configured.[/red] Run /org/configure in the UI.")
+        raise typer.Exit(code=1)
+    from dosm.directory import get_directory_source
+
+    try:
+        domain = get_directory_source(cfg).test_connection()
+    except Exception as e:
+        console.print(f"[red]FAIL[/red] {type(e).__name__}: {e}")
+        raise typer.Exit(code=1)
+    console.print(f"[green]OK[/green] connected to AD domain {domain!r}")
+
+
+@org_app.command("sync")
+def org_sync(
+    slug: str = typer.Argument(..., help="Department slug (URL fragment)."),
+) -> None:
+    """Run a one-shot sync of a single department from AD."""
+    cfg = load_config()
+    init_engine(cfg)
+    from sqlalchemy import select as _select
+
+    from dosm.directory.sync import sync_department
+    from dosm.models import Department
+
+    with session_scope() as db:
+        dept = db.execute(_select(Department).where(Department.slug == slug)).scalar_one_or_none()
+        if dept is None:
+            console.print(f"[red]Department {slug!r} not found.[/red]")
+            raise typer.Exit(code=1)
+        try:
+            summary = sync_department(db, cfg, dept, actor_id=None)
+        except Exception as e:
+            console.print(f"[red]Sync failed:[/red] {e}")
+            raise typer.Exit(code=1)
+        console.print(
+            f"[green]OK[/green] {slug}: +{summary['added']} -{summary['removed']} "
+            f"(kept {summary['kept']}), parent_changed={summary['parent_changed']}"
+        )
+
+
+@org_app.command("members")
+def org_members(slug: str = typer.Argument(..., help="Department slug.")) -> None:
+    """Print the cached member list for a department."""
+    cfg = load_config()
+    init_engine(cfg)
+    from sqlalchemy import select as _select
+
+    from dosm.models import Department, DepartmentMember
+
+    with session_scope() as db:
+        dept = db.execute(_select(Department).where(Department.slug == slug)).scalar_one_or_none()
+        if dept is None:
+            console.print(f"[red]Department {slug!r} not found.[/red]")
+            raise typer.Exit(code=1)
+        members = list(
+            db.execute(
+                _select(DepartmentMember)
+                .where(DepartmentMember.department_id == dept.id)
+                .order_by(DepartmentMember.display_name)
+            ).scalars()
+        )
+    if not members:
+        console.print(f"{slug}: no cached members. Run [cyan]dosm org sync {slug}[/cyan].")
+        return
+    table = Table(title=f"{dept.name} ({len(members)} members)")
+    table.add_column("Name")
+    table.add_column("Title")
+    table.add_column("Email")
+    table.add_column("Status")
+    for m in members:
+        table.add_row(
+            m.display_name,
+            m.title or "—",
+            m.email or "—",
+            "[green]enabled[/green]" if m.enabled else "[red]disabled[/red]",
+        )
+    console.print(table)
+
+
+@org_app.command("tree")
+def org_tree() -> None:
+    """Print an ASCII tree of the org chart from cached data."""
+    cfg = load_config()
+    init_engine(cfg)
+    from sqlalchemy import select as _select
+
+    from dosm.models import Department
+
+    with session_scope() as db:
+        depts = list(db.execute(_select(Department).order_by(Department.name)).scalars())
+    by_id = {d.id: d for d in depts}
+    children: dict[int | None, list[Department]] = {}
+    for d in depts:
+        children.setdefault(d.parent_id, []).append(d)
+    roots = sorted(children.get(None, []), key=lambda d: d.name)
+    if not roots:
+        console.print("(no departments)")
+        return
+
+    def _walk(d: Department, prefix: str, last: bool) -> None:
+        connector = "└─ " if last else "├─ "
+        mgr = f" [{d.manager_name}]" if d.manager_name else ""
+        console.print(f"{prefix}{connector}{d.name}{mgr}")
+        kids = sorted(children.get(d.id, []), key=lambda x: x.name)
+        for i, kid in enumerate(kids):
+            _walk(kid, prefix + ("   " if last else "│  "), i == len(kids) - 1)
+
+    for i, root in enumerate(roots):
+        _walk(root, "", i == len(roots) - 1)
+    _ = by_id  # kept for future "depth=" filtering; silences unused warning
+
+
+@org_app.command("find")
+def org_find(query: str = typer.Argument(..., help="Substring to match name/email/title.")) -> None:
+    """Search cached people across all departments."""
+    cfg = load_config()
+    init_engine(cfg)
+    from sqlalchemy import or_, select as _select
+
+    from dosm.models import Department, DepartmentMember
+
+    like = f"%{query}%"
+    with session_scope() as db:
+        rows = db.execute(
+            _select(DepartmentMember, Department)
+            .join(Department, DepartmentMember.department_id == Department.id)
+            .where(
+                or_(
+                    DepartmentMember.display_name.ilike(like),
+                    DepartmentMember.email.ilike(like),
+                    DepartmentMember.title.ilike(like),
+                )
+            )
+            .order_by(DepartmentMember.display_name)
+            .limit(50)
+        ).all()
+    if not rows:
+        console.print(f"No people match {query!r}.")
+        return
+    table = Table()
+    table.add_column("Name")
+    table.add_column("Title")
+    table.add_column("Email")
+    table.add_column("Department")
+    for m, d in rows:
+        name = m.display_name if m.enabled else f"[strike]{m.display_name}[/strike]"
+        table.add_row(name, m.title or "—", m.email or "—", d.name)
+    console.print(table)
 
 
 if __name__ == "__main__":

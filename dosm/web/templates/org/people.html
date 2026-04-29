@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Find a person — DOSM Org{% endblock %}
+{% block head_extra %}
+<style>
+.people-row.disabled .name { text-decoration:line-through; }
+.people-search { display:flex; gap:var(--sp-2); margin-bottom:var(--sp-3); }
+.people-search input { flex:1; }
+</style>
+{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <div class="subtitle" style="margin-bottom:var(--sp-1)"><a href="/org">Org</a> / People</div>
+    <h1>Find a person</h1>
+  </div>
+  <div class="actions">
+    <a href="/org" class="btn btn-ghost btn-sm">Back</a>
+  </div>
+</header>
+
+<section class="card">
+  <form method="get" action="/org/people" class="people-search">
+    <input type="text" name="q" value="{{ q }}" placeholder="Name, email, or title…" autofocus>
+    <button type="submit">Search</button>
+  </form>
+
+  {% if not q %}
+  <p class="muted" style="margin:0">
+    Searches the local cache of department members. Run <strong>Sync now</strong>
+    on a department to refresh its members from AD.
+  </p>
+  {% elif not results %}
+  <p class="muted" style="margin:0">No people match {{ q!r }}.</p>
+  {% else %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Title</th>
+        <th>Email</th>
+        <th>Department</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for m, d in results %}
+    <tr class="people-row {% if not m.enabled %}disabled{% endif %}"
+        {% if not m.enabled %}title="Account disabled"{% endif %}>
+      <td><span class="name">{{ m.display_name }}</span></td>
+      <td class="muted">{{ m.title or "—" }}</td>
+      <td>{% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><a href="/org/{{ d.slug }}">{{ d.name }}</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:.83rem; margin-top:var(--sp-3)">
+    {{ results|length }} match{{ 'es' if results|length != 1 else '' }}{% if results|length == 100 %} (capped){% endif %}.
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

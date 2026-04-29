@@ -137,6 +137,26 @@ class PipelinesConfig(BaseModel):
     poller_abandon_after_hours: int = 24
 
 
+class DirectoryConfig(BaseModel):
+    """Active Directory integration via a Windows jumpbox.
+
+    DOSM doesn't speak LDAP/Kerberos directly. It opens a WinRM session to
+    a designated Windows host (which must have RSAT-AD-PowerShell installed
+    and be domain-joined), runs PowerShell ActiveDirectory cmdlets there,
+    and parses the JSON output. The bind identity is whatever credential
+    profile is attached to the chosen host.
+    """
+
+    # Host id of the AD jumpbox. None means "not configured" — the Org page
+    # shows an empty state pointing the user at the configure flow.
+    ad_jumpbox_host_id: int | None = None
+    # Optional driver override. "winrm_jumpbox" is the production adapter.
+    # "mock" returns canned fixtures and is used by tests; flipping it on
+    # here also lets a developer build the UI without a real jumpbox.
+    adapter: str = "winrm_jumpbox"  # winrm_jumpbox | mock
+    powershell_timeout_seconds: float = 30.0
+
+
 class SSHPolicyConfig(BaseModel):
     """Governs what `ssh_exec` actions can run without elevated confirmation.
 
@@ -186,6 +206,7 @@ class Config(BaseModel):
     metrics: MetricsConfig = MetricsConfig()
     certs: CertsConfig = CertsConfig()
     pipelines: PipelinesConfig = PipelinesConfig()
+    directory: DirectoryConfig = DirectoryConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     # cli_tools is a flat {tool_id: bool} map — Settings page toggles for
     # the CLI catalog. Enabled tools surface on the Terminals page.

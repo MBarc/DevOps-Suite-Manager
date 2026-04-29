@@ -113,7 +113,13 @@ class Host(Base):
 
 
 class Department(Base):
-    """A team or business unit in the org chart."""
+    """A team or business unit, sourced from an Active Directory group.
+
+    Members and parent hierarchy are sync-populated, never user-edited.
+    The user supplies the AD group name and the manager (an AD user); the
+    sync engine resolves DNs, fetches member attributes, and walks the
+    manager-of-manager chain to derive ``parent_id``.
+    """
 
     __tablename__ = "departments"
 
@@ -121,11 +127,29 @@ class Department(Base):
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    head: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # AD group — what binds this dept to a real-world group of people.
+    ad_group_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    ad_group_dn: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # Manager — set by user (input string), DN + cached attrs filled by sync.
+    manager_input: Mapped[str] = mapped_column(String(255), nullable=False)
+    manager_dn: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    manager_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    manager_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    manager_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Hierarchy: derived from manager chain at sync time. Never user-set.
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
     )
+
+    # Sync state
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sync_status: Mapped[str] = mapped_column(String(16), nullable=False, default="never")
+    # never | ok | error | pending
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -143,6 +167,45 @@ class Department(Base):
         foreign_keys=lambda: [Department.parent_id],
         lazy="selectin",
     )
+    members: Mapped[list["DepartmentMember"]] = relationship(
+        "DepartmentMember",
+        back_populates="department",
+        cascade="all, delete-orphan",
+        order_by="DepartmentMember.display_name",
+    )
+
+
+class DepartmentMember(Base):
+    """A person who belongs to a department's AD group.
+
+    Synced from AD on demand. ``enabled=False`` indicates the AD account is
+    disabled — the UI renders these with a strikethrough and tooltip rather
+    than hiding them, so an operator looking at "who do I talk to" can still
+    see the historical association.
+    """
+
+    __tablename__ = "department_members"
+    __table_args__ = (
+        UniqueConstraint("department_id", "user_dn", name="uq_dept_member_dn"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_dn: Mapped[str] = mapped_column(String(512), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # AD `manager` attribute, captured at sync time so the directory list can
+    # show each person's manager without a live LDAP round trip.
+    manager_dn: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    manager_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    department: Mapped["Department"] = relationship("Department", back_populates="members")
 
 
 # ---- Docs index -----------------------------------------------------------
@@ -404,6 +467,7 @@ __all__ = [
     "Base",
     "User",
     "Department",
+    "DepartmentMember",
     "Tag",
     "HostTag",
     "Credential",

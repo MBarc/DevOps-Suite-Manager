@@ -95,4 +95,31 @@ def run_migrations(engine: Engine) -> list[str]:
         "frontmatter_title VARCHAR(255)",
     ):
         applied.append("documents.frontmatter_title")
+    # Phase 14 redo — Organisation graph rebuilt on top of Active Directory.
+    # The old shape had free-text head/email/parent. Detect it by the `head`
+    # column and drop the table; Base.metadata.create_all rebuilds with the
+    # new schema (ad_group_dn, manager_dn, sync state, member relationship).
+    # Project decision: no production data exists yet, so a clean replace is
+    # safe and avoids needing Alembic for the column drops + add.
+    if _has_column(engine, "departments", "head"):
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS department_members"))
+            conn.execute(text("DROP TABLE departments"))
+        applied.append("departments.v2_clean_replace")
+    # Phase 14 polish — per-member manager fields so the directory list
+    # shows "who reports to whom" instead of just titles.
+    if _add_column_if_missing(
+        engine,
+        "department_members",
+        "manager_dn",
+        "manager_dn VARCHAR(512)",
+    ):
+        applied.append("department_members.manager_dn")
+    if _add_column_if_missing(
+        engine,
+        "department_members",
+        "manager_name",
+        "manager_name VARCHAR(255)",
+    ):
+        applied.append("department_members.manager_name")
     return applied

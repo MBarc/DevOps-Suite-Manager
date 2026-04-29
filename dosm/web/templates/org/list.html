@@ -1,71 +1,273 @@
 {% extends "base.html" %}
-{% block title %}Organization — DOSM{% endblock %}
+{% block title %}Org — DOSM{% endblock %}
 {% block head_extra %}
 <style>
 .view-toggle { display:flex; gap:var(--sp-1); }
 .view-toggle button { padding:.35em .9em; border-radius:6px; border:1px solid var(--border); background:var(--bg-alt); color:var(--fg-muted); font-size:.85rem; cursor:pointer; }
 .view-toggle button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-#tree-container { width:100%; overflow-x:auto; min-height:200px; }
+#tree-wrap { position:relative; }
+#tree-container {
+  width:100%; height:600px; overflow:hidden;
+  border:1px solid var(--border); border-radius:8px;
+  background:var(--bg-alt); cursor:grab;
+}
+#tree-container.dragging { cursor:grabbing; }
+#tree-container svg { display:block; user-select:none; }
 #tree-container svg text { font-family:inherit; }
+.tree-controls {
+  position:absolute; top:8px; right:8px; display:flex; gap:4px;
+  background:var(--bg-alt); border:1px solid var(--border); border-radius:6px;
+  padding:3px; box-shadow:0 2px 8px rgba(0,0,0,.3);
+}
+.tree-controls button {
+  width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+  border:none; background:transparent; color:var(--fg-muted); cursor:pointer; border-radius:4px;
+  font-size:14px; font-weight:500;
+}
+.tree-controls button:hover { background:var(--surface-raised, rgba(255,255,255,.06)); color:var(--fg-strong, #fff); }
+.tree-hint {
+  position:absolute; bottom:8px; left:12px;
+  font-size:.75rem; color:var(--fg-muted); pointer-events:none;
+  background:rgba(0,0,0,0.4); padding:2px 8px; border-radius:4px;
+}
 .dept-row td:first-child { font-weight:500; }
+.empty-hero { padding:var(--sp-6) var(--sp-4); text-align:center; }
+.empty-hero h2 { margin:0 0 var(--sp-2) 0; }
+.empty-hero p { color:var(--fg-muted); max-width:560px; margin:0 auto var(--sp-3) auto; }
+.sync-pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:.72rem; font-weight:500; }
+.sync-pill.ok { background:rgba(34,197,94,.15); color:#86efac; }
+.sync-pill.error { background:rgba(239,68,68,.15); color:#fca5a5; }
+.sync-pill.pending, .sync-pill.never { background:rgba(148,163,184,.15); color:var(--fg-muted); }
+.row-disabled .row-name { text-decoration:line-through; }
+.kind-badge {
+  display:inline-block; padding:1px 6px; border-radius:3px;
+  font-size:10px; font-weight:700; letter-spacing:.04em;
+  margin-left:6px; vertical-align:middle;
+}
+.kind-badge.dept { background:#6366f1; color:#fff; }
+.kind-badge.person { background:#475569; color:#e2e8f0; }
 </style>
 {% endblock %}
 {% block content %}
 <header class="page-header">
   <div>
-    <h1>Organization</h1>
-    <div class="subtitle">{{ depts|length }} department{{ 's' if depts|length != 1 else '' }}</div>
+    <h1>Directory</h1>
+    <div class="subtitle">
+      {% if configured %}
+        {{ depts|length }} department{{ 's' if depts|length != 1 else '' }} ·
+        {{ members|length }} {% if members|length == 1 %}person{% else %}people{% endif %} ·
+        Source: <code>{% if jumpbox %}{{ jumpbox.name }}{% else %}mock (testing){% endif %}</code>
+      {% else %}
+        Active Directory directory — not yet configured
+      {% endif %}
+    </div>
   </div>
   <div class="actions">
+    {% if configured %}
+    <a href="/org/configure" class="btn btn-ghost btn-sm">Configure</a>
     <a href="/org/new" class="btn btn-ghost btn-sm">New department</a>
+    {% endif %}
   </div>
 </header>
 
-{% if not depts %}
-<section class="card">
-  <div class="empty-state">No departments yet. <a href="/org/new">Create one</a> to start building the org chart.</div>
+{% if not configured %}
+<section class="card empty-hero">
+  <h2>You haven't configured a Windows jumpbox yet.</h2>
+  <p>
+    DOSM uses a Windows host (with RSAT-AD-PowerShell installed) to read your
+    Active Directory. Pick one of your existing jumpbox hosts — its credential
+    profile becomes the bind identity for AD queries.
+  </p>
+  <a href="/org/configure" class="btn">Configure jumpbox</a>
+</section>
+{% elif not depts %}
+<section class="card empty-hero">
+  <h2>No departments yet.</h2>
+  <p>
+    Add a department by giving it a name, an AD group, and a manager. DOSM
+    will pull members and infer the org chart from the manager chain.
+  </p>
+  <a href="/org/new" class="btn">New department</a>
 </section>
 {% else %}
 
 <section class="card">
   <div class="row-between" style="margin-bottom:var(--sp-3)">
-    <h2 style="margin:0">Departments</h2>
+    <h2 style="margin:0">Directory</h2>
     <div class="view-toggle">
       <button id="btn-list" class="active">List</button>
       <button id="btn-tree">Tree</button>
     </div>
   </div>
 
-  <!-- List view -->
   <div id="view-list">
-    <table class="data">
+    <div style="margin-bottom:12px">
+      <div style="position:relative; display:flex; align-items:center; max-width:560px;
+                  border:1px solid var(--divider); border-radius:8px;
+                  background:var(--surface-raised,rgba(255,255,255,.05)); overflow:visible">
+        <button id="dir-filter-btn" type="button"
+                style="display:flex; align-items:center; gap:4px; padding:6px 10px 6px 12px;
+                       font-size:12px; font-weight:600; white-space:nowrap; border:none;
+                       border-right:1px solid var(--divider); border-radius:8px 0 0 8px;
+                       background:transparent; color:var(--fg-muted); cursor:pointer">
+          <span id="dir-filter-label">Any field</span>
+          <span style="font-size:10px; opacity:.6">▾</span>
+        </button>
+        <ul id="dir-filter-menu"
+            style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:180px;
+                   background:var(--surface,#1e1e2e); border:1px solid var(--divider); border-radius:6px;
+                   list-style:none; margin:0; padding:4px 0; z-index:300; box-shadow:0 4px 16px rgba(0,0,0,.3)">
+          <li data-field=""        style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Any field</li>
+          <li data-field="name"    style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Name</li>
+          <li data-field="kind"    style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Type</li>
+          <li data-field="detail"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Manager</li>
+          <li data-field="email"   style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Email</li>
+          <li data-field="dept"    style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Department</li>
+        </ul>
+        <input id="dir-search" type="text" placeholder="Search directory…" autocomplete="off"
+               style="flex:1; padding:6px 32px 6px 10px; font-size:13px; border:none;
+                      background:transparent; color:var(--fg); outline:none" />
+        <button id="dir-clear" type="button"
+                style="display:none; position:absolute; right:8px; background:none; border:none;
+                       color:var(--fg-muted); cursor:pointer; font-size:16px; line-height:1; padding:0">×</button>
+      </div>
+    </div>
+
+    <table class="data" id="dir-table">
       <thead>
-        <tr><th>Name</th><th>Head</th><th>Parent</th><th>Description</th></tr>
+        <tr>
+          <th>Name</th>
+          <th>Manager</th>
+          <th>Email</th>
+          <th>Department</th>
+        </tr>
       </thead>
       <tbody>
       {% for d in depts %}
-      <tr class="dept-row">
-        <td><a href="/org/{{ d.slug }}">{{ d.name }}</a></td>
-        <td class="muted">{{ d.head or "—" }}</td>
-        <td class="muted">{{ d.parent.name if d.parent else "—" }}</td>
-        <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          {{ (d.description or "")[:100] }}
+      <tr class="dir-row"
+          data-name="{{ d.name | lower }}"
+          data-kind="department"
+          data-detail="{{ (d.manager_name or '') | lower }}"
+          data-email="{{ (d.manager_email or '') | lower }}"
+          data-dept="{{ (d.parent.name if d.parent else '') | lower }}">
+        <td>
+          <a href="/org/{{ d.slug }}" class="row-name">{{ d.name }}</a>
+          <span class="kind-badge dept">DEPT</span>
         </td>
+        <td class="muted">{{ d.manager_name or "—" }}</td>
+        <td>{% if d.manager_email %}<a href="mailto:{{ d.manager_email }}">{{ d.manager_email }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td>{% if d.parent %}<a href="/org/{{ d.parent.slug }}">{{ d.parent.name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      {% for m, d in members %}
+      <tr class="dir-row {% if not m.enabled %}row-disabled{% endif %}"
+          data-name="{{ m.display_name | lower }}"
+          data-kind="person"
+          data-detail="{{ (m.manager_name or '') | lower }}"
+          data-email="{{ (m.email or '') | lower }}"
+          data-dept="{{ d.name | lower }}"
+          {% if not m.enabled %}title="Account disabled"{% endif %}>
+        <td>
+          <span class="row-name">{{ m.display_name }}</span>
+          <span class="kind-badge person">USER</span>
+        </td>
+        <td class="muted">{{ m.manager_name or "—" }}</td>
+        <td>{% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><a href="/org/{{ d.slug }}">{{ d.name }}</a></td>
       </tr>
       {% endfor %}
       </tbody>
     </table>
+
+    <p class="muted" id="dir-empty" hidden style="margin:var(--sp-3) 0 0 0">No matches.</p>
   </div>
 
-  <!-- Tree view -->
   <div id="view-tree" style="display:none">
-    <div id="tree-container"><span class="muted" style="font-size:.85rem">Loading…</span></div>
+    <div id="tree-wrap">
+      <div id="tree-container"><span class="muted" style="font-size:.85rem; padding:var(--sp-3); display:inline-block">Loading…</span></div>
+      <div class="tree-controls" id="tree-controls" style="display:none">
+        <button type="button" id="tc-in" title="Zoom in">+</button>
+        <button type="button" id="tc-out" title="Zoom out">−</button>
+        <button type="button" id="tc-fit" title="Fit to view">⤢</button>
+      </div>
+      <div class="tree-hint" id="tree-hint" style="display:none">Drag to pan · scroll to zoom</div>
+    </div>
   </div>
 </section>
 {% endif %}
 
 <script>
 (function () {
+  // ── Directory search (hosts-page pattern) ────────────────────────────
+  var filterBtn   = document.getElementById('dir-filter-btn');
+  var filterLabel = document.getElementById('dir-filter-label');
+  var filterMenu  = document.getElementById('dir-filter-menu');
+  var searchInput = document.getElementById('dir-search');
+  var clearBtn    = document.getElementById('dir-clear');
+  var emptyMsg    = document.getElementById('dir-empty');
+  var activeField = '';
+
+  if (filterBtn) {
+    filterBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      filterMenu.style.display = filterMenu.style.display === 'none' ? 'block' : 'none';
+    });
+
+    Array.from(filterMenu.children).forEach(function (li) {
+      li.addEventListener('mouseenter', function () { li.style.background = 'var(--accent,#6366f1)'; li.style.color = '#fff'; });
+      li.addEventListener('mouseleave', function () { li.style.background = ''; li.style.color = 'var(--fg)'; });
+      li.addEventListener('click', function () {
+        activeField = li.getAttribute('data-field');
+        filterLabel.textContent = li.textContent;
+        filterBtn.style.color = activeField ? 'var(--accent,#6366f1)' : 'var(--fg-muted)';
+        filterMenu.style.display = 'none';
+        searchInput.value = '';
+        clearBtn.style.display = 'none';
+        applyFilter('');
+        searchInput.focus();
+      });
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!filterBtn.contains(e.target) && !filterMenu.contains(e.target))
+        filterMenu.style.display = 'none';
+    });
+
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value;
+      clearBtn.style.display = q ? 'block' : 'none';
+      applyFilter(q.toLowerCase());
+    });
+
+    clearBtn.addEventListener('click', function () {
+      searchInput.value = '';
+      clearBtn.style.display = 'none';
+      applyFilter('');
+      searchInput.focus();
+    });
+  }
+
+  var DATA_ATTRS = ['data-name','data-kind','data-detail','data-email','data-dept'];
+
+  function applyFilter(q) {
+    var table = document.getElementById('dir-table');
+    if (!table) return;
+    var visible = 0;
+    Array.from(table.querySelector('tbody').rows).forEach(function (row) {
+      var match = true;
+      if (q) {
+        if (activeField) {
+          match = (row.getAttribute('data-' + activeField) || '').includes(q);
+        } else {
+          match = DATA_ATTRS.some(function (a) { return (row.getAttribute(a) || '').includes(q); });
+        }
+      }
+      row.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    if (emptyMsg) emptyMsg.hidden = visible !== 0;
+  }
+
   const btnList = document.getElementById('btn-list');
   const btnTree = document.getElementById('btn-tree');
   const viewList = document.getElementById('view-list');
@@ -94,7 +296,6 @@
 
   async function loadTree() {
     const container = document.getElementById('tree-container');
-    // Load D3 lazily
     await loadScript('https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js');
     let data;
     try {
@@ -119,26 +320,43 @@
 
   function renderD3Tree(container, data) {
     const root = d3.hierarchy(data);
-    const nodeCount = root.descendants().length;
-
-    const marginX = 20, marginY = 60;
-    const W = Math.max(container.clientWidth - 4, 600);
-    const H = Math.max(nodeCount * 56 + marginY * 2, 240);
-
+    // Per-node spacing — drives the tree's natural size. The viewport stays
+    // fixed at the container's dimensions; the tree grows with the org and
+    // pan/zoom lets the user navigate it.
+    const NODE_W = 180, NODE_H = 90;
     const treeLayout = d3.tree()
-      .size([W - marginX * 2, H - marginY * 2])
-      .separation((a, b) => (a.parent === b.parent ? 1 : 1.4));
-
+      .nodeSize([NODE_W, NODE_H])
+      .separation((a, b) => (a.parent === b.parent ? 1 : 1.25));
     treeLayout(root);
 
+    // Use the actual extent of laid-out nodes (d3.tree with nodeSize centres
+    // around 0 and may produce negative x). We compute the tight bounding
+    // box and translate the inner group so everything lands inside the SVG.
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    root.each(n => {
+      if (n.x < xMin) xMin = n.x;
+      if (n.x > xMax) xMax = n.x;
+      if (n.y < yMin) yMin = n.y;
+      if (n.y > yMax) yMax = n.y;
+    });
+    const PAD = 60;
+    const treeW = (xMax - xMin) + PAD * 2;
+    const treeH = (yMax - yMin) + PAD * 2;
+
+    const viewportW = container.clientWidth || 800;
+    const viewportH = container.clientHeight || 600;
+
     const svg = d3.create('svg')
-      .attr('width', W)
-      .attr('height', H)
-      .attr('style', 'display:block; font-size:12px;');
+      .attr('width', viewportW)
+      .attr('height', viewportH)
+      .attr('style', 'font-size:12px;');
 
-    const g = svg.append('g').attr('transform', `translate(${marginX},${marginY})`);
+    // Two layers of <g>: outer is what d3.zoom transforms; inner translates
+    // the negative coords into the visible region of that group.
+    const zoomLayer = svg.append('g').attr('class', 'zoom-layer');
+    const g = zoomLayer.append('g')
+      .attr('transform', `translate(${PAD - xMin},${PAD - yMin})`);
 
-    // Links
     g.append('g')
       .attr('fill', 'none')
       .attr('stroke', 'var(--border, #3f3f46)')
@@ -148,7 +366,6 @@
       .join('path')
       .attr('d', d3.linkVertical().x(d => d.x).y(d => d.y));
 
-    // Nodes
     const node = g.append('g')
       .selectAll('g')
       .data(root.descendants())
@@ -161,7 +378,6 @@
       .attr('stroke', 'var(--accent, #6366f1)')
       .attr('stroke-width', 1.5);
 
-    // Name label above
     node.append('text')
       .attr('dy', '-14')
       .attr('text-anchor', 'middle')
@@ -171,16 +387,46 @@
       .text(d => d.data.name)
       .on('click', (_, d) => { if (d.data.slug) window.location.href = '/org/' + d.data.slug; });
 
-    // Head label below
-    node.filter(d => d.data.head)
+    node.filter(d => d.data.manager || typeof d.data.members === 'number')
       .append('text')
       .attr('dy', '22')
       .attr('text-anchor', 'middle')
       .attr('fill', 'var(--fg-muted, #71717a)')
       .attr('font-size', '11')
-      .text(d => d.data.head);
+      .text(d => {
+        const parts = [];
+        if (d.data.manager) parts.push(d.data.manager);
+        if (typeof d.data.members === 'number') parts.push(d.data.members + ' member' + (d.data.members === 1 ? '' : 's'));
+        return parts.join(' · ');
+      });
 
+    // ---- Pan + zoom -----------------------------------------------------
+    const zoom = d3.zoom()
+      .scaleExtent([0.2, 3])
+      .on('start', () => container.classList.add('dragging'))
+      .on('end', () => container.classList.remove('dragging'))
+      .on('zoom', (event) => zoomLayer.attr('transform', event.transform));
+    svg.call(zoom);
+
+    function fit() {
+      const scale = Math.min(viewportW / treeW, viewportH / treeH, 1);
+      const tx = (viewportW - treeW * scale) / 2;
+      const ty = (viewportH - treeH * scale) / 2;
+      svg.transition().duration(250).call(
+        zoom.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(scale)
+      );
+    }
+
+    document.getElementById('tc-in').onclick = () => svg.transition().duration(150).call(zoom.scaleBy, 1.3);
+    document.getElementById('tc-out').onclick = () => svg.transition().duration(150).call(zoom.scaleBy, 1 / 1.3);
+    document.getElementById('tc-fit').onclick = fit;
+    document.getElementById('tree-controls').style.display = '';
+    document.getElementById('tree-hint').style.display = '';
+
+    container.innerHTML = '';
     container.appendChild(svg.node());
+    requestAnimationFrame(fit);
   }
 })();
 </script>
