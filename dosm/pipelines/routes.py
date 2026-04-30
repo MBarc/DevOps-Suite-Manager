@@ -113,7 +113,8 @@ async def pipelines_list(
         except Exception:
             summary = ""
             provider_name = p.provider
-        enriched.append({"p": p, "latest": latest[0] if latest else None, "cfg": cfg, "summary": summary, "provider_name": provider_name})
+        enriched.append({"p": p, "latest": latest[0] if latest else None,
+                         "cfg": cfg, "summary": summary, "provider_name": provider_name})
     return _templates(request).TemplateResponse(
         request, "pipelines/list.html", {"rows": enriched, "user": user}
     )

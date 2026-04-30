@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, Response
@@ -11,7 +11,7 @@ from sqlalchemy import desc, func, select, text
 from sqlalchemy.orm import Session
 
 from dosm import __version__
-from dosm.certs.scanner import peek_cached as peek_cached_certs
+from dosm.agent import agent_router
 from dosm.auth.deps import (
     _NotAuthenticated,
     get_current_user,
@@ -20,27 +20,27 @@ from dosm.auth.deps import (
 )
 from dosm.auth.routes import router as auth_router
 from dosm.auth.session import install_session_middleware
+from dosm.certs import certs_router
+from dosm.certs.scanner import peek_cached as peek_cached_certs
 from dosm.config import Config, load_config
-from dosm.db import get_session, init_engine
-from dosm.agent import agent_router
 from dosm.credentials import credentials_router
+from dosm.db import get_session, init_engine
 from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
 from dosm.docs_index.watcher import start_watcher, stop_watcher
 from dosm.guacamole import guacamole_router
-from dosm.jumps import gc_loop, get_tunnel_manager
-from dosm.pipelines.poller import pipeline_poll_loop
-from dosm.llm import chat_router
-from dosm.certs import certs_router
-from dosm.monitoring import monitoring_router
-from dosm.pipelines import pipelines_router
-from dosm.settings import settings_router
 from dosm.hosts import hosts_router
+from dosm.jumps import gc_loop, get_tunnel_manager
+from dosm.llm import chat_router
 from dosm.metrics import metrics_router
-from dosm.org import org_router
 from dosm.models import AuditLog, Host, PipelineRun, User
+from dosm.monitoring import monitoring_router
+from dosm.org import org_router
+from dosm.pipelines import pipelines_router
+from dosm.pipelines.poller import pipeline_poll_loop
 from dosm.recording import recording_router
 from dosm.recording.routes import abort_stale_recordings
+from dosm.settings import settings_router
 from dosm.terminals import terminals_router
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -50,7 +50,7 @@ STATIC_DIR = PACKAGE_ROOT / "web" / "static"
 
 def _humanize_ago(ts: datetime, now: datetime) -> str:
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     seconds = int((now - ts).total_seconds())
     if seconds < 60:
         return f"{max(seconds, 0)}s ago"
@@ -89,7 +89,7 @@ def _action_color(action: str) -> str:
 
 def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or load_config()
-    engine = init_engine(cfg)
+    init_engine(cfg)
     # Create any new tables and apply idempotent column-add migrations so an
     # older DOSM_HOME upgrades without requiring a manual `dosm db init`.
     from dosm.db import create_all
@@ -176,7 +176,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         user: User = Depends(require_user),
         db: Session = Depends(get_session),
     ) -> HTMLResponse:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         since_24h = now - timedelta(hours=24)
 
         host_count = db.execute(select(func.count(Host.id))).scalar_one()

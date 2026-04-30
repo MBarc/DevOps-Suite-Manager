@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -61,7 +61,7 @@ async def plan_reject(
         return RedirectResponse(f"/chat/{cid}", status_code=303)
     card.status = "rejected"
     card.approver_id = user.id
-    card.approved_at = datetime.now(timezone.utc)
+    card.approved_at = datetime.now(UTC)
     try:
         args_dict = json.loads(card.args)
     except Exception:
@@ -121,7 +121,6 @@ async def plan_approve(
     # message) is kept. Non-secret fields: form value wins when non-empty.
     for field_def in spec.args_schema:
         fname = field_def["name"]
-        ftype = field_def.get("type", "string")
         form_val = str(form_data.get(f"arg_{fname}", "") or "")
         if form_val.strip():
             args[fname] = form_val.strip()
@@ -148,7 +147,7 @@ async def plan_approve(
     card.effective_args = json.dumps(args)
     card.status = "approved"
     card.approver_id = user.id
-    card.approved_at = datetime.now(timezone.utc)
+    card.approved_at = datetime.now(UTC)
     plan_id = card.id
     plan_tool = card.tool
     rec_events.record_plan_card_decision(
@@ -191,7 +190,7 @@ async def plan_approve(
         )
         c = s2.get(Conversation, cid)
         if c is not None:
-            c.updated_at = datetime.now(timezone.utc)
+            c.updated_at = datetime.now(UTC)
         s2.add(
             AuditLog(
                 actor_id=user.id,
@@ -234,7 +233,7 @@ async def plan_approve_group(
     if not pending_cards:
         return RedirectResponse(f"/chat/{cid}", status_code=303)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     approved: list[tuple[int, str, dict]] = []
 
     for card in pending_cards:
@@ -297,7 +296,7 @@ async def plan_approve_group(
             )
             conv_row = s2.get(Conversation, cid)
             if conv_row is not None:
-                conv_row.updated_at = datetime.now(timezone.utc)
+                conv_row.updated_at = datetime.now(UTC)
             s2.add(
                 AuditLog(
                     actor_id=user.id,

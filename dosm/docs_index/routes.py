@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
 from dosm.db import get_session
@@ -14,7 +14,7 @@ from dosm.docs_index import vault
 from dosm.docs_index.indexer import get_index_status, reindex_async
 from dosm.docs_index.markdown import render as render_markdown
 from dosm.docs_index.search import search as search_docs
-from dosm.models import AuditLog, Document, Folder, User
+from dosm.models import AuditLog, Document, User
 
 router = APIRouter(prefix="/docs")
 
@@ -247,7 +247,9 @@ async def docs_save(
         rel_parts = Path(path)
         doc_slug = rel_parts.stem
         save_folder_slug = rel_parts.parent.name or vault.UNFILED_SLUG
-        saved = vault.save_doc(cfg, folder_slug=save_folder_slug, doc_slug=doc_slug, title=title, body_md=body, author=user.username)
+        saved = vault.save_doc(
+            cfg, folder_slug=save_folder_slug, doc_slug=doc_slug, title=title, body_md=body, author=user.username
+        )
         action = "docs.update"
     else:
         # New doc.
@@ -272,7 +274,7 @@ async def docs_convert(
     """Convert an uploaded file to markdown and return JSON — used by the editor's import button."""
     raw = await file.read()
     if len(raw) > _MAX_UPLOAD_BYTES:
-        return JSONResponse({"error": f"File too large"}, status_code=413)
+        return JSONResponse({"error": "File too large"}, status_code=413)
 
     fname = file.filename or "upload"
     suffix = Path(fname).suffix.lower()

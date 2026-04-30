@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.config import Config
-from dosm.models import Credential, Pipeline, PipelineRun
+from dosm.models import Pipeline, PipelineRun
 from dosm.pipelines.adapters import (
     PipelineProviderError,
     PipelineUnreachable,
     PollResult,
-    TriggerResult,
     get_adapter,
 )
 from dosm.secrets import SecretNotFound, get_backend
@@ -141,7 +139,6 @@ async def trigger_pipeline(
     )
     db.add(run)
     db.flush()
-    run_id = run.id
 
     try:
         secret = _resolve_secret(cfg, pipeline)
@@ -149,14 +146,14 @@ async def trigger_pipeline(
     except (PipelineProviderError, PipelineUnreachable) as e:
         run.status = "failed"
         run.error = str(e)
-        run.completed_at = datetime.now(timezone.utc)
+        run.completed_at = datetime.now(UTC)
         db.flush()
         return run
 
     run.external_id = result.external_id
     run.status = result.status
     run.html_url = result.html_url
-    run.last_polled_at = datetime.now(timezone.utc)
+    run.last_polled_at = datetime.now(UTC)
     db.flush()
     return run
 
@@ -180,12 +177,12 @@ async def refresh_run(cfg: Config, db: Session, run: PipelineRun) -> PipelineRun
         )
     except (PipelineProviderError, PipelineUnreachable) as e:
         run.error = str(e)
-        run.last_polled_at = datetime.now(timezone.utc)
+        run.last_polled_at = datetime.now(UTC)
         db.flush()
         return run
 
     run.status = result.status
-    run.last_polled_at = datetime.now(timezone.utc)
+    run.last_polled_at = datetime.now(UTC)
     if result.started_at and not run.started_at:
         run.started_at = result.started_at
     if result.completed_at and run.status in ("success", "failed", "cancelled", "skipped"):

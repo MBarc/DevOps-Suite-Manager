@@ -58,10 +58,18 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.ruff]
-line-length = 100
+line-length = 130
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "B008",  # FastAPI Depends() in function defaults is intentional
+    "B904",  # raise-without-from — too noisy in CLI/route error handlers
+    "B905",  # zip() without strict= — intentional in pairing loops
+    "B027",  # empty abstract method without decorator — ABC pattern
+]
 # Test files import fixtures via function args — ruff shouldn't flag unused imports there.
-per-file-ignores = { "tests/**" = ["F401", "F811"] }
+# LLM tool definition files have long description strings — E501 would require ugly wrapping.
+# PowerShell adapter embeds full PS commands that cannot be split.
+per-file-ignores = { "tests/**" = ["F401", "F811"], "dosm/agent/actions.py" = ["E501"], "dosm/agent/queries.py" = ["E501"], "dosm/directory/adapters/winrm_jumpbox.py" = ["E501"], "dosm/metrics/sources.py" = ["E501"] }
