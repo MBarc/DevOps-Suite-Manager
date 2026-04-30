@@ -106,30 +106,36 @@ class JumpTunnelManager:
         host: Host,
         *,
         bind_host: str = "0.0.0.0",
+        target_port: int | None = None,
     ) -> TunnelLease | None:
         """Return a TunnelLease if `host` is jumped; ``None`` for direct hosts.
 
         The caller uses the lease's bind_host/bind_port as the apparent
         endpoint (e.g. for Guacamole's connection blob).
+
+        ``target_port`` overrides ``host.port`` for the tunnel destination —
+        used by winrm_exec to forward to WinRM (5985/5986) instead of the
+        host's registered RDP port (3389).
         """
         jump_hops, target = build_jump_chain(db, cfg, host)
         if not jump_hops:
             return None
         sig = _chain_signature(jump_hops)
+        eff_port = target_port if target_port is not None else target.port
         async with self._lock:
             entry = self._jumps.get(sig)
             if entry is None:
                 conn = await self._open_chain(jump_hops)
                 entry = _JumpEntry(chain_sig=sig, conn=conn)
                 self._jumps[sig] = entry
-            fkey = (target.hostname, target.port)
+            fkey = (target.hostname, eff_port)
             forward = entry.forwards.get(fkey)
             if forward is None:
                 listener = await entry.conn.forward_local_port(
                     listen_host=bind_host,
                     listen_port=0,  # OS picks a free port
                     dest_host=target.hostname,
-                    dest_port=target.port,
+                    dest_port=eff_port,
                 )
                 bound = listener.get_port()
                 forward = _ForwardEntry(
@@ -137,7 +143,7 @@ class JumpTunnelManager:
                     bind_host=bind_host,
                     bind_port=bound,
                     target_host=target.hostname,
-                    target_port=target.port,
+                    target_port=eff_port,
                 )
                 entry.forwards[fkey] = forward
             forward.lease_count += 1

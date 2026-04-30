@@ -37,6 +37,7 @@ dependencies = [
     "mammoth>=1.6",
     "markdown-it-py>=3.0",
     "nh3>=0.2",
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]

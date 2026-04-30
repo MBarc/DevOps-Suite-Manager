@@ -16,8 +16,29 @@ services:
       # Browser-facing Guacamole URL used for the iframe — must be reachable
       # from the user's browser, not from inside Docker.
       GUACAMOLE_PUBLIC_URL: ${GUACAMOLE_PUBLIC_URL:-http://localhost:8888/guacamole}
+      # LLM model to use — must match what you want Ollama to serve.
+      DOSM_LLM_MODEL: ${DOSM_LLM_MODEL:-qwen2.5:3b-instruct}
     networks: [guac]
-    depends_on: [guacd]
+    depends_on: [guacd, ollama]
+
+  # ── Ollama (local LLM) ──────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    networks: [guac]
+    # Exposed on a non-default port to avoid conflict with a host Ollama install.
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"
+    # Uncomment for NVIDIA GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   # ── Guacamole stack ──────────────────────────────────────────────────────
   guacd:
@@ -66,3 +87,4 @@ networks:
 
 volumes:
   guac-db:
+  ollama-data:

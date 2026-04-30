@@ -26,6 +26,7 @@ from dosm.agent import agent_router
 from dosm.credentials import credentials_router
 from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
+from dosm.docs_index.watcher import start_watcher, stop_watcher
 from dosm.guacamole import guacamole_router
 from dosm.jumps import gc_loop, get_tunnel_manager
 from dosm.pipelines.poller import pipeline_poll_loop
@@ -147,11 +148,12 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.on_event("startup")
     async def _warm_and_index() -> None:
         abort_stale_recordings(cfg)
-        # Warm the embedder in a background thread so no request ever pays the
-        # first-time init cost (HF download, ONNX load).
         warm_embedder_async(cfg)
         if cfg.docs_index.auto_index_on_startup:
             reindex_async(cfg, force=False)
+        # Watch $DOSM_HOME/docs/ for external file changes (dropped-in files,
+        # rsync, etc.) so the RAG index stays current automatically.
+        start_watcher(cfg)
         # Reap idle jump SSH connections whose forwards have all been
         # released. Without this, a tab close that misses the pagehide
         # beacon would leak the jump conn until process exit.
@@ -162,6 +164,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.on_event("shutdown")
     async def _stop_background_tasks() -> None:
+        stop_watcher()
         for attr in ("tunnel_gc_task", "pipeline_poller_task"):
             task = getattr(app.state, attr, None)
             if task is not None:

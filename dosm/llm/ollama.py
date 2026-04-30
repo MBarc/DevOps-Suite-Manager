@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -22,6 +22,25 @@ class ChatDelta:
     content: str
     done: bool
     raw: dict
+
+
+@dataclass
+class ToolCall:
+    """A single tool invocation returned by the model."""
+
+    name: str
+    arguments: dict  # already parsed by Ollama — never a raw JSON string
+
+
+@dataclass
+class ChatResponse:
+    """Structured response from a non-streaming chat completion."""
+
+    content: str
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    # The raw message dict as returned by Ollama. Re-insert into the history
+    # before appending tool results so the model sees its own tool_calls.
+    raw_message: dict = field(default_factory=dict)
 
 
 class OllamaClient:
@@ -54,6 +73,64 @@ class OllamaClient:
             if m.get("name") == target or m.get("name", "").split(":")[0] == target.split(":")[0]:
                 return True
         return False
+
+    async def complete_chat(
+        self,
+        messages: list[dict],
+        *,
+        temperature: float = 0.2,
+        num_ctx: int | None = None,
+        tools: list[dict] | None = None,
+    ) -> ChatResponse:
+        """Non-streaming chat completion. Returns a ChatResponse with content
+        and any tool_calls the model emitted."""
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        if num_ctx is not None:
+            payload["options"]["num_ctx"] = num_ctx
+        if tools:
+            payload["tools"] = tools
+        # Use a split timeout: fail fast on connect (Ollama down), but allow
+        # unlimited read time so large models on CPU can finish generating.
+        split_timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=split_timeout) as c:
+            try:
+                r = await c.post(f"{self.base_url}/api/chat", json=payload)
+                r.raise_for_status()
+                obj = r.json()
+                msg = obj.get("message") or {}
+                content = str(msg.get("content") or "")
+                raw_tool_calls = msg.get("tool_calls") or []
+                tool_calls = []
+                for tc in raw_tool_calls:
+                    fn = tc.get("function") or {}
+                    name = fn.get("name") or ""
+                    args = fn.get("arguments") or {}
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    if name:
+                        tool_calls.append(ToolCall(name=name, arguments=args))
+                return ChatResponse(
+                    content=content,
+                    tool_calls=tool_calls,
+                    raw_message=msg,
+                )
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                raise OllamaUnreachable(str(e)) from e
+            except httpx.HTTPStatusError as e:
+                body = ""
+                try:
+                    body = (await e.response.aread()).decode("utf-8", errors="replace")[:400]
+                except Exception:
+                    pass
+                raise OllamaError(f"Ollama {e.response.status_code}: {body}") from e
 
     async def stream_chat(
         self,

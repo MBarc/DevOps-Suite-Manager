@@ -4,7 +4,8 @@ import json
 import re
 from dataclasses import dataclass
 
-from dosm.agent.actions import list_actions
+from dosm.agent.actions import action_tools, list_actions
+from dosm.agent.queries import query_tools
 
 
 @dataclass
@@ -13,62 +14,70 @@ class ParsedPlan:
     args: dict
     rationale: str | None
     rollback: str | None
-    raw: str  # the full <plan>...</plan> block
+    raw: str
+
+
+@dataclass
+class ParsedQuery:
+    tool: str
+    args: dict
+    raw: str
 
 
 _PLAN_BLOCK_RE = re.compile(r"<plan>\s*(\{.*?\})\s*</plan>", re.DOTALL)
+_QUERY_BLOCK_RE = re.compile(r"<query>\s*(\{.*?\})\s*</query>", re.DOTALL)
+
+
+def tools_for_agent() -> list[dict]:
+    """All tools the agent can call, as OpenAI-compatible schemas.
+
+    Read-only query tools are auto-executed by the server.
+    Mutating action tools create plan cards requiring operator approval.
+    """
+    return query_tools() + action_tools()
 
 
 def agent_system_prompt(user: str | None = None) -> str:
-    catalog_lines = []
-    for spec in list_actions():
-        args = ", ".join(
-            f"{a['name']}{'?' if not a.get('required') else ''}:{a['type']}"
-            for a in spec.args_schema
-        )
-        catalog_lines.append(f"- {spec.name}({args}) — {spec.description}")
-    catalog = "\n".join(catalog_lines) if catalog_lines else "(no tools registered)"
-
     lines = [
-        "You are DOSM in AGENT mode. You may propose actions, but a human "
-        "operator approves every one before execution. You never act on your "
-        "own.",
+        "You are DOSM, an AI operations assistant in AGENT mode.",
         "",
-        "Available tools:",
-        catalog,
-        "",
-        "When you want to take an action, emit ONE plan block per intended "
-        "action, in this exact format (and nothing else inside the tags):",
-        "",
-        "<plan>",
-        '{"tool": "ssh_exec", "args": {"host": "sf-prod-01", "command": "uptime"}, '
-        '"rationale": "Why we want to run this.", "rollback": "How to recover '
-        'if it goes wrong, or null if read-only."}',
-        "</plan>",
+        "You have two categories of tools:",
+        "1. READ-ONLY tools (list_hosts, host_metrics, search_docs, etc.) — call these freely.",
+        "   They query the local database or lightweight APIs. They do NOT open connections.",
+        "2. EXEC/MUTATING tools (ssh_exec, local_exec, create_host, etc.) — these create a",
+        "   plan card that a human operator must approve before anything runs.",
         "",
         "Rules:",
-        "1. Always include a brief plain-English explanation around the plan "
-        "block — what you're about to do and what success looks like.",
-        "2. Read-only diagnostics first. Only propose state-changing commands "
-        "after you've confirmed the situation.",
-        "3. Use exact host names from the operator's inventory; if you're "
-        "unsure, ask before proposing a plan.",
-        "4. After a tool is approved and executed, the tool result will be "
-        "appended to the conversation so you can decide the next step.",
-        "5. If you cannot answer or act safely from the available tools, say "
-        "so plainly rather than guessing.",
+        "1. Call a read-only tool first to verify names/state before proposing any exec or mutation.",
+        "2. Use exact names from the inventory — call list_hosts if unsure of a host name.",
+        "3. Read-only tool results are database records — they do NOT mean you are connected.",
+        "4. State what you are proposing and why before calling a mutating tool.",
+        "5. If you cannot answer or act safely, say so plainly.",
+        "   IMPORTANT: Inventory host names (e.g. 'herupa') are labels — not DNS hostnames.",
+        "   Before using a host address in any command, call list_hosts to get the real",
+        "   hostname or IP, then use that value in the command (not the inventory label).",
+        "",
+        "6. Choosing where to execute — the key question is: WHO runs the command?",
+        "   DOSM container is the executor → local_exec (has NO 'host' parameter). Use when:",
+        "     - testing reachability FROM DOSM:  'ping herupa'  →  local_exec: ping -c 4 <herupa-addr>",
+        "     - port checks FROM DOSM:  'is 5432 open on db?'  →  local_exec: nc -zv db 5432",
+        "     - DOSM-side curl, dig, traceroute",
+        "   A registered host is the executor → ssh_exec (Linux/SSH) or winrm_exec (Windows). Use when:",
+        "     - running a command ON a host:  'df -h on herupa'  →  ssh_exec host=herupa: df -h",
+        "     - the host is the subject:  'from herupa, ping the DB'  →  ssh_exec host=herupa",
+        "     - checking services, processes, or files ON a host",
+        "",
+        "7. Jump chains are automatic in ssh_exec — always name the FINAL target host.",
+        "   Never name a jump box as the host; the runner resolves the chain from the inventory.",
+        "",
+        "8. local_exec has NO 'host' parameter. Never pass host= to local_exec.",
     ]
     if user:
-        lines.append(f"6. The operator speaking with you is {user}.")
+        lines.append(f"9. The operator speaking with you is {user}.")
     return "\n".join(lines)
 
 
 def parse_plan_blocks(text: str) -> list[ParsedPlan]:
-    """Extract all <plan>{...}</plan> blocks from `text`.
-
-    Malformed JSON is silently skipped; the caller can still render the raw
-    text so the operator sees what the model tried to say.
-    """
     plans: list[ParsedPlan] = []
     for match in _PLAN_BLOCK_RE.finditer(text):
         raw = match.group(0)
@@ -94,9 +103,6 @@ def parse_plan_blocks(text: str) -> list[ParsedPlan]:
 
 
 def strip_plan_blocks(text: str) -> str:
-    """Return the assistant text with `<plan>...</plan>` blocks replaced by
-    a placeholder so the visible message references each plan inline.
-    """
     counter = {"n": 0}
 
     def repl(_m: re.Match) -> str:
@@ -104,3 +110,26 @@ def strip_plan_blocks(text: str) -> str:
         return f"\n[plan #{counter['n']}]\n"
 
     return _PLAN_BLOCK_RE.sub(repl, text).strip()
+
+
+def parse_query_blocks(text: str) -> list[ParsedQuery]:
+    """Extract all <query>{...}</query> blocks from `text`."""
+    queries: list[ParsedQuery] = []
+    for match in _QUERY_BLOCK_RE.finditer(text):
+        raw = match.group(0)
+        body = match.group(1)
+        try:
+            obj = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+        tool = obj.get("tool")
+        args = obj.get("args") or {}
+        if not isinstance(tool, str) or not isinstance(args, dict):
+            continue
+        queries.append(ParsedQuery(tool=tool, args=args, raw=raw))
+    return queries
+
+
+def strip_query_blocks(text: str) -> str:
+    """Remove <query>...</query> blocks, leaving the surrounding text."""
+    return _QUERY_BLOCK_RE.sub("", text).strip()

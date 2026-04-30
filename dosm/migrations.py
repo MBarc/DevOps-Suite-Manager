@@ -122,4 +122,24 @@ def run_migrations(engine: Engine) -> list[str]:
         "manager_name VARCHAR(255)",
     ):
         applied.append("department_members.manager_name")
+    # Phase 16d — thinking trace: per-message JSON record of read-only
+    # query tool calls the agent made before answering. Drives the
+    # collapsible "Thinking…" bubble in the chat UI.
+    if _add_column_if_missing(
+        engine,
+        "chat_messages",
+        "thinking",
+        "thinking TEXT",
+    ):
+        applied.append("chat_messages.thinking")
+    # Total wall-clock generation time in milliseconds (LLM inference + tool
+    # execution + DB write). Shown in the thinking bubble so the operator
+    # can see actual wait time even when no query tools were called.
+    if _add_column_if_missing(
+        engine,
+        "chat_messages",
+        "generation_ms",
+        "generation_ms INTEGER",
+    ):
+        applied.append("chat_messages.generation_ms")
     return applied

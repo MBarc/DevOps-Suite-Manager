@@ -289,7 +289,12 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # JSON-encoded list[{rel_path, chunk_id, ord, score, snippet}]. Null for user msgs.
     citations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON-encoded list[{tool, args, ok, summary, data_preview, elapsed_ms}].
+    # Records read-only query tool calls the agent made before answering.
+    thinking: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Wall-clock milliseconds from start of _generate_reply to DB commit.
+    generation_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
     ord: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

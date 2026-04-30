@@ -1,14 +1,10 @@
 {% extends "base.html" %}
-{% block title %}{{ conversation.title }} — DOSM{% endblock %}
+{% block title %}{{ conversation.title }} | DOSM{% endblock %}
 {% block content %}
 <header class="page-header">
   <div>
     <h1 style="font-size:18px">{{ conversation.title }}</h1>
-    <div class="subtitle">
-      Mode <span class="badge {% if is_agent %}badge-amber{% else %}badge-blue{% endif %}">{{ conversation.mode }}</span>
-      · Model <code>{{ ollama_model }}</code>
-      · grounded in <code>{{ request.app.state.config.docs_dir }}</code>
-    </div>
+    <div class="subtitle">Model <code>{{ ollama_model }}</code> · grounded in <code>{{ request.app.state.config.docs_dir }}</code></div>
   </div>
   <div class="actions">
     <a href="/chat" class="btn btn-ghost">All chats</a>
@@ -27,8 +23,52 @@
           <span class="chat-role">{{ entry.m.role }}</span>
           <span class="muted" style="font-size:11.5px">{{ entry.m.created_at.isoformat(timespec='seconds') }}</span>
         </header>
-        <div class="chat-body">{{ entry.m.content }}</div>
+        {% if entry.thinking or entry.generation_ms %}
+        <details class="thinking-bubble" data-state="done">
+          <summary class="thinking-summary">
+            <span class="thinking-caret">▸</span>
+            <span class="thinking-title">Thought</span>
+            <span class="thinking-meta">
+              {%- if entry.thinking -%}
+                {{ entry.thinking | length }} tool{% if entry.thinking | length != 1 %}s{% endif %} ·
+              {%- endif -%}
+              {%- if entry.generation_ms -%}
+                {%- set s = (entry.generation_ms / 1000) | int -%}
+                {%- if s >= 60 %} {{ s // 60 }}m {{ s % 60 }}s{%- else %} {{ "%.1f"|format(entry.generation_ms / 1000.0) }}s{%- endif -%}
+              {%- elif entry.thinking -%}
+                {{ "%.1f"|format(entry.thinking_total_ms / 1000.0) }}s
+              {%- endif -%}
+            </span>
+          </summary>
+          <ol class="thinking-steps">
+            {% for t in entry.thinking %}
+              <li class="thinking-step {% if t.ok %}ok{% else %}err{% endif %}">
+                <div class="thinking-step-head">
+                  <code class="thinking-tool">{{ t.tool }}({% if t.args %}{{ t.args | tojson }}{% endif %})</code>
+                  <span class="thinking-elapsed muted">{{ t.elapsed_ms }}ms</span>
+                </div>
+                <div class="thinking-step-summary">→ {{ t.summary }}</div>
+                {% if t.data_preview %}
+                <details class="thinking-data">
+                  <summary class="muted" style="font-size:11.5px">data preview</summary>
+                  <pre class="thinking-pre">{{ t.data_preview }}</pre>
+                </details>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ol>
+        </details>
+        {% endif %}
+        <div class="chat-body">
+          {%- if entry.m.content -%}{{ entry.m.content }}{%- elif entry.cards -%}<span class="muted" style="font-style:italic">Action ready for your approval ↓</span>{%- endif -%}
+        </div>
         {% if entry.m.error %}<div class="error" style="margin-top:6px">{{ entry.m.error }}</div>{% endif %}
+        {% if entry.pending_safe_count > 1 %}
+          <form method="post" action="/chat/{{ conversation.id }}/plan/approve_group" class="approve-group-form">
+            <input type="hidden" name="message_id" value="{{ entry.m.id }}" />
+            <button type="submit" class="btn btn-approve-all">Approve all {{ entry.pending_safe_count }} safe actions</button>
+          </form>
+        {% endif %}
         {% if entry.cards %}
           {% for c in entry.cards %}
           <article class="plan-card plan-{{ c.card.status }} plan-{{ c.card.tier }}">
@@ -46,19 +86,39 @@
 
             {% if c.card.status == 'pending' %}
               <form method="post" action="/chat/{{ conversation.id }}/plan/{{ c.card.id }}/approve" class="plan-form">
-                {% if c.card.tool == 'ssh_exec' %}
-                  <label>Command (you can edit before approving)
-                    <input type="text" name="edited_command" value="{{ c.args.get('command', '') }}" />
-                  </label>
-                {% endif %}
+                {% for field in c.schema %}
+                  {% if field.type == 'secret' %}
+                    <label>{{ field.name }}{% if field.required %} <span class="field-req">*</span>{% endif %}
+                      <span class="muted plan-field-desc">{{ field.description }}</span>
+                      <input type="password" name="arg_{{ field.name }}" autocomplete="new-password"
+                             value="{{ c.args.get(field.name, '') }}" placeholder="Enter {{ field.name }}…" />
+                    </label>
+                  {% elif field.type == 'textarea' %}
+                    <label>{{ field.name }}{% if field.required %} <span class="field-req">*</span>{% endif %}
+                      <span class="muted plan-field-desc">{{ field.description }}</span>
+                      <textarea name="arg_{{ field.name }}" rows="4">{{ c.args.get(field.name, '') }}</textarea>
+                    </label>
+                  {% elif field.type == 'boolean' %}
+                    <label class="field-inline">
+                      <input type="checkbox" name="arg_{{ field.name }}" value="true" {% if c.args.get(field.name) %}checked{% endif %} />
+                      {{ field.name }} <span class="muted plan-field-desc">{{ field.description }}</span>
+                    </label>
+                  {% else %}
+                    <label>{{ field.name }}{% if field.required %} <span class="field-req">*</span>{% endif %}
+                      <span class="muted plan-field-desc">{{ field.description }}</span>
+                      <input type="text" name="arg_{{ field.name }}" value="{{ c.args.get(field.name, '') }}" />
+                    </label>
+                  {% endif %}
+                {% endfor %}
                 {% if c.card.tier == 'elevated' or elevated_card_id == c.card.id %}
+                  {% set ecf = confirm_fields.get(c.card.tool) %}
                   <label class="elevated-confirm">
-                    Off allow-list. Type the host name <code>{{ c.args.get('host', '') }}</code> to confirm:
+                    Elevated — type <code>{{ c.args.get(ecf, '') if ecf else c.card.tool }}</code> to confirm:
                     <input type="text" name="confirmation" autocomplete="off" autofocus />
                   </label>
                 {% endif %}
                 <div class="plan-actions">
-                  <button type="submit" class="btn">Approve & run</button>
+                  <button type="submit" class="btn">Approve &amp; run</button>
                   <button type="submit" class="btn btn-danger" formaction="/chat/{{ conversation.id }}/plan/{{ c.card.id }}/reject">Reject</button>
                 </div>
               </form>
@@ -80,15 +140,18 @@
           {% endfor %}
         {% endif %}
         {% if entry.citations %}
-        <ol class="citations">
-          {% for c in entry.citations %}
-            <li>
-              <span class="cite-n">[{{ c.n }}]</span>
-              <a href="/docs/view?path={{ c.rel_path|urlencode }}"><code>{{ c.rel_path }}</code></a>
-              <span class="muted">· chunk #{{ c.ord }} · score {{ "%.3f"|format(c.score) }}</span>
-            </li>
-          {% endfor %}
-        </ol>
+        <details class="citations-details">
+          <summary class="citations-summary">Sources ({{ entry.citations | length }})</summary>
+          <ol class="citations">
+            {% for c in entry.citations %}
+              <li>
+                <span class="cite-n">[{{ c.n }}]</span>
+                <a href="/docs/view?path={{ c.rel_path|urlencode }}"><code>{{ c.rel_path }}</code></a>
+                <span class="muted">· chunk #{{ c.ord }} · score {{ "%.3f"|format(c.score) }}</span>
+              </li>
+            {% endfor %}
+          </ol>
+        </details>
         {% endif %}
       </article>
     {% endfor %}
@@ -98,14 +161,26 @@
         <span class="chat-role">assistant</span>
         <span class="muted" style="font-size:11.5px" id="pending-status">thinking…</span>
       </header>
+      <details class="thinking-bubble" id="pending-thinking" data-state="streaming" style="display:none" open>
+        <summary class="thinking-summary">
+          <span class="thinking-caret">▾</span>
+          <span class="thinking-title" id="pending-thinking-title">Thinking…</span>
+          <span class="thinking-meta" id="pending-thinking-meta"></span>
+          <span class="thinking-pulse" aria-hidden="true"></span>
+        </summary>
+        <ol class="thinking-steps" id="pending-thinking-steps"></ol>
+      </details>
       <div class="chat-body" id="pending-body"></div>
       <div id="pending-plans"></div>
-      <ol class="citations" id="pending-citations"></ol>
+      <details class="citations-details" id="pending-citations-details" style="display:none">
+        <summary class="citations-summary" id="pending-citations-summary">Sources (0)</summary>
+        <ol class="citations" id="pending-citations"></ol>
+      </details>
     </article>
   </div>
 
   <form method="post" action="/chat/{{ conversation.id }}/message" class="chat-compose" id="compose">
-    <textarea name="content" id="content" placeholder="{{ 'Ask the agent to investigate or change something…' if is_agent else 'Ask about a runbook, command, or failure mode…' }}" rows="2" required></textarea>
+    <textarea name="content" id="content" placeholder="Ask a question or tell the agent to do something…" rows="2" required></textarea>
     <div class="chat-compose-row">
       <span class="muted" style="font-size:12px">Enter to send · Shift+Enter for newline</span>
       <button type="submit">Send</button>
@@ -116,7 +191,9 @@
 <script>
 (function () {
   const params = new URLSearchParams(location.search);
-  const replyTo = params.get('reply_to');
+  const urlReplyTo = params.get('reply_to');
+  const replyTo = urlReplyTo || {{ auto_reply_to | tojson }};
+  const isReconnect = !urlReplyTo && !!replyTo;
   const transcript = document.getElementById('transcript');
   const pending = document.getElementById('pending');
   const pendingBody = document.getElementById('pending-body');
@@ -131,40 +208,184 @@
     }
   });
 
-  requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
+  // After a generation completes, scroll_plans=1 is set so we land on the card.
+  const scrollPlans = params.get('scroll_plans') === '1';
+  if (scrollPlans) {
+    // Clean the param from the URL without reloading.
+    const cleanUrl = new URL(location.href);
+    cleanUrl.searchParams.delete('scroll_plans');
+    history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
+  }
+
+  // Scroll to first pending plan card, or bottom of transcript.
+  requestAnimationFrame(() => {
+    const firstPending = transcript.querySelector('.plan-card.plan-pending');
+    if (firstPending && (!replyTo || scrollPlans)) {
+      firstPending.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+  });
 
   if (!replyTo) return;
+
+  // Live elapsed-time ticker shown while waiting for the model.
+  const streamStart = performance.now();
+  let elapsedTimer = null;
+  function fmtElapsed(ms) {
+    const s = ms / 1000;
+    if (s < 60) return s.toFixed(1) + 's';
+    return Math.floor(s / 60) + 'm ' + Math.floor(s % 60) + 's';
+  }
+  const statusPrefix = isReconnect ? 'reconnected — still generating… ' : 'thinking… ';
+  elapsedTimer = setInterval(() => {
+    pendingStatus.textContent = statusPrefix + fmtElapsed(performance.now() - streamStart);
+  }, 500);
+  if (isReconnect) pendingStatus.textContent = 'reconnected — still generating…';
 
   pending.classList.remove('hidden');
   const es = new EventSource(`/chat/{{ conversation.id }}/stream?reply_to=${encodeURIComponent(replyTo)}`);
   let started = false;
 
+  const pendingCitesDetails = document.getElementById('pending-citations-details');
+  const pendingCitesSummary = document.getElementById('pending-citations-summary');
+
   es.addEventListener('citations', (e) => {
     try {
       const arr = JSON.parse(e.data);
+      if (!arr.length) return;
       pendingCites.innerHTML = '';
       arr.forEach(c => {
         const li = document.createElement('li');
         li.innerHTML = `<span class="cite-n">[${c.n}]</span> <a href="/docs/view?path=${encodeURIComponent(c.rel_path)}"><code>${c.rel_path}</code></a> <span class="muted">· chunk #${c.ord} · score ${c.score.toFixed(3)}</span>`;
         pendingCites.appendChild(li);
       });
+      pendingCitesSummary.textContent = `Sources (${arr.length})`;
+      pendingCitesDetails.style.display = '';
     } catch {}
   });
 
+  const pendingThinking = document.getElementById('pending-thinking');
+  const pendingThinkingSteps = document.getElementById('pending-thinking-steps');
+  const pendingThinkingTitle = document.getElementById('pending-thinking-title');
+  const pendingThinkingMeta = document.getElementById('pending-thinking-meta');
+  let thinkingStartedAt = 0;
+  let thinkingStepCount = 0;
+
+  function ensureThinkingBubble() {
+    if (!thinkingStartedAt) {
+      pendingThinking.style.display = '';
+      pendingThinking.open = true;
+      thinkingStartedAt = performance.now();
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  es.addEventListener('query_call', (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      ensureThinkingBubble();
+      thinkingStepCount += 1;
+      pendingStatus.textContent = `calling ${d.tool}…`;
+      const li = document.createElement('li');
+      li.className = 'thinking-step pending';
+      li.dataset.step = String(d.step);
+      const argsStr = d.args && Object.keys(d.args).length ? JSON.stringify(d.args) : '';
+      li.innerHTML = `
+        <div class="thinking-step-head">
+          <code class="thinking-tool">${escapeHtml(d.tool)}(${escapeHtml(argsStr)})</code>
+          <span class="thinking-spinner" aria-hidden="true"></span>
+        </div>
+        <div class="thinking-step-summary muted">…</div>`;
+      pendingThinkingSteps.appendChild(li);
+      transcript.scrollTop = transcript.scrollHeight;
+    } catch {}
+  });
+
+  es.addEventListener('query_result', (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      pendingStatus.textContent = d.ok ? `${d.tool} ✓` : `${d.tool} ✗`;
+      const li = pendingThinkingSteps.querySelector(`li[data-step="${d.step}"]`);
+      if (!li) return;
+      li.classList.remove('pending');
+      li.classList.add(d.ok ? 'ok' : 'err');
+      const head = li.querySelector('.thinking-step-head');
+      const spinner = head.querySelector('.thinking-spinner');
+      if (spinner) spinner.remove();
+      const elapsed = document.createElement('span');
+      elapsed.className = 'thinking-elapsed muted';
+      elapsed.textContent = `${d.elapsed_ms}ms`;
+      head.appendChild(elapsed);
+      const summary = li.querySelector('.thinking-step-summary');
+      summary.classList.remove('muted');
+      summary.textContent = `→ ${d.summary}`;
+      if (d.data_preview) {
+        const det = document.createElement('details');
+        det.className = 'thinking-data';
+        det.innerHTML = `<summary class="muted" style="font-size:11.5px">data preview</summary><pre class="thinking-pre">${escapeHtml(d.data_preview)}</pre>`;
+        li.appendChild(det);
+      }
+      transcript.scrollTop = transcript.scrollHeight;
+    } catch {}
+  });
+
+  function finalizeThinking() {
+    if (pendingThinking.style.display === 'none') return;
+    pendingThinking.dataset.state = 'done';
+    pendingThinking.open = false;
+    const elapsed = thinkingStartedAt ? (performance.now() - thinkingStartedAt) / 1000 : 0;
+    pendingThinkingTitle.textContent = 'Thought';
+    pendingThinkingMeta.textContent = ` (${thinkingStepCount} tool${thinkingStepCount === 1 ? '' : 's'} · ${elapsed.toFixed(1)}s)`;
+    const caret = pendingThinking.querySelector('.thinking-caret');
+    if (caret) caret.textContent = '▸';
+    const pulse = pendingThinking.querySelector('.thinking-pulse');
+    if (pulse) pulse.remove();
+  }
+
   es.addEventListener('token', (e) => {
-    if (!started) { started = true; pendingStatus.textContent = 'replying…'; }
+    if (!started) {
+      started = true;
+      clearInterval(elapsedTimer);
+      pendingStatus.textContent = 'replying…';
+      finalizeThinking();
+    }
     pendingBody.textContent += e.data.replace(/\\n/g, '\n');
     transcript.scrollTop = transcript.scrollHeight;
   });
 
-  es.addEventListener('plan', () => {
-    // Plan cards are persisted server-side; reload to render them with full
-    // approve/edit/reject controls instead of trying to mirror state in JS.
+  es.addEventListener('plan', (e) => {
     pendingStatus.textContent = 'plan ready';
+    finalizeThinking();
+    try {
+      const d = JSON.parse(e.data);
+      if (pendingThinkingSteps && d.tool) {
+        const li = document.createElement('li');
+        li.className = 'thinking-step awaiting';
+        li.innerHTML = `
+          <div class="thinking-step-head">
+            <code class="thinking-tool">${escapeHtml(d.tool)}(${escapeHtml(JSON.stringify(d.args || {}))})</code>
+          </div>
+          <div class="thinking-step-summary">→ awaiting your approval</div>`;
+        pendingThinkingSteps.appendChild(li);
+      }
+    } catch {}
   });
 
   es.addEventListener('error', (e) => {
     pendingStatus.textContent = 'error';
+    // Keep thinking bubble expanded on error so the operator can see what failed.
+    if (pendingThinking.style.display !== 'none') {
+      pendingThinking.dataset.state = 'error';
+      pendingThinking.open = true;
+      const pulse = pendingThinking.querySelector('.thinking-pulse');
+      if (pulse) pulse.remove();
+    }
     const errLine = document.createElement('div');
     errLine.className = 'error';
     errLine.style.marginTop = '6px';
@@ -173,15 +394,21 @@
   });
 
   es.addEventListener('done', () => {
+    clearInterval(elapsedTimer);
     es.close();
     const url = new URL(location.href);
     url.searchParams.delete('reply_to');
+    // Signal the next load to scroll to plan cards.
+    url.searchParams.set('scroll_plans', '1');
     history.replaceState(null, '', url.pathname + url.search);
     // Reload to pick up persisted plan cards / final state.
     setTimeout(() => location.reload(), 400);
   });
 
-  es.onerror = () => { pendingStatus.textContent = 'disconnected'; };
+  es.onerror = () => {
+    clearInterval(elapsedTimer);
+    pendingStatus.textContent = 'disconnected';
+  };
 })();
 </script>
 
@@ -209,7 +436,14 @@
     border-radius: var(--r-sm); padding: var(--sp-3) var(--sp-4);
   }
   .chat-msg-user .chat-body { background: rgba(116,168,255,0.05); }
-  .citations { margin: 8px 0 0 0; padding-left: 22px; font-size: 12.5px; color: var(--fg-muted); }
+  .citations-details { margin: 8px 0 0 0; }
+  .citations-summary {
+    font-size: 12px; color: var(--fg-muted); cursor: pointer;
+    list-style: none; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .citations-summary::before { content: '▶'; font-size: 9px; transition: transform 0.15s; }
+  .citations-details[open] .citations-summary::before { transform: rotate(90deg); }
+  .citations { margin: 6px 0 0 16px; padding-left: 6px; font-size: 12.5px; color: var(--fg-muted); }
   .citations li { margin-bottom: 2px; }
   .cite-n { color: var(--accent); font-family: var(--font-mono); font-weight: 600; margin-right: 4px; }
 
@@ -260,5 +494,93 @@
     font-family: var(--font-mono); font-size: 12px; max-height: 220px; overflow: auto;
   }
   .plan-stderr { color: var(--warn); }
+  .plan-field-desc { display: block; font-size: 11.5px; margin-bottom: 2px; }
+  .field-req { color: var(--danger); margin-left: 2px; }
+  .field-inline { flex-direction: row !important; align-items: center; gap: 6px; }
+  .approve-group-form { margin-top: 10px; }
+  .btn-approve-all {
+    background: rgba(95,209,154,0.12);
+    color: var(--success);
+    border: 1px solid rgba(95,209,154,0.3);
+  }
+  .btn-approve-all:hover { background: rgba(95,209,154,0.22); }
+
+  /* Thinking bubble */
+  .thinking-bubble {
+    margin: 4px 0 8px 0;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--fg-dim);
+    border-radius: var(--r-xs);
+    padding: 6px 10px;
+    font-size: 12.5px;
+    color: var(--fg-muted);
+  }
+  .thinking-bubble[data-state="streaming"] {
+    border-left-color: var(--accent);
+    animation: thinking-pulse-border 1.6s ease-in-out infinite;
+  }
+  .thinking-bubble[data-state="error"] { border-left-color: var(--danger); }
+  @keyframes thinking-pulse-border {
+    0%, 100% { border-left-color: var(--accent); }
+    50% { border-left-color: rgba(116,168,255,0.4); }
+  }
+  .thinking-summary {
+    cursor: pointer; list-style: none;
+    display: inline-flex; align-items: center; gap: 6px;
+    user-select: none;
+  }
+  .thinking-summary::-webkit-details-marker { display: none; }
+  .thinking-caret { font-size: 9px; color: var(--fg-dim); transition: transform 0.15s; }
+  .thinking-bubble[open] .thinking-caret { transform: rotate(0deg); }
+  .thinking-title { font-style: italic; }
+  .thinking-meta { color: var(--fg-dim); }
+  .thinking-pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    animation: thinking-pulse-dot 1s ease-in-out infinite;
+    margin-left: 4px;
+  }
+  @keyframes thinking-pulse-dot {
+    0%, 100% { opacity: 0.3; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.1); }
+  }
+  .thinking-steps {
+    list-style: none; padding: 6px 0 2px 0; margin: 0;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .thinking-step {
+    padding: 6px 8px;
+    background: var(--bg-elev-2);
+    border-left: 2px solid var(--fg-dim);
+    border-radius: var(--r-xs);
+  }
+  .thinking-step.ok { border-left-color: var(--success); }
+  .thinking-step.err { border-left-color: var(--danger); }
+  .thinking-step.pending { border-left-color: var(--accent); }
+  .thinking-step.awaiting { border-left-color: var(--warn); }
+  .thinking-step.awaiting .thinking-step-summary { color: var(--warn); }
+  .thinking-step-head { display: flex; align-items: center; gap: 8px; }
+  .thinking-tool {
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-strong);
+    background: var(--bg-elev-1); padding: 1px 6px; border-radius: var(--r-xs);
+    word-break: break-all;
+  }
+  .thinking-elapsed { font-size: 10.5px; }
+  .thinking-step-summary { margin-top: 3px; font-size: 12px; color: var(--fg); }
+  .thinking-spinner {
+    width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: thinking-spin 0.8s linear infinite;
+    display: inline-block;
+  }
+  @keyframes thinking-spin { to { transform: rotate(360deg); } }
+  .thinking-data { margin-top: 4px; }
+  .thinking-pre {
+    margin: 4px 0 0 0; padding: 6px 8px;
+    background: var(--bg-elev-1); border: 1px solid var(--border-soft); border-radius: var(--r-xs);
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted);
+    max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  }
 </style>
 {% endblock %}

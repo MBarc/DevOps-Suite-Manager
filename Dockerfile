@@ -2,9 +2,19 @@ FROM python:3.12-slim
 
 # libgomp1: required by the fastembed ONNX runtime
 # openssh-client: used by asyncssh for key negotiation helpers
+# Network diagnostic tools used by local_exec agent action:
+#   iputils-ping → ping
+#   netcat-openbsd → nc
+#   curl, dnsutils (dig/nslookup), traceroute, iproute2 (ip/ss)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     openssh-client \
+    iputils-ping \
+    netcat-openbsd \
+    curl \
+    dnsutils \
+    traceroute \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
