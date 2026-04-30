@@ -1,0 +1,88 @@
+# docker-compose.user.yml — image-based install (no source code needed)
+#
+# First-time setup:
+#   bash scripts/setup-guacamole.sh   (generates .env with all secrets)
+#   docker compose -f docker-compose.user.yml up -d
+#
+# Updates:
+#   bash scripts/update.sh
+#   — or manually:
+#   docker compose -f docker-compose.user.yml pull
+#   docker compose -f docker-compose.user.yml up -d
+
+services:
+
+  dosm:
+    image: ghcr.io/mbarc/dosm:latest
+    restart: unless-stopped
+    ports:
+      - "${DOSM_PORT:-8765}:8765"
+    volumes:
+      - ./dosm-home:/dosm-home
+    environment:
+      DOSM_HOME: /dosm-home
+      DOSM_ADMIN_PASSWORD: ${DOSM_ADMIN_PASSWORD:-changeme}
+      GUACAMOLE_PUBLIC_URL: ${GUACAMOLE_PUBLIC_URL:-http://localhost:8888/guacamole}
+      DOSM_LLM_MODEL: ${DOSM_LLM_MODEL:-qwen2.5:3b-instruct}
+    networks: [guac]
+    depends_on: [guacd, ollama]
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    networks: [guac]
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"
+    # Uncomment for NVIDIA GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  guacd:
+    image: guacamole/guacd:1.5.5
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [guac]
+
+  guacamole-db:
+    image: ghcr.io/mbarc/dosm-guacamole-db:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guacamole
+      POSTGRES_USER: guacamole
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole.sh first}
+    volumes:
+      - guac-db:/var/lib/postgresql/data
+    networks: [guac]
+
+  guacamole:
+    image: ghcr.io/mbarc/dosm-guacamole:latest
+    restart: unless-stopped
+    depends_on: [guacd, guacamole-db]
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRES_HOSTNAME: guacamole-db
+      POSTGRES_DATABASE: guacamole
+      POSTGRES_USER: guacamole
+      POSTGRES_PASSWORD: ${GUACAMOLE_DB_PASSWORD:?run scripts/setup-guacamole.sh first}
+      JSON_SECRET_KEY: ${GUACAMOLE_JSON_SECRET_KEY:?run scripts/setup-guacamole.sh first}
+      JSON_TRUSTED_NETWORKS: ${GUACAMOLE_JSON_TRUSTED_NETWORKS:-127.0.0.1,::1,172.16.0.0/12}
+    ports:
+      - "${GUACAMOLE_PORT:-8888}:8080"
+    volumes:
+      - ./dosm-home/data/guacamole_recordings:/recordings
+    networks: [guac]
+
+networks:
+  guac:
+
+volumes:
+  guac-db:
+  ollama-data:
