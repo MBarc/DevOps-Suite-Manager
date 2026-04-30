@@ -1,9 +1,22 @@
 {% extends "base.html" %}
-{% block title %}{{ conversation.title }} | DOSM{% endblock %}
+{% block title %}Chat | DOSM{% endblock %}
 {% block content %}
 <header class="page-header">
   <div>
-    <h1 style="font-size:18px">{{ conversation.title }}</h1>
+    <div style="display:flex;align-items:center;gap:8px">
+      <h1 style="font-size:18px;margin:0" id="conv-title-display">{{ conversation.title }}</h1>
+      <button id="conv-rename-btn" class="btn btn-ghost btn-sm" title="Rename conversation" style="padding:3px 7px;line-height:1">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+    </div>
+    <form id="conv-rename-form" method="post" action="/chat/{{ conversation.id }}/rename" style="display:none;margin-top:4px">
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="text" name="title" id="conv-rename-input" value="{{ conversation.title }}"
+               style="font-size:16px;font-weight:600;width:320px;max-width:100%" autocomplete="off" />
+        <button type="submit" class="btn btn-sm">Save</button>
+        <button type="button" id="conv-rename-cancel" class="btn btn-ghost btn-sm">Cancel</button>
+      </div>
+    </form>
     <div class="subtitle">Model <code>{{ ollama_model }}</code> · grounded in <code>{{ request.app.state.config.docs_dir }}</code></div>
   </div>
   <div class="actions">
@@ -178,6 +191,13 @@
       </details>
     </article>
   </div>
+
+  {% if interrupted_msg_id %}
+  <div class="chat-interrupted" id="interrupted-banner">
+    <span>Generation was interrupted (container may have restarted).</span>
+    <a href="/chat/{{ conversation.id }}?reply_to={{ interrupted_msg_id }}" class="btn btn-sm">Retry</a>
+  </div>
+  {% endif %}
 
   <form method="post" action="/chat/{{ conversation.id }}/message" class="chat-compose" id="compose">
     <textarea name="content" id="content" placeholder="Ask a question or tell the agent to do something…" rows="2" required></textarea>
@@ -582,5 +602,36 @@
     font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted);
     max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word;
   }
+  .chat-interrupted {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px var(--sp-6);
+    background: rgba(234,179,8,0.08);
+    border-top: 1px solid rgba(234,179,8,0.25);
+    font-size: 13px; color: var(--warn, #eab308);
+  }
 </style>
+
+<script>
+(function () {
+  const renameBtn = document.getElementById('conv-rename-btn');
+  const renameForm = document.getElementById('conv-rename-form');
+  const renameInput = document.getElementById('conv-rename-input');
+  const renameCancel = document.getElementById('conv-rename-cancel');
+  const titleDisplay = document.getElementById('conv-title-display');
+  if (!renameBtn) return;
+
+  renameBtn.addEventListener('click', () => {
+    titleDisplay.style.display = 'none';
+    renameBtn.style.display = 'none';
+    renameForm.style.display = '';
+    renameInput.focus();
+    renameInput.select();
+  });
+  renameCancel.addEventListener('click', () => {
+    renameForm.style.display = 'none';
+    titleDisplay.style.display = '';
+    renameBtn.style.display = '';
+  });
+})();
+</script>
 {% endblock %}

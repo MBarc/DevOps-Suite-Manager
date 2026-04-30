@@ -52,14 +52,14 @@ def _snippet(text: str, query: str) -> str:
     return prefix + t[start:end].strip() + suffix
 
 
-def _like_search(db: Session, query: str, limit: int) -> list[SearchHit]:
+def _like_search(db: Session, query: str, limit: int, *, exclude_org: bool = True) -> list[SearchHit]:
     q = f"%{query}%"
-    stmt = (
-        select(DocChunk, Document)
-        .join(Document, Document.id == DocChunk.doc_id)
-        .where(or_(DocChunk.text.ilike(q), Document.rel_path.ilike(q)))
-        .limit(limit)
+    stmt = select(DocChunk, Document).join(Document, Document.id == DocChunk.doc_id).where(
+        or_(DocChunk.text.ilike(q), Document.rel_path.ilike(q))
     )
+    if exclude_org:
+        stmt = stmt.where(~Document.rel_path.startswith("org/"))
+    stmt = stmt.limit(limit)
     hits: list[SearchHit] = []
     for chunk, doc in db.execute(stmt).all():
         hits.append(
@@ -78,7 +78,7 @@ def _like_search(db: Session, query: str, limit: int) -> list[SearchHit]:
 
 
 def _vector_search(
-    db: Session, embedder: Embedder, query: str, limit: int
+    db: Session, embedder: Embedder, query: str, limit: int, *, exclude_org: bool = True
 ) -> list[SearchHit]:
     qvec = embedder.embed_query(query)  # (dim,)
 
@@ -88,6 +88,8 @@ def _vector_search(
         .join(Document, Document.id == DocChunk.doc_id)
         .where(DocChunk.embedding.is_not(None))
     )
+    if exclude_org:
+        stmt = stmt.where(~Document.rel_path.startswith("org/"))
     rows = db.execute(stmt).all()
     if not rows:
         return []
@@ -117,23 +119,29 @@ def _vector_search(
     return hits
 
 
-def search(db: Session, cfg: Config, query: str, *, limit: int = 10) -> list[SearchHit]:
+def search(
+    db: Session, cfg: Config, query: str, *, limit: int = 10, exclude_org: bool = True
+) -> list[SearchHit]:
     """Vector search if we have an embedder + embedded chunks; else LIKE.
 
     Never blocks a request on first-time embedder initialization — uses
     block=False so cold requests get LIKE results immediately while a
     background warmer (or CLI `docs reindex`) primes the embedder.
+
+    exclude_org: hide org/* documents from human-facing searches; pass
+    False when calling from the agent's search_docs query tool so it can
+    still answer "who do I email about X" from synced org data.
     """
     query = (query or "").strip()
     if not query:
         return []
     embedder = _get_embedder(cfg, block=False)
     if isinstance(embedder, NoEmbedder):
-        return _like_search(db, query, limit)
+        return _like_search(db, query, limit, exclude_org=exclude_org)
     try:
-        hits = _vector_search(db, embedder, query, limit)
+        hits = _vector_search(db, embedder, query, limit, exclude_org=exclude_org)
         if hits:
             return hits
     except Exception:
         pass
-    return _like_search(db, query, limit)
+    return _like_search(db, query, limit, exclude_org=exclude_org)

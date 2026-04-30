@@ -16,26 +16,20 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
         Dashboard
       </a>
-      <a href="/hosts" class="{% if path.startswith('/hosts') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="0.9"/><circle cx="7" cy="17" r="0.9"/></svg>
-        Hosts
-      </a>
-      <a href="/credentials" class="{% if path.startswith('/credentials') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="M12 12l8-8M16 8l3 3"/></svg>
-        Credentials
-      </a>
-      <a href="/org" class="{% if path.startswith('/org') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><path d="M12 7.5v3"/><path d="M7.5 10.5H4a1 1 0 0 0-1 1v2.5h3.5v-.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v.5H21v-2.5a1 1 0 0 0-1-1h-3.5"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/></svg>
-        Org
-      </a>
-      <a href="/docs" class="{% if path.startswith('/docs') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M15 3v4h4"/><path d="M9 13h6M9 17h6M9 9h3"/></svg>
-        Docs
-      </a>
       <a href="/chat" class="{% if path.startswith('/chat') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h8M8 14h5"/></svg>
         Chat
       </a>
+      <a href="/hosts" class="{% if path.startswith('/hosts') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="0.9"/><circle cx="7" cy="17" r="0.9"/></svg>
+        Hosts
+      </a>
+      {% if request.app.state.config.terminals.enabled %}
+      <a href="/terminals" class="{% if path.startswith('/terminals') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
+        Terminals
+      </a>
+      {% endif %}
       <a href="/pipelines" class="{% if path.startswith('/pipelines') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l3 4h9"/><path d="M3 17h6l3-4"/><circle cx="3" cy="7" r="1.5"/><circle cx="3" cy="17" r="1.5"/><circle cx="21" cy="11" r="1.5"/></svg>
         Pipelines
@@ -48,12 +42,18 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M9 12v8l3-2 3 2v-8"/></svg>
         Certificates
       </a>
-      {% if request.app.state.config.terminals.enabled %}
-      <a href="/terminals" class="{% if path.startswith('/terminals') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
-        Terminals
+      <a href="/org" class="{% if path.startswith('/org') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><path d="M12 7.5v3"/><path d="M7.5 10.5H4a1 1 0 0 0-1 1v2.5h3.5v-.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v.5H21v-2.5a1 1 0 0 0-1-1h-3.5"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/></svg>
+        Org
       </a>
-      {% endif %}
+      <a href="/credentials" class="{% if path.startswith('/credentials') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="M12 12l8-8M16 8l3 3"/></svg>
+        Credentials
+      </a>
+      <a href="/docs" class="{% if path.startswith('/docs') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M15 3v4h4"/><path d="M9 13h6M9 17h6M9 9h3"/></svg>
+        Docs
+      </a>
 
       <div class="sidebar-section-label">Platform</div>
       {% if user is defined and user and user.role == 'admin' %}

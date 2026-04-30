@@ -39,6 +39,7 @@ async def docs_home(
     unfiled = list(db.execute(
         select(Document)
         .where(Document.folder_id.is_(None))
+        .where(~Document.rel_path.startswith("org/"))
         .order_by(Document.rel_path)
     ).scalars())
     return _templates(request).TemplateResponse(

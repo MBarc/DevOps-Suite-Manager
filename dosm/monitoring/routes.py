@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
 from dosm.db import get_session
 from dosm.hosts.repo import list_hosts
-from dosm.models import AuditLog, MonitoringSource, User
+from dosm.models import AuditLog, MonitoringSource, Tag, User
 from dosm.monitoring import repo
 from dosm.monitoring.adapters import TOOL_LABELS, HostCheckResult, MonitoringAdapter, make_adapter
 from dosm.secrets import SecretNotFound, get_backend
@@ -305,15 +307,46 @@ async def delete_source(
 # Fleet coverage page
 # ---------------------------------------------------------------------------
 
+def _glob_to_regex(pattern: str) -> re.Pattern:
+    """Convert a glob-ish pattern to a compiled regex.
+
+    If the pattern already contains regex metacharacters (^, $, (, [, .)
+    it is used as-is; otherwise * and ? are converted to .* and . respectively
+    and the whole thing is anchored with ^ and $.
+    """
+    if re.search(r"[\^\$\(\[\.]", pattern):
+        return re.compile(pattern, re.IGNORECASE)
+    escaped = re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".")
+    return re.compile(f"^{escaped}$", re.IGNORECASE)
+
+
+def _filter_hosts(hosts, pattern: str, tag_names: list[str]):
+    """Return the subset of hosts matching *both* pattern and tag filters."""
+    filtered = hosts
+    if pattern:
+        rx = _glob_to_regex(pattern)
+        filtered = [h for h in filtered if rx.search(h.name) or rx.search(h.hostname)]
+    if tag_names:
+        tag_set = {t.lower() for t in tag_names}
+        filtered = [h for h in filtered if any(t.name.lower() in tag_set for t in h.tags)]
+    return filtered
+
+
 @router.get("/coverage", response_class=HTMLResponse)
 async def coverage_page(
     request: Request,
     refresh: str = "",
+    pattern: str = "",
+    tags: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
 ) -> HTMLResponse:
     sources = repo.list_enabled(db)
-    hosts = list_hosts(db)
+    all_hosts = list_hosts(db)
+    all_tags = list(db.execute(select(Tag).order_by(Tag.name)).scalars())
+
+    selected_tags = [t for t in tags.split(",") if t.strip()] if tags else []
+    hosts = _filter_hosts(all_hosts, pattern.strip(), selected_tags)
 
     if refresh:
         for h in hosts:
@@ -358,12 +391,16 @@ async def coverage_page(
             "rows": rows,
             "tool_labels": TOOL_LABELS,
             "col_found": col_found,
-            "n_hosts": len(hosts),
+            "n_hosts": len(all_hosts),
+            "n_filtered": len(hosts),
             "n_fully": fully,
             "n_partially": partially,
             "n_not_covered": not_covered,
             "has_sources": bool(sources),
-            "has_hosts": bool(hosts),
+            "has_hosts": bool(all_hosts),
+            "all_tags": all_tags,
+            "filter_pattern": pattern.strip(),
+            "filter_tags": selected_tags,
         },
     )
 

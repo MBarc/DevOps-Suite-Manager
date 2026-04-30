@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -20,7 +20,7 @@ from dosm.agent.prompt import (
 from dosm.agent.queries import get_query
 from dosm.auth.deps import require_user
 from dosm.db import get_session, session_scope
-from dosm.llm.ollama import OllamaClient, OllamaError, OllamaUnreachable, ToolCall
+from dosm.llm.ollama import OllamaClient, OllamaError, OllamaUnreachable
 from dosm.llm.retrieval import (
     Citation,
     citations_to_json,
@@ -95,6 +95,23 @@ async def chat_new(
     db.add(conv)
     db.flush()
     cid = conv.id
+    return RedirectResponse(f"/chat/{cid}", status_code=303)
+
+
+@router.post("/{cid}/rename", include_in_schema=False)
+async def chat_rename(
+    cid: int,
+    title: str = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    conv = db.get(Conversation, cid)
+    if conv is None or conv.user_id != user.id:
+        raise HTTPException(404)
+    title = title.strip()[:255] or "New chat"
+    conv.title = title
+    db.add(AuditLog(actor_id=user.id, action="chat.rename", target=f"conversation:{cid}", details=title))
+    db.commit()
     return RedirectResponse(f"/chat/{cid}", status_code=303)
 
 
@@ -201,11 +218,18 @@ async def chat_view(
 
     # Detect an in-flight generation so the template can auto-start SSE on load.
     auto_reply_to: int | None = None
+    interrupted_msg_id: int | None = None
     entry = _reply_futures.get(cid)
     if entry is not None:
         pending_reply_to, pending_future, _ = entry
         if not pending_future.done():
             auto_reply_to = pending_reply_to
+    else:
+        # After a container restart _reply_futures is empty. Detect a dangling
+        # user message (no assistant reply follows it) so the template can show
+        # a Retry button.
+        if messages and messages[-1].role == "user":
+            interrupted_msg_id = messages[-1].id
 
     return _templates(request).TemplateResponse(
         request,
@@ -221,6 +245,7 @@ async def chat_view(
             "elevated_card_id": int(request.query_params.get("elevated_card", "0")) or None,
             "confirm_fields": confirm_fields,
             "auto_reply_to": auto_reply_to,
+            "interrupted_msg_id": interrupted_msg_id,
         },
     )
 
@@ -252,7 +277,7 @@ async def chat_post_message(
     user_msg_id = msg.id
     if conv.title == "New chat" or not existing:
         conv.title = _auto_title(content)
-    conv.updated_at = datetime.now(timezone.utc)
+    conv.updated_at = datetime.now(UTC)
     return RedirectResponse(f"/chat/{cid}?reply_to={user_msg_id}", status_code=303)
 
 
@@ -470,7 +495,7 @@ async def _generate_reply(
 
             conv_row = s.get(Conversation, conv_id)
             if conv_row is not None:
-                conv_row.updated_at = datetime.now(timezone.utc)
+                conv_row.updated_at = datetime.now(UTC)
                 if not conv_row.model:
                     conv_row.model = cfg.llm.model
             s.add(

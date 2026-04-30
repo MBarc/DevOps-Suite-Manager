@@ -7,9 +7,8 @@ No human approval is required — these are read-only.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -93,6 +92,7 @@ def query_tools() -> list[dict]:
 async def _list_hosts_runner(cfg, args: dict) -> QueryResult:
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
+
     from dosm.db import session_scope
     from dosm.models import Host
 
@@ -146,9 +146,10 @@ register_query(LIST_HOSTS)
 async def _host_metrics_runner(cfg, args: dict) -> QueryResult:
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
+
     from dosm.db import session_scope
+    from dosm.metrics.sources import MetricsError, make_source_for_host
     from dosm.models import Host
-    from dosm.metrics.sources import make_source_for_host, MetricsError
 
     host_name = (args.get("host") or "").strip()
     if not host_name:
@@ -207,6 +208,7 @@ register_query(HOST_METRICS)
 
 async def _query_monitoring_runner(cfg, args: dict) -> QueryResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import MonitoringSource
     from dosm.monitoring.adapters import make_adapter
@@ -420,6 +422,7 @@ register_query(LIST_PIPELINE_RUNS)
 
 async def _find_person_runner(cfg, args: dict) -> QueryResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import Department, DepartmentMember
 
@@ -486,6 +489,7 @@ register_query(FIND_PERSON)
 
 async def _list_credentials_runner(cfg, args: dict) -> QueryResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import Credential
 
@@ -529,7 +533,7 @@ async def _search_docs_runner(cfg, args: dict) -> QueryResult:
         k = 5
 
     with session_scope() as s:
-        hits = _search(s, cfg, query, limit=k)
+        hits = _search(s, cfg, query, limit=k, exclude_org=False)
 
     if not hits:
         return QueryResult(ok=True, summary="No matching documents", data=f"No documents matched {query!r}.")

@@ -7,13 +7,49 @@
       <a href="/monitoring" style="color:var(--fg-muted); font-size:13px; text-decoration:none">&larr; Monitoring</a>
     </div>
     <h1>Fleet Coverage</h1>
-    <div class="subtitle">Coverage matrix — all hosts against all monitoring sources</div>
+    <div class="subtitle">Coverage matrix — hosts against all monitoring sources</div>
   </div>
   <div class="actions">
-    <a href="/monitoring/coverage?refresh=1" class="btn btn-ghost">Refresh</a>
+    <a href="/monitoring/coverage{% if filter_pattern or filter_tags %}&refresh=1{% else %}?refresh=1{% endif %}{% if filter_pattern %}&pattern={{ filter_pattern|urlencode }}{% endif %}{% if filter_tags %}&tags={{ filter_tags|join(',')|urlencode }}{% endif %}" class="btn btn-ghost">Refresh</a>
     <a href="/monitoring/sources" class="btn btn-ghost">Manage Sources</a>
   </div>
 </header>
+
+<!-- Scope filter -->
+<section class="card" style="margin-bottom:20px">
+  <form method="get" action="/monitoring/coverage" id="coverage-filter-form">
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <label style="font-size:12px;color:var(--fg-muted);display:block;margin-bottom:4px">Name / hostname pattern</label>
+        <input type="text" name="pattern" value="{{ filter_pattern }}"
+               placeholder="e.g. server* or ^prod-\d+$"
+               style="width:100%;box-sizing:border-box" autocomplete="off" />
+        <div style="font-size:11px;color:var(--fg-muted);margin-top:3px">Supports glob (<code>*</code> <code>?</code>) or regex</div>
+      </div>
+      {% if all_tags %}
+      <div style="min-width:180px">
+        <label style="font-size:12px;color:var(--fg-muted);display:block;margin-bottom:4px">Tags (match any)</label>
+        <div id="tag-filter" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;max-height:100px;overflow-y:auto">
+          {% for tag in all_tags %}
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap">
+            <input type="checkbox" name="tags_check" value="{{ tag.name|e }}"
+                   {% if tag.name in filter_tags %}checked{% endif %} />
+            {{ tag.name }}
+          </label>
+          {% endfor %}
+        </div>
+        <input type="hidden" name="tags" id="tags-hidden" value="{{ filter_tags|join(',') }}" />
+      </div>
+      {% endif %}
+      <div style="display:flex;gap:6px;align-items:center;padding-bottom:1px">
+        <button type="submit" class="btn">Apply</button>
+        {% if filter_pattern or filter_tags %}
+        <a href="/monitoring/coverage" class="btn btn-ghost">Clear</a>
+        {% endif %}
+      </div>
+    </div>
+  </form>
+</section>
 
 {% if not has_sources %}
 <div class="card" style="border-left:3px solid var(--warning,#eab308); margin-bottom:24px">
@@ -27,11 +63,19 @@
 </div>
 {% else %}
 
+{% if filter_pattern or filter_tags %}
+<div style="font-size:13px;color:var(--fg-muted);margin-bottom:12px">
+  Showing {{ n_filtered }} of {{ n_hosts }} hosts
+  {% if filter_pattern %} matching <code>{{ filter_pattern }}</code>{% endif %}
+  {% if filter_tags %} tagged <code>{{ filter_tags|join(', ') }}</code>{% endif %}
+</div>
+{% endif %}
+
 <!-- Summary stats -->
 <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px">
   <div class="card" style="text-align:center; padding:16px 12px">
-    <div style="font-size:26px; font-weight:700">{{ n_hosts }}</div>
-    <div class="muted" style="font-size:12px; margin-top:4px">Total Hosts</div>
+    <div style="font-size:26px; font-weight:700">{{ n_filtered if (filter_pattern or filter_tags) else n_hosts }}</div>
+    <div class="muted" style="font-size:12px; margin-top:4px">{{ 'Filtered' if (filter_pattern or filter_tags) else 'Total' }} Hosts</div>
   </div>
   <div class="card" style="text-align:center; padding:16px 12px">
     <div style="font-size:26px; font-weight:700; color:#16a34a">{{ n_fully }}</div>
@@ -47,6 +91,7 @@
   </div>
 </div>
 
+{% if rows %}
 <!-- Matrix -->
 <section class="card" style="padding:0; overflow:hidden">
   <div style="overflow-x:auto">
@@ -95,10 +140,26 @@
     </table>
   </div>
 </section>
+{% else %}
+<div class="card"><div class="empty-state">No hosts match the current filter.</div></div>
+{% endif %}
 
 <div class="muted" style="font-size:12px; margin-top:8px">
   Results are cached for 60 seconds.
-  <a href="/monitoring/coverage?refresh=1" style="color:var(--accent)">Force refresh</a>
+  <a href="/monitoring/coverage?refresh=1{% if filter_pattern %}&pattern={{ filter_pattern|urlencode }}{% endif %}{% if filter_tags %}&tags={{ filter_tags|join(',')|urlencode }}{% endif %}" style="color:var(--accent)">Force refresh</a>
 </div>
 {% endif %}
+
+<script>
+(function () {
+  const form = document.getElementById('coverage-filter-form');
+  const hidden = document.getElementById('tags-hidden');
+  if (!form || !hidden) return;
+  form.addEventListener('submit', () => {
+    const checked = [...form.querySelectorAll('input[name="tags_check"]:checked')].map(el => el.value);
+    hidden.value = checked.join(',');
+    form.querySelectorAll('input[name="tags_check"]').forEach(el => { el.disabled = true; });
+  });
+})();
+</script>
 {% endblock %}
