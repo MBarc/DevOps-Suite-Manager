@@ -240,8 +240,12 @@ defaults shown via `dosm init` are sensible):
   session as the change itself.
 
 For a deeper tour and the design choices behind these picks, see
-[`docs/ROADMAP.md`](docs/ROADMAP.md). For an AI assistant working in
-this repo, [`CLAUDE.md`](CLAUDE.md) is the orientation file.
+[`docs/ROADMAP.md`](docs/ROADMAP.md). For the complete CLI reference,
+see [`docs/cli/`](docs/cli/) — every administrative action is
+scriptable from the CLI, and the same reference is auto-installed
+into the docs vault on `dosm init` so the agent can retrieve it. For
+an AI assistant working in this repo, [`CLAUDE.md`](CLAUDE.md) is the
+orientation file.
 
 ---
 

@@ -23,5 +23,14 @@ jobs:
       - name: Lint (ruff)
         run: ruff check dosm/ tests/
 
+      - name: CLI docs are up to date
+        run: |
+          python scripts/gen_cli_docs.py
+          if ! git diff --exit-code docs/cli/_generated/; then
+            echo "::error::docs/cli/_generated/ is out of sync with dosm/cli.py."
+            echo "Run: python scripts/gen_cli_docs.py && git add docs/cli/_generated/"
+            exit 1
+          fi
+
       - name: Run tests
         run: pytest tests/ -v --tb=short

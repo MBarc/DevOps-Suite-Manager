@@ -137,4 +137,18 @@ def initialize_home(home: Path, *, force: bool = False) -> list[Path]:
         readme_path.write_text(README_TEMPLATE)
         created.append(readme_path)
 
+    # Install the bundled CLI reference into the docs vault so the agent
+    # can RAG it on first run. Best-effort — failure here should not block
+    # `dosm init` (e.g. running from a source checkout where the generator
+    # has never been run).
+    try:
+        from dosm.docs_index.cli_reference import install_cli_reference, is_current
+
+        docs_dir = home / "docs"
+        if force or not is_current(docs_dir):
+            _, target = install_cli_reference(docs_dir)
+            created.append(target)
+    except FileNotFoundError:
+        pass
+
     return created

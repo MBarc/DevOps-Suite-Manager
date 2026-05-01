@@ -5,7 +5,10 @@
 <div class="app-shell">
   <aside class="sidebar">
     <a href="/" class="brand" title="DevOps Operations Suite Manager">
-      <span class="brand-mark">DO</span>
+      <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="28" height="28">
+        <rect width="32" height="32" rx="6" fill="#1e1e2e"/>
+        <text x="3" y="24" font-family="monospace" font-size="18" font-weight="700" fill="#6366f1">&gt;_</text>
+      </svg>
       <span class="brand-name">DOSM</span>
     </a>
 
@@ -102,7 +105,7 @@
 @keyframes rec-pulse { 0%,100%{opacity:1}50%{opacity:.35} }
 .rec-popover { position:absolute;bottom:calc(100% + 8px);right:0;min-width:260px;background:var(--surface,#18181b);border:1px solid var(--border,#3f3f46);border-radius:10px;padding:14px;box-shadow:0 8px 32px rgba(0,0,0,.5); }
 .rec-popover h4 { margin:0 0 10px;font-size:13px;font-weight:600;color:var(--text,#e4e4e7); }
-.rec-popover label { display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer;color:var(--text-muted,#a1a1aa);font-size:12px; }
+.rec-popover label { display:flex;flex-direction:row;align-items:center;gap:8px;padding:3px 0;cursor:pointer;color:var(--text-muted,#a1a1aa);font-size:12px; }
 .rec-popover label:hover { color:var(--text,#e4e4e7); }
 .rec-popover input[type=number] { width:60px;background:var(--input-bg,#27272a);border:1px solid var(--border,#3f3f46);border-radius:4px;color:var(--text,#e4e4e7);padding:2px 6px;font-size:12px; }
 .rec-popover .rec-actions { display:flex;gap:8px;margin-top:12px; }
@@ -144,7 +147,8 @@
         </button>
         ${state.popoverOpen ? renderIdlePopover() : ''}
       </div>`;
-      document.getElementById('rec-idle-btn').onclick = () => {
+      document.getElementById('rec-idle-btn').onclick = (e) => {
+        e.stopPropagation();
         state.popoverOpen = !state.popoverOpen; render();
       };
       if (state.popoverOpen) wireIdlePopover();
@@ -152,16 +156,25 @@
       widget.innerHTML = `<div style="position:relative">
         <button class="rec-btn active" id="rec-active-btn">
           <span class="rec-dot"></span>
-          ${fmtElapsed(state.elapsed)}
+          <span id="rec-elapsed">${fmtElapsed(state.elapsed)}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:2px"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         ${state.popoverOpen ? renderActivePopover() : ''}
       </div>`;
-      document.getElementById('rec-active-btn').onclick = () => {
+      document.getElementById('rec-active-btn').onclick = (e) => {
+        e.stopPropagation();
         state.popoverOpen = !state.popoverOpen; render();
       };
       if (state.popoverOpen) wireActivePopover();
     }
+  }
+
+  // Light-touch tick — update only the elapsed timer text without rebuilding
+  // the whole widget. Replacing innerHTML on a 1 s cadence can disrupt focus
+  // in adjacent iframes (Guac SSH/RDP) in some browsers.
+  function tickElapsed() {
+    const el = document.getElementById('rec-elapsed');
+    if (el) el.textContent = fmtElapsed(state.elapsed);
   }
 
   function renderIdlePopover() {
@@ -177,8 +190,7 @@
       ${optRow('plan_cards','Agent plan cards', o.plan_cards)}
       ${optRow('monitoring','Monitoring queries', o.monitoring)}
       ${optRow('navigation','Page navigation', o.navigation)}
-      ${optRow('guac_ssh_keystrokes','Keystrokes — Guac SSH ⚠ passwords may appear', o.guac_ssh_keystrokes)}
-      ${optRow('guac_rdp_keystrokes','Keystrokes — Guac RDP ⚠ high noise', o.guac_rdp_keystrokes)}
+      ${optRow('guac_keystrokes','Guac keystrokes (SSH/RDP) ⚠ passwords may appear', o.guac_keystrokes)}
       <label>Output cap (KB) <input type="number" id="opt-output_cap_kb" value="${o.output_cap_kb}" min="0" style="margin-left:auto"></label>
       <div class="rec-actions">
         <button class="rec-start-btn" id="rec-start-btn">▶ Start recording</button>
@@ -199,8 +211,7 @@
       ${optRow('plan_cards','Agent plan cards', o.plan_cards)}
       ${optRow('monitoring','Monitoring queries', o.monitoring)}
       ${optRow('navigation','Page navigation', o.navigation)}
-      ${optRow('guac_ssh_keystrokes','Keystrokes — Guac SSH ⚠ passwords may appear', o.guac_ssh_keystrokes)}
-      ${optRow('guac_rdp_keystrokes','Keystrokes — Guac RDP ⚠ high noise', o.guac_rdp_keystrokes)}
+      ${optRow('guac_keystrokes','Guac keystrokes (SSH/RDP) ⚠ passwords may appear', o.guac_keystrokes)}
       <label>Output cap (KB) <input type="number" id="opt-output_cap_kb" value="${o.output_cap_kb}" min="0" style="margin-left:auto"></label>
       <div class="rec-actions">
         <button class="rec-stop-btn" id="rec-stop-btn">■ Stop &amp; save</button>
@@ -215,7 +226,7 @@
   function collectOpts() {
     const keys = ['timestamps','pipelines','host_opens','commands','terminal_output',
                   'clipboard','plan_cards','monitoring','navigation',
-                  'guac_ssh_keystrokes','guac_rdp_keystrokes'];
+                  'guac_keystrokes'];
     const o = {};
     keys.forEach(k => {
       const el = document.getElementById(`opt-${k}`);
@@ -303,7 +314,7 @@
   function startTimer() {
     if (timer) return;
     timer = setInterval(() => {
-      if (state.active) { state.elapsed++; render(); }
+      if (state.active) { state.elapsed++; tickElapsed(); }
     }, 1000);
   }
 

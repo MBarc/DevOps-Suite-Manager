@@ -29,32 +29,23 @@
   });
 
   // Keystroke capture — buffer printable chars, emit on Enter.
-  // Time-gap heuristic: if the user paused >2 s before starting to type a line
-  // AND the line is short (≤32 chars), it is likely a password response —
-  // the line is flagged so the parent can redact it before logging.
+  // The user explicitly opted in via the "Guac keystrokes" recording option,
+  // which warns that passwords may appear. No automatic redaction is done
+  // here; pause/length heuristics produced too many false positives (any
+  // brief pause to think before a short command got masked).
   var _kBuf = '';
-  var _kLastEnterMs = 0;
-  var _kLineFirstMs = 0;
-  var _K_PAUSE_MS = 2000;
-  var _K_PWD_MAX = 32;
 
   window.addEventListener('keydown', function (e) {
-    var now = Date.now();
     var key = e.key;
 
     if (key === 'Enter') {
       if (_kBuf.length > 0) {
-        var pause = (_kLineFirstMs > 0 && _kLastEnterMs > 0)
-          ? _kLineFirstMs - _kLastEnterMs : 0;
-        var maybePwd = pause > _K_PAUSE_MS && _kBuf.length <= _K_PWD_MAX;
         window.parent.postMessage(
-          { type: 'guac_keystroke_line', line: _kBuf, maybe_password: maybePwd },
+          { type: 'guac_keystroke_line', line: _kBuf },
           '*'
         );
       }
       _kBuf = '';
-      _kLineFirstMs = 0;
-      _kLastEnterMs = now;
     } else if (key === 'Backspace') {
       _kBuf = _kBuf.slice(0, -1);
     } else if (e.ctrlKey && (key === 'c' || key === 'C')) {
@@ -62,19 +53,15 @@
       // preserved, then clear the buffer.
       if (_kBuf.length > 0) {
         window.parent.postMessage(
-          { type: 'guac_keystroke_line', line: _kBuf + '^C', maybe_password: false },
+          { type: 'guac_keystroke_line', line: _kBuf + '^C' },
           '*'
         );
         _kBuf = '';
-        _kLineFirstMs = 0;
       }
-      _kLastEnterMs = now;
     } else if (e.ctrlKey && (key === 'u' || key === 'U')) {
       // Ctrl+U — clear line in bash
       _kBuf = '';
-      _kLineFirstMs = 0;
     } else if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (_kBuf.length === 0) _kLineFirstMs = now;
       _kBuf += key;
     }
   });

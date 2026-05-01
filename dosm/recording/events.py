@@ -3,7 +3,6 @@ from __future__ import annotations
 from dosm.recording.journal import PWD_PROMPT_RE, redact
 from dosm.recording.state import get_active
 
-
 # ---------------------------------------------------------------------------
 # High-level event helpers — called from route hook points.
 # Each function is a no-op when no recording is active for that user.
@@ -107,9 +106,7 @@ def record_guac_command(
     rec = get_active(user_id)
     if rec is None:
         return
-    if protocol == "ssh" and not rec.options.guac_ssh_keystrokes:
-        return
-    if protocol == "rdp" and not rec.options.guac_rdp_keystrokes:
+    if not rec.options.guac_keystrokes:
         return
     host_part = f"`{host_name}` " if host_name else ""
     rec.writer.write_event(

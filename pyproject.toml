@@ -53,6 +53,15 @@ dosm = "dosm.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["dosm"]
 
+# Bundle the generated CLI reference inside the wheel so the runtime can
+# install it into $DOSM_HOME/docs/_dosm-cli/ on dosm init / dosm docs
+# install-cli-reference. Hand-written prose lives outside the wheel —
+# only the spliced output is shipped.
+[tool.hatch.build.targets.wheel.force-include]
+"docs/cli/_generated" = "dosm/cli_docs/_generated"
+"docs/cli/exit-codes.md" = "dosm/cli_docs/exit-codes.md"
+"docs/cli/README.md" = "dosm/cli_docs/README.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

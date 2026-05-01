@@ -103,6 +103,13 @@ def db_init() -> None:
     """Create all tables in SQLite. Safe to re-run."""
     cfg = load_config()
     create_all(cfg)
+    # Seed the DOSM-CLI folder so generated CLI reference docs land in
+    # their own folder when the indexer runs, even if the user never
+    # explicitly invokes `dosm docs install-cli-reference`.
+    from dosm.docs_index.cli_reference import ensure_cli_folder
+
+    with session_scope() as s:
+        ensure_cli_folder(s)
     console.print(f"[green]Schema ready[/green] at {cfg.db_path}")
 
 
@@ -248,7 +255,7 @@ def docs_new(
 
     cfg = load_config()
     init_engine(cfg)
-    from dosm.docs_index.vault import find_unique_slug, save_doc, slugify, UNFILED_SLUG
+    from dosm.docs_index.vault import find_unique_slug, save_doc, slugify
 
     slug = find_unique_slug(cfg.docs_dir / app_slug, slugify(title))
     # Write initial file so the editor has something to open.
@@ -322,6 +329,40 @@ def docs_reindex(
     )
     if stats.last_error:
         console.print(f"[red]Last error:[/red] {stats.last_error}")
+
+
+@docs_app.command("install-cli-reference")
+def docs_install_cli_reference(
+    force: bool = typer.Option(
+        False, "--force", help="Reinstall even if the version stamp matches."
+    ),
+) -> None:
+    """Copy the bundled CLI reference into $DOSM_HOME/docs/_dosm-cli/.
+
+    Also seeds the DOSM-CLI Folder row so the pages appear in their own
+    folder rather than Unfiled. Run after upgrading DOSM to refresh the
+    docs the agent retrieves via RAG. Auto-runs on `dosm init`. Files in
+    `_dosm-cli/` are owned by DOSM — do not hand-edit them.
+    """
+    from dosm.docs_index.cli_reference import (
+        ensure_cli_folder,
+        install_cli_reference,
+        is_current,
+    )
+
+    _load()
+    cfg = load_config()
+    if not force and is_current(cfg.docs_dir):
+        console.print(f"[yellow]Already current[/yellow]: {cfg.docs_dir / '_dosm-cli'}")
+        console.print("Use [bold]--force[/bold] to reinstall.")
+        return
+    count, target = install_cli_reference(cfg.docs_dir)
+    with session_scope() as s:
+        ensure_cli_folder(s)
+    console.print(f"[green]Installed[/green] {count} file(s) to {target}")
+    console.print("[green]Seeded[/green] DOSM-CLI folder")
+    console.print("Run [bold]dosm docs reindex[/bold] to make them searchable now")
+    console.print("(or just start [bold]dosm serve[/bold] — auto-index picks them up).")
 
 
 @docs_app.command("status")
@@ -574,7 +615,8 @@ def org_find(query: str = typer.Argument(..., help="Substring to match name/emai
     """Search cached people across all departments."""
     cfg = load_config()
     init_engine(cfg)
-    from sqlalchemy import or_, select as _select
+    from sqlalchemy import or_
+    from sqlalchemy import select as _select
 
     from dosm.models import Department, DepartmentMember
 

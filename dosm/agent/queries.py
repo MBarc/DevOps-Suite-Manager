@@ -642,3 +642,124 @@ READ_DOC = QuerySpec(
     runner=_read_doc_runner,
 )
 register_query(READ_DOC)
+
+
+# ---------------------------------------------------------------------------
+# cli_help
+# ---------------------------------------------------------------------------
+
+async def _cli_help_runner(cfg, args: dict) -> QueryResult:
+    """Return structured help for a `dosm` subcommand.
+
+    Use this before proposing any plan card whose action invokes the dosm
+    CLI — verifies the command exists, flags are spelled correctly, and
+    required arguments are present. Cheaper than searching the docs and
+    immune to RAG ranking noise.
+    """
+    import click
+
+    from dosm.cli import app as _app
+
+    command = (args.get("command") or "").strip()
+    if not command:
+        return QueryResult(ok=False, summary="command is required", error="command argument is required")
+
+    parts = command.split()
+    if parts and parts[0] == "dosm":
+        parts = parts[1:]
+
+    import typer as _typer
+    root = _typer.main.get_command(_app)
+    node: click.Command = root
+    walked: list[str] = []
+    for token in parts:
+        if not isinstance(node, click.Group):
+            return QueryResult(
+                ok=False,
+                summary=f"{' '.join(walked)!r} is not a group",
+                error=f"{' '.join(walked) or 'dosm'!r} has no subcommands; cannot resolve {token!r}",
+            )
+        sub = node.commands.get(token)
+        if sub is None:
+            available = ", ".join(sorted(node.commands)) or "(none)"
+            return QueryResult(
+                ok=False,
+                summary=f"unknown command: dosm {' '.join(walked + [token])}",
+                error=f"unknown command at {' '.join(walked) or 'dosm'!r}: {token!r}. Available: {available}",
+            )
+        node = sub
+        walked.append(token)
+
+    lines: list[str] = []
+    full = " ".join(["dosm", *walked])
+
+    if isinstance(node, click.Group):
+        # Listing a group — show its children.
+        lines.append(f"{full} — {(node.help or '').strip() or '(group)'}")
+        lines.append("")
+        lines.append("Subcommands:")
+        for name in sorted(node.commands):
+            child = node.commands[name]
+            short = (child.short_help or child.help or "").strip().splitlines()[0] if (child.short_help or child.help) else ""
+            lines.append(f"  {name} — {short}" if short else f"  {name}")
+        return QueryResult(ok=True, summary=f"group {full!r}", data="\n".join(lines))
+
+    # Concrete command.
+    desc = (node.help or node.short_help or "").strip()
+    lines.append(f"{full}")
+    if desc:
+        lines.append("")
+        lines.append(desc)
+
+    args_rows: list[str] = []
+    opts_rows: list[str] = []
+    for p in node.params:
+        if p.name == "help":
+            continue
+        type_name = getattr(p.type, "name", None) or p.type.__class__.__name__
+        if isinstance(p, click.Argument):
+            req = "required" if p.required else "optional"
+            args_rows.append(f"  <{p.name.upper()}> ({type_name}, {req})")
+        else:
+            flags = ",".join(getattr(p, "opts", []) or [])
+            default = "" if p.default in (None, ()) else f" default={p.default!r}"
+            help_text = (getattr(p, "help", None) or "").strip()
+            opts_rows.append(f"  {flags} ({type_name}){default}" + (f" — {help_text}" if help_text else ""))
+
+    if args_rows:
+        lines.append("")
+        lines.append("Arguments:")
+        lines.extend(args_rows)
+    if opts_rows:
+        lines.append("")
+        lines.append("Options:")
+        lines.extend(opts_rows)
+
+    synopsis_parts = ["dosm", *walked]
+    if opts_rows:
+        synopsis_parts.append("[OPTIONS]")
+    for p in node.params:
+        if isinstance(p, click.Argument):
+            token = f"<{p.name.upper()}>"
+            synopsis_parts.append(token if p.required else f"[{token}]")
+    lines.append("")
+    lines.append("Synopsis: " + " ".join(synopsis_parts))
+
+    return QueryResult(ok=True, summary=f"help for {full!r}", data="\n".join(lines))
+
+
+CLI_HELP = QuerySpec(
+    name="cli_help",
+    description=(
+        "Look up exact synopsis, arguments, and options for a `dosm` CLI command. "
+        "Call this before proposing any plan card that invokes the dosm CLI to "
+        "verify spelling and required flags. Pass the command path with or without "
+        "the leading 'dosm' (e.g. 'secret set' or 'dosm secret set'). "
+        "Pass a group name (e.g. 'docs') to list its subcommands."
+    ),
+    args_schema=[
+        {"name": "command", "type": "string", "required": True, "description": "Command path, e.g. 'secret set' or 'org sync'."},
+    ],
+    runner=_cli_help_runner,
+)
+register_query(CLI_HELP)

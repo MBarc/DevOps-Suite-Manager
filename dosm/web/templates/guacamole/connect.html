@@ -100,10 +100,11 @@
       return;
     }
 
-    // Keystroke lines from the Guac iframe — redact client-side before sending
-    // so the server never receives a potential password in plaintext.
+    // Keystroke lines from the Guac iframe. The user opted in via the
+    // recording option and was warned that passwords may appear — log the
+    // line as typed.
     if (e.data.type === 'guac_keystroke_line') {
-      var line = e.data.maybe_password ? '******' : (e.data.line || '');
+      var line = e.data.line || '';
       if (line) {
         fetch('/recording/event', {
           method: 'POST',
@@ -119,10 +120,33 @@
     }
   });
 
-  wrap.addEventListener('click', function dismissHint() {
-    hint.style.opacity = '0';
-    setTimeout(() => hint.remove(), 400);
+  // Aggressive iframe refocus. Browsers do not reliably re-focus an
+  // iframe's contentWindow when the user clicks on it after focus has
+  // moved away to the parent (recording widget, resource panel, browser
+  // tab/devtools). Without this, Guacamole's keyboard handler stops
+  // receiving keys and typing silently fails until a full page reload.
+  //
+  // pointerdown in capture phase fires before the iframe absorbs the
+  // event, so we get a chance to call contentWindow.focus() on every
+  // press inside the wrap. mouseenter handles the case where the user
+  // tabs back from another window or clicks an overlay then returns.
+  function refocusFrame() {
     try { frame.contentWindow.focus(); } catch (_) {}
+  }
+  wrap.addEventListener('pointerdown', refocusFrame, true);
+  wrap.addEventListener('mouseenter', () => {
+    if (document.hasFocus()) refocusFrame();
+  });
+  // Also refocus when the parent regains focus (e.g. user comes back
+  // from another tab) — defer one tick so the parent's own focus event
+  // settles first.
+  window.addEventListener('focus', () => setTimeout(refocusFrame, 0));
+
+  // One-shot hint dismissal on first click.
+  wrap.addEventListener('click', function dismissHint() {
+    if (!hint) return;
+    hint.style.opacity = '0';
+    setTimeout(() => hint && hint.remove(), 400);
     wrap.removeEventListener('click', dismissHint);
   });
 

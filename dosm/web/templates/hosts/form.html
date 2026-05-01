@@ -19,7 +19,7 @@
         action="{{ '/hosts/' + host.id|string + '/edit' if host else '/hosts/new' }}"
         class="stack">
     <label>Hostname
-      <input type="text" name="name" id="f-hostname" required value="{{ host.name if host else '' }}" placeholder="sf-prod-01.company.com" />
+      <input type="text" name="name" id="f-hostname" required value="{{ host.name if host else '' }}" placeholder="server.domain.com" />
     </label>
     <label>IP Address
       <input type="text" name="hostname" id="f-ip" required value="{{ host.hostname if host else '' }}" placeholder="10.0.0.10" />
@@ -52,7 +52,6 @@
       <input type="checkbox" id="is-jumpbox-cb" name="is_jumpbox" value="1"
         {% if host and host.is_jumpbox %}checked{% endif %} />
       <span>This host is a jumpbox</span>
-      <span class="field-hint" style="margin-left:auto">Jumpboxes connect directly — no jump host needed.</span>
     </label>
     <label id="jump-host-row"
       {% if host and host.is_jumpbox %}style="display:none"{% endif %}>
@@ -69,7 +68,7 @@
     </label>
     <label>Tags
       <input type="text" name="tags"
-        placeholder="prod, sf, linux"
+        placeholder="prod, linux"
         value="{{ host.tags|map(attribute='name')|join(', ') if host else '' }}" />
       <span class="field-hint">Comma-separated. Free-form.</span>
     </label>
