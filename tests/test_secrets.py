@@ -21,7 +21,7 @@ def test_set_and_get_returns_same_value(backend):
 
 
 def test_set_and_get_unicode_value(backend):
-    value = "p@ssw0rd!€".encode("utf-8")
+    value = "p@ssw0rd!€".encode()
     backend.set("test/unicode", value)
     assert backend.get("test/unicode") == value
 

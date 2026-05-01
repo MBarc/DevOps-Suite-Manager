@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 from dosm.agent.actions import classify_command, get_action, list_actions
 from dosm.config import Config, SSHPolicyConfig
@@ -6,7 +6,7 @@ from dosm.main import _action_color, _humanize_ago
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _ago(seconds: int) -> datetime:
@@ -43,7 +43,7 @@ def test_humanize_ago_days():
 
 def test_humanize_ago_naive_timestamp():
     # Naive datetimes (no tzinfo) should be treated as UTC without raising.
-    naive = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
+    naive = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
     result = _humanize_ago(naive, _now())
     assert result.endswith("m ago")
 

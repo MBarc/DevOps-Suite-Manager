@@ -1,4 +1,6 @@
 """Pipeline provider adapters."""
+from dosm.pipelines.adapters.awx import AWXAdapter
+from dosm.pipelines.adapters.azure_devops import AzureDevOpsAdapter
 from dosm.pipelines.adapters.base import (
     FieldSpec,
     PipelineAdapter,
@@ -7,8 +9,6 @@ from dosm.pipelines.adapters.base import (
     PollResult,
     TriggerResult,
 )
-from dosm.pipelines.adapters.awx import AWXAdapter
-from dosm.pipelines.adapters.azure_devops import AzureDevOpsAdapter
 from dosm.pipelines.adapters.github import GitHubActionsAdapter
 from dosm.pipelines.adapters.octopus import OctopusDeployAdapter
 from dosm.pipelines.adapters.terraform_cloud import TerraformCloudAdapter

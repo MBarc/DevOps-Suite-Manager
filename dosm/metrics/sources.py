@@ -254,7 +254,7 @@ class SSHSource(MetricsSource):
             kwargs["password"] = self._password
         try:
             self._conn = await asyncio.wait_for(asyncssh.connect(**kwargs), timeout=8.0)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise MetricsUnreachable(f"timed out connecting to {self._host.name}") from e
         except Exception as e:
             raise MetricsUnreachable(f"{self._host.name}: {type(e).__name__}: {e}") from e
@@ -266,7 +266,7 @@ class SSHSource(MetricsSource):
             res = await asyncio.wait_for(
                 conn.run(_SNAPSHOT_SCRIPT, check=False), timeout=8.0
             )
-        except (asyncio.TimeoutError, Exception) as e:
+        except (TimeoutError, Exception) as e:
             await self.aclose()  # force reconnect on next tick
             raise MetricsUnreachable(f"{self._host.name}: snapshot failed: {e}") from e
         snap, self._prev_cpu = _parse_snapshot(str(res.stdout or ""), self._prev_cpu)
@@ -435,7 +435,7 @@ class WinRMSource(MetricsSource):
             payload = await asyncio.wait_for(
                 loop.run_in_executor(None, self._run_script_sync), timeout=self._timeout
             )
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise MetricsUnreachable(
                 f"{self._host.name}: WinRM timed out after {self._timeout}s"
             ) from e

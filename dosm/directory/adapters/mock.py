@@ -29,7 +29,6 @@ from dosm.directory.adapters import (
     UserRecord,
 )
 
-
 _USERS: dict[str, UserRecord] = {
     "CN=Eric CEO,OU=People,DC=acme,DC=local": UserRecord(
         distinguished_name="CN=Eric CEO,OU=People,DC=acme,DC=local",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -16,7 +16,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -98,7 +98,7 @@ class Host(Base):
     )
 
     credential: Mapped[Credential | None] = relationship("Credential")
-    jump_host: Mapped["Host | None"] = relationship(
+    jump_host: Mapped[Host | None] = relationship(
         "Host", remote_side=lambda: [Host.id], foreign_keys=lambda: [Host.jump_host_id]
     )
     tags: Mapped[list[Tag]] = relationship(
@@ -155,19 +155,19 @@ class Department(Base):
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
-    parent: Mapped["Department | None"] = relationship(
+    parent: Mapped[Department | None] = relationship(
         "Department",
         back_populates="children",
         remote_side=lambda: [Department.id],
         foreign_keys=lambda: [Department.parent_id],
     )
-    children: Mapped[list["Department"]] = relationship(
+    children: Mapped[list[Department]] = relationship(
         "Department",
         back_populates="parent",
         foreign_keys=lambda: [Department.parent_id],
         lazy="selectin",
     )
-    members: Mapped[list["DepartmentMember"]] = relationship(
+    members: Mapped[list[DepartmentMember]] = relationship(
         "DepartmentMember",
         back_populates="department",
         cascade="all, delete-orphan",
@@ -205,7 +205,7 @@ class DepartmentMember(Base):
     manager_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
-    department: Mapped["Department"] = relationship("Department", back_populates="members")
+    department: Mapped[Department] = relationship("Department", back_populates="members")
 
 
 # ---- Docs index -----------------------------------------------------------
@@ -241,7 +241,7 @@ class Document(Base):
     )
     frontmatter_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    folder: Mapped["Folder | None"] = relationship("Folder")
+    folder: Mapped[Folder | None] = relationship("Folder")
 
 
 class DocChunk(Base):

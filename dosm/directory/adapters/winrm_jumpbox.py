@@ -17,8 +17,8 @@ from dosm.config import Config
 from dosm.db import session_scope
 from dosm.directory.adapters import (
     AdDirectoryError,
-    AdDirectoryUnreachable,
     AdDirectorySource,
+    AdDirectoryUnreachable,
     AdGroupNotFound,
     AdUserNotFound,
     GroupRecord,
@@ -28,7 +28,6 @@ from dosm.directory.adapters import (
 )
 from dosm.models import Host
 from dosm.secrets import SecretNotFound, get_backend
-
 
 # ---- PowerShell scripts -----------------------------------------------------
 #
@@ -232,7 +231,7 @@ class WinRMJumpboxSource(AdDirectorySource):
     # ---- Construction ---------------------------------------------------
 
     @classmethod
-    def from_config(cls, cfg: Config) -> "WinRMJumpboxSource":
+    def from_config(cls, cfg: Config) -> WinRMJumpboxSource:
         host_id = cfg.directory.ad_jumpbox_host_id
         if not host_id:
             raise AdDirectoryError("AD jumpbox is not configured. Set one at /org/configure.")

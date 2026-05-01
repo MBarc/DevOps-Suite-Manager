@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 
 from dosm.config import Config
 
-
 # ---- Errors --------------------------------------------------------------
 
 

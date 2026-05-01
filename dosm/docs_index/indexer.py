@@ -5,7 +5,7 @@ import hashlib
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -152,7 +152,7 @@ def _index_one(
     rel = path.relative_to(cfg.docs_dir).as_posix()
     stat = path.stat()
     size = stat.st_size
-    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(tzinfo=None)
+    mtime = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(tzinfo=None)
     digest = _sha256(path)
 
     # Read frontmatter metadata for markdown files before opening the DB session,
@@ -199,7 +199,7 @@ def _index_one(
             doc.sha256 = digest
             doc.size_bytes = size
             doc.modified_at = mtime
-            doc.indexed_at = datetime.now(timezone.utc)
+            doc.indexed_at = datetime.now(UTC)
             doc.chunk_count = 0
             doc.folder_id = app_id
             doc.frontmatter_title = fm_title
@@ -259,7 +259,7 @@ def _index_one(
         doc.chunk_count = len(chunks)
         doc.status = "indexed"
         doc.error = None
-        doc.indexed_at = datetime.now(timezone.utc)
+        doc.indexed_at = datetime.now(UTC)
     return "indexed"
 
 
@@ -282,7 +282,7 @@ def reindex(cfg: Config, *, force: bool = False) -> IndexStats:
         if _status.running:
             return get_index_status()
         _status.running = True
-        _status.started_at = datetime.now(timezone.utc)
+        _status.started_at = datetime.now(UTC)
         _status.finished_at = None
         _status.total_files = 0
         _status.processed = 0
@@ -324,7 +324,7 @@ def reindex(cfg: Config, *, force: bool = False) -> IndexStats:
         if removed:
             _log(f"pruned {removed} deleted files")
     finally:
-        _update(running=False, finished_at=datetime.now(timezone.utc))
+        _update(running=False, finished_at=datetime.now(UTC))
     return get_index_status()
 
 

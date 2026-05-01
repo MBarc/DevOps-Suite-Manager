@@ -76,7 +76,7 @@ class TunnelLease:
     bind_port: int
     target_host: str
     target_port: int
-    _manager: "JumpTunnelManager"
+    _manager: JumpTunnelManager
     _key: tuple[tuple[int, ...], str, int]
     _released: bool = False
 
@@ -294,7 +294,7 @@ async def probe_forward(
             asyncio.open_connection(probe_addr, lease.bind_port),
             timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise TargetUnreachableError(
             f"jump box cannot reach {lease.target_host}:{lease.target_port} "
             f"— connection timed out (host unreachable or port filtered)"
@@ -355,7 +355,7 @@ async def verify_ssh_credentials(
             f"target {target_host}:{target_port} rejected credentials "
             f"for user {username!r} — check the credential profile"
         ) from e
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise TargetUnreachableError(
             f"target {target_host}:{target_port} timed out during SSH handshake"
         )

@@ -5,7 +5,8 @@ from dataclasses import asdict, dataclass
 from sqlalchemy.orm import Session
 
 from dosm.config import Config
-from dosm.docs_index.search import SearchHit, search as search_docs
+from dosm.docs_index.search import SearchHit
+from dosm.docs_index.search import search as search_docs
 
 
 @dataclass

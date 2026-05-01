@@ -12,7 +12,7 @@ SQLAlchemy and pywinrm are both blocking, so a sync function avoids the
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ from dosm.models import AuditLog, Department, DepartmentMember
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def resolve_inputs(cfg: Config, group_name: str, manager_input: str) -> tuple[str, str, dict]:

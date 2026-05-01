@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from dosm.agent.actions import action_tools, list_actions
+from dosm.agent.actions import action_tools
 from dosm.agent.queries import query_tools
 
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -83,7 +83,7 @@ async def _poll_one(cfg: Config, run_id: int) -> bool:
 async def poll_tick(cfg: Config) -> TickStats:
     """One poller tick: abandon stale runs, then poll all due runs."""
     stats = TickStats()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     abandon_before = now - timedelta(hours=cfg.pipelines.poller_abandon_after_hours)
 
     # Collect due run IDs and handle abandonment in a single short session.

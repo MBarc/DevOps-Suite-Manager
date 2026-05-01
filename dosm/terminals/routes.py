@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import _NotAuthenticated, get_current_user, require_user
+from dosm.auth.deps import require_user
 from dosm.db import get_session
 from dosm.models import AuditLog, User
 from dosm.recording.events import (
@@ -20,7 +19,8 @@ from dosm.recording.events import (
 from dosm.terminals.discover import discover_shells, find_shell
 from dosm.terminals.pty_bridge import open_pty
 from dosm.terminals.recorder import AsciinemaRecorder, recording_path
-from dosm.terminals.runas import make_runas_shell, register as register_runas
+from dosm.terminals.runas import make_runas_shell
+from dosm.terminals.runas import register as register_runas
 
 router = APIRouter(prefix="/terminals")
 
@@ -135,8 +135,9 @@ async def terminals_ws(
         return
 
     # Re-open a DB session to resolve user + record audit trail.
-    from dosm.db import get_engine
     from sqlalchemy.orm import sessionmaker
+
+    from dosm.db import get_engine
 
     Session = sessionmaker(bind=get_engine(), future=True)
     with Session() as s:

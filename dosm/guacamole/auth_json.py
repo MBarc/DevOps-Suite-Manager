@@ -17,7 +17,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets as _secrets
 from pathlib import Path
 

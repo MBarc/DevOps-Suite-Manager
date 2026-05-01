@@ -233,7 +233,7 @@ async def hosts_ping(
                 asyncio.open_connection(host.hostname, host.port),
                 timeout=PING_TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return JSONResponse({
                 "ok": False, "via": "direct", "target": target, "latency_ms": None,
                 "message": f"timed out after {PING_TIMEOUT_SECONDS:.0f}s — "

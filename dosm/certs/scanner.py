@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import warnings
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography import x509
@@ -35,7 +35,7 @@ def _cn(name: x509.Name) -> str:
 
 
 def _status(not_after: datetime, warn_days: int, critical_days: int) -> tuple[str, int]:
-    days = (not_after - datetime.now(timezone.utc)).days
+    days = (not_after - datetime.now(UTC)).days
     if days < 0:
         return "expired", days
     if days <= critical_days:
@@ -140,7 +140,7 @@ def scan_all(
     force: bool = False,
 ) -> list[CertInfo]:
     global _cache
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if not force and _cache is not None:
         cached, cached_at = _cache
         if now - cached_at < _CACHE_TTL:

@@ -4,7 +4,7 @@ import platform
 import secrets
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from dosm.terminals.discover import Shell
 

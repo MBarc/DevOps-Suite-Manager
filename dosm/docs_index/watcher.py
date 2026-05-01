@@ -24,7 +24,7 @@ _observer_lock = threading.Lock()
 _WATCHED_EXTENSIONS = {".md", ".markdown", ".txt", ".pdf", ".docx"}
 
 
-def start_watcher(cfg: "Config") -> None:
+def start_watcher(cfg: Config) -> None:
     """Start the background docs watcher. No-op if already running or watchdog missing."""
     global _observer
     with _observer_lock:
@@ -33,8 +33,8 @@ def start_watcher(cfg: "Config") -> None:
         if not cfg.docs_dir.exists():
             return
         try:
+            from watchdog.events import FileSystemEvent, FileSystemEventHandler
             from watchdog.observers import Observer
-            from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
             class _Handler(FileSystemEventHandler):
                 def __init__(self) -> None:
@@ -55,7 +55,7 @@ def start_watcher(cfg: "Config") -> None:
                     from dosm.docs_index.indexer import reindex_async
                     reindex_async(cfg, force=False)
 
-                def on_any_event(self, event: "FileSystemEvent") -> None:
+                def on_any_event(self, event: FileSystemEvent) -> None:
                     if event.is_directory:
                         return
                     path = str(getattr(event, "src_path", ""))

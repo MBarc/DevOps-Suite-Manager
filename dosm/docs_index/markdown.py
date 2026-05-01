@@ -1,8 +1,8 @@
 """Markdown → safe HTML rendering for the docs vault view."""
 from __future__ import annotations
 
-from markdown_it import MarkdownIt  # type: ignore
 import nh3  # type: ignore
+from markdown_it import MarkdownIt  # type: ignore
 
 _md = MarkdownIt("commonmark").enable("table")
 

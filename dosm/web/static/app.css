@@ -111,13 +111,8 @@ a:hover { color: var(--fg-strong); }
 .brand:hover { color: var(--fg-strong); }
 .brand-mark {
   width: 28px; height: 28px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), #7bf0c8);
-  box-shadow: 0 6px 16px -8px rgba(116,168,255,0.6);
-  display: grid; place-items: center;
-  color: var(--accent-fg);
-  font-weight: 800;
-  font-size: 12px;
+  flex-shrink: 0;
+  display: block;
 }
 .brand-name { font-size: 15px; }
 

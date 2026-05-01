@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -239,7 +239,7 @@ async def credentials_update(
     cred.username = username.strip() or None
     cred.domain = domain.strip() or None
     # secret_ref is immutable after creation — keeps existing value
-    cred.updated_at = datetime.now(timezone.utc)
+    cred.updated_at = datetime.now(UTC)
     try:
         db.flush()
     except IntegrityError as e:

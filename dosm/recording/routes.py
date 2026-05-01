@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -12,13 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
-from dosm.db import get_session, session_scope
+from dosm.db import get_session
 from dosm.docs_index.indexer import reindex_async
 from dosm.models import AuditLog, RecordingSession, User
 from dosm.recording.journal import JournalWriter, RecordingOptions
 from dosm.recording.state import (
     ActiveRecording,
-    all_active,
     clear_active,
     get_active,
     set_active,
@@ -38,8 +36,9 @@ def _slug(username: str) -> str:
 # ---------------------------------------------------------------------------
 
 def abort_stale_recordings(cfg) -> None:
-    from dosm.db import get_engine
     from sqlalchemy.orm import sessionmaker
+
+    from dosm.db import get_engine
 
     S = sessionmaker(bind=get_engine(), future=True)
     with S() as db:
@@ -56,7 +55,7 @@ def abort_stale_recordings(cfg) -> None:
             if tmp_path.exists():
                 try:
                     with open(tmp_path, "a", encoding="utf-8") as fh:
-                        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                        ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                         fh.write(
                             f"\n---\n\n"
                             f"*Recording aborted: server restarted at {ts}.*\n"
@@ -67,7 +66,7 @@ def abort_stale_recordings(cfg) -> None:
                 except Exception:
                     pass
             row.status = "aborted"
-            row.stopped_at = datetime.now(timezone.utc)
+            row.stopped_at = datetime.now(UTC)
         db.commit()
 
 
@@ -101,7 +100,7 @@ async def recording_status(
     rec = get_active(user.id)
     if rec is None:
         return JSONResponse({"active": False})
-    elapsed = int((datetime.now(timezone.utc) - rec.started_at).total_seconds())
+    elapsed = int((datetime.now(UTC) - rec.started_at).total_seconds())
     return JSONResponse(
         {
             "active": True,
@@ -159,7 +158,7 @@ async def recording_start(
         slug=slug,
         options=opts,
         tmp_path=tmp_path,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
         writer=writer,
     )
     set_active(user.id, rec)
@@ -195,7 +194,7 @@ async def recording_stop(
     row = db.get(RecordingSession, rec.recording_id)
     if row:
         row.status = "finalized"
-        row.stopped_at = datetime.now(timezone.utc)
+        row.stopped_at = datetime.now(UTC)
         row.journal_path = final_rel
 
     db.add(

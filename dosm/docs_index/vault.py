@@ -13,7 +13,7 @@ import os
 import re
 import tempfile
 import unicodedata
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -87,7 +87,7 @@ def serialize_doc(
 # ── Path safety ───────────────────────────────────────────────────────────────
 
 
-def resolve_path(cfg: "Config", rel: str) -> Path:
+def resolve_path(cfg: Config, rel: str) -> Path:
     """Resolve a relative doc path safely under docs_dir. Raises ValueError on traversal."""
     docs_root = cfg.docs_dir.resolve()
     target = (docs_root / rel).resolve()
@@ -100,7 +100,7 @@ def resolve_path(cfg: "Config", rel: str) -> Path:
 
 
 def save_doc(
-    cfg: "Config",
+    cfg: Config,
     *,
     folder_slug: str,
     doc_slug: str,
@@ -120,7 +120,7 @@ def save_doc(
         folder_slug=folder_slug,
         body_md=body_md,
         author=author,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     fd, tmp_path = tempfile.mkstemp(dir=folder_dir, suffix=".tmp")
     try:
@@ -136,7 +136,7 @@ def save_doc(
     return target
 
 
-def delete_doc(cfg: "Config", rel: str) -> None:
+def delete_doc(cfg: Config, rel: str) -> None:
     """Delete a vault doc. Raises ValueError on traversal, FileNotFoundError if missing."""
     target = resolve_path(cfg, rel)
     target.unlink()

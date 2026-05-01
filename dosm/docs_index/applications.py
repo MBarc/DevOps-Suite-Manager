@@ -46,6 +46,7 @@ def delete_folder(db: Session, folder: Folder) -> None:
 
 def doc_count(db: Session, folder_id: int) -> int:
     from sqlalchemy import func
+
     from dosm.models import Document
     return db.execute(
         select(func.count(Document.id)).where(Document.folder_id == folder_id)

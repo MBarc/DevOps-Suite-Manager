@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
+from datetime import UTC
 
 from dosm.config import Config
 
@@ -189,7 +190,7 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
             duration_ms=duration_ms,
             extra={"host": host_label, "command": command, "jumps": jump_count},
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ActionResult(
             ok=False,
             summary=f"{host_label}: {command} timed out after {timeout}s",
@@ -267,6 +268,7 @@ async def _local_exec_runner(cfg: Config, args: dict) -> ActionResult:
     # swap any whole-word occurrences for the actual address recorded in the inventory.
     try:
         from sqlalchemy import select as _sel
+
         from dosm.db import session_scope as _scope
         from dosm.models import Host as _Host
         with _scope() as _s:
@@ -293,7 +295,7 @@ async def _local_exec_runner(cfg: Config, args: dict) -> ActionResult:
 
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         try:
             proc.kill()
         except Exception:
@@ -440,7 +442,7 @@ async def _winrm_exec_runner(cfg: Config, args: dict) -> ActionResult:
                 asyncio.get_event_loop().run_in_executor(None, _run_sync),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ActionResult(
                 ok=False,
                 summary=f"{host_label}: WinRM timed out after {timeout}s",
@@ -593,11 +595,13 @@ register_action(RUN_PIPELINE)
 
 async def _create_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
     import json
+
     from sqlalchemy.exc import IntegrityError
+
     from dosm.db import session_scope
     from dosm.models import AuditLog
-    from dosm.pipelines.repo import create_pipeline
     from dosm.pipelines.adapters import PipelineProviderError, list_providers
+    from dosm.pipelines.repo import create_pipeline
 
     name = (args.get("name") or "").strip()
     provider = (args.get("provider") or "").strip()
@@ -671,10 +675,11 @@ register_action(CREATE_PIPELINE)
 
 async def _update_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
     import json
+
     from dosm.db import session_scope
     from dosm.models import AuditLog
-    from dosm.pipelines.repo import get_pipeline_by_name, update_pipeline
     from dosm.pipelines.adapters import PipelineProviderError, list_providers
+    from dosm.pipelines.repo import get_pipeline_by_name, update_pipeline
 
     name = (args.get("name") or "").strip()
     if not name:
@@ -757,7 +762,7 @@ register_action(UPDATE_PIPELINE)
 async def _delete_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.db import session_scope
     from dosm.models import AuditLog
-    from dosm.pipelines.repo import get_pipeline_by_name, delete_pipeline
+    from dosm.pipelines.repo import delete_pipeline, get_pipeline_by_name
 
     name = (args.get("name") or "").strip()
     if not name:
@@ -792,6 +797,7 @@ register_action(DELETE_PIPELINE)
 
 async def _upsert_doc_runner(cfg: Config, args: dict) -> ActionResult:
     import time
+
     from dosm.docs_index import vault
     from dosm.docs_index.indexer import reindex_async
 
@@ -896,8 +902,9 @@ register_action(DELETE_DOC)
 async def _sync_org_group_runner(cfg: Config, args: dict) -> ActionResult:
     import asyncio
     import time
-    from functools import partial
+
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import Department
 
@@ -956,7 +963,7 @@ register_action(SYNC_ORG_GROUP)
 
 async def _create_host_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.db import session_scope
-    from dosm.hosts.repo import create_host, HostValidationError
+    from dosm.hosts.repo import HostValidationError, create_host
     from dosm.models import AuditLog
 
     name = (args.get("name") or "").strip()
@@ -1021,8 +1028,9 @@ register_action(CREATE_HOST)
 
 async def _update_host_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
-    from dosm.hosts.repo import update_host, HostValidationError
+    from dosm.hosts.repo import HostValidationError, update_host
     from dosm.models import AuditLog, Host
 
     name = (args.get("name") or "").strip()
@@ -1102,6 +1110,7 @@ def _auto_secret_ref(name: str) -> str:
 
 async def _create_credential_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy.exc import IntegrityError
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, Credential
     from dosm.secrets import get_backend
@@ -1159,8 +1168,10 @@ register_action(CREATE_CREDENTIAL)
 
 
 async def _update_credential_runner(cfg: Config, args: dict) -> ActionResult:
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, Credential
     from dosm.secrets import get_backend
@@ -1181,7 +1192,7 @@ async def _update_credential_runner(cfg: Config, args: dict) -> ActionResult:
             cred.username = username.strip() or None
         if domain is not None:
             cred.domain = domain.strip() or None
-        cred.updated_at = datetime.now(timezone.utc)
+        cred.updated_at = datetime.now(UTC)
         secret_ref = cred.secret_ref
         cred_id = cred.id
         s.add(AuditLog(action="credential.update", target=f"credential:{cred_id}", details="agent"))
@@ -1216,6 +1227,7 @@ register_action(UPDATE_CREDENTIAL)
 
 async def _delete_credential_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, Credential
     from dosm.secrets import get_backend
@@ -1259,6 +1271,7 @@ register_action(DELETE_CREDENTIAL)
 
 async def _toggle_monitoring_runner(cfg: Config, args: dict, *, enable: bool) -> ActionResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, MonitoringSource
 
@@ -1282,6 +1295,7 @@ async def _toggle_monitoring_runner(cfg: Config, args: dict, *, enable: bool) ->
 
 async def _delete_host_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, Host
 
@@ -1320,6 +1334,7 @@ _MONITORING_TOOL_CHOICES = {"dynatrace", "datadog", "servicenow", "prometheus"}
 
 async def _create_monitoring_source_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy.exc import IntegrityError
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, MonitoringSource
     from dosm.secrets import get_backend
@@ -1394,6 +1409,7 @@ register_action(CREATE_MONITORING_SOURCE)
 
 async def _update_monitoring_source_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, MonitoringSource
     from dosm.secrets import get_backend
@@ -1471,6 +1487,7 @@ register_action(UPDATE_MONITORING_SOURCE)
 
 async def _delete_monitoring_source_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
+
     from dosm.db import session_scope
     from dosm.models import AuditLog, MonitoringSource
     from dosm.secrets import get_backend
