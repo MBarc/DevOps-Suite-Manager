@@ -22,6 +22,7 @@ from dosm.pipelines.adapters.base import (
     PollResult,
     TriggerResult,
 )
+from dosm.pipelines.inputs import split_azure_devops_inputs
 
 
 def _b64_pat(token: str) -> str:
@@ -109,13 +110,7 @@ class AzureDevOpsAdapter(PipelineAdapter):
             raise PipelineProviderError("azure_devops requires a PAT credential")
         cfg = self.validate_config(config)
 
-        template_params: dict = {}
-        variables: dict = {}
-        for k, v in (inputs or {}).items():
-            if k.startswith("var."):
-                variables[k[4:]] = {"value": v}
-            else:
-                template_params[k] = v
+        template_params, variables = split_azure_devops_inputs(inputs or {})
 
         body: dict = {
             "resources": {
@@ -125,7 +120,7 @@ class AzureDevOpsAdapter(PipelineAdapter):
         if template_params:
             body["templateParameters"] = template_params
         if variables:
-            body["variables"] = variables
+            body["variables"] = {name: {"value": val} for name, val in variables.items()}
 
         async with httpx.AsyncClient(timeout=20.0) as c:
             try:

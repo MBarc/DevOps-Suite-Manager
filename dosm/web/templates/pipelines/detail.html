@@ -25,15 +25,67 @@
   {% if not p.credential %}
     <div class="badge badge-amber" style="margin-bottom: var(--sp-3)">no credential bound — provider may reject</div>
   {% endif %}
+  {% if input_error %}
+    <div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ input_error }}</div>
+  {% endif %}
+  {% if p.provider == 'terraform_cloud' %}
+    <div class="badge badge-amber" style="margin-bottom: var(--sp-3)">
+      Terraform Cloud doesn't accept run-time inputs — set workspace variables in TFC.
+      Inputs entered here are recorded in run history but not sent.
+    </div>
+  {% endif %}
+  {% if p.provider == 'azure_devops' and schema %}
+    <div class="field-hint" style="margin-bottom: var(--sp-3)">
+      Plain names become <code>templateParameters</code>; prefix a name with
+      <code>var.</code> (e.g. <code>var.deploy_env</code>) to send it as a runtime variable instead.
+    </div>
+  {% endif %}
+  {% set submitted = submitted_inputs or {} %}
   <form method="post" action="/pipelines/{{ p.id }}/run" class="stack">
-    <label>Inputs
-      <textarea name="inputs_text" rows="6" placeholder="{% if schema %}{% for s in schema %}{{ s.name }}=
-{% endfor %}{% else %}# one key=value per line, or paste a JSON object
-environment=staging
-version=1.2.3{% endif %}">{% if schema %}{% for s in schema %}{{ s.name }}=
-{% endfor %}{% endif %}</textarea>
-      <span class="field-hint">One <code>key=value</code> per line, or paste a JSON object.</span>
-    </label>
+    {% if schema %}
+      {% for s in schema %}
+        {% set prev = submitted.get(s.name) %}
+        {% set value = prev if prev is not none and prev != '' else (s.default if s.default is defined else '') %}
+        {% if s.type == 'boolean' %}
+          <label class="row" style="gap: var(--sp-2); align-items:center">
+            <input type="checkbox" name="input__{{ s.name }}" value="1"
+                   {% if (prev and prev != '0' and prev != 'false') or (prev is none and s.default in (true, 'true', '1', 1)) %}checked{% endif %} />
+            <span>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}</span>
+          </label>
+          {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+        {% elif s.type == 'choice' %}
+          <label>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}
+            <select name="input__{{ s.name }}" {% if s.required %}required{% endif %}>
+              {% if not s.required %}<option value="">(unset)</option>{% endif %}
+              {% for opt in (s.options or []) %}
+                <option value="{{ opt }}" {% if value == opt %}selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+            {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+          </label>
+        {% elif s.type == 'number' %}
+          <label>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}
+            <input type="number" step="any" name="input__{{ s.name }}"
+                   value="{{ value }}" {% if s.required %}required{% endif %} />
+            {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+          </label>
+        {% else %}
+          <label>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}
+            <input type="text" name="input__{{ s.name }}"
+                   value="{{ value }}" {% if s.required %}required{% endif %}
+                   placeholder="{{ s.description or '' }}" />
+            {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+          </label>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <label>Inputs
+        <textarea name="inputs_text" rows="6"
+                  placeholder="# one key=value per line, or paste a JSON object&#10;environment=staging&#10;version=1.2.3"></textarea>
+        <span class="field-hint">No schema declared — use <code>key=value</code> per line or a JSON object.
+          <a href="/pipelines/{{ p.id }}/edit">Add a schema</a> for a typed form.</span>
+      </label>
+    {% endif %}
     <div>
       <button type="submit">Run</button>
     </div>

@@ -24,6 +24,7 @@ from dosm.pipelines.adapters.base import (
     PollResult,
     TriggerResult,
 )
+from dosm.pipelines.inputs import coerce_for_github
 
 
 def _parse_iso(s: str | None) -> datetime | None:
@@ -131,9 +132,13 @@ class GitHubActionsAdapter(PipelineAdapter):
                 previous_id = previous[0].get("id")
 
             try:
+                # GitHub's workflow_dispatch payload requires string values
+                # for every input (booleans/numbers go on the wire as their
+                # string repr). coerce_for_github handles that uniformly so
+                # typed inputs from the run form Just Work.
                 disp = await c.post(
                     dispatch_url,
-                    json={"ref": ref, "inputs": inputs or {}},
+                    json={"ref": ref, "inputs": coerce_for_github(inputs or {})},
                     headers=self._headers(secret),
                 )
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:

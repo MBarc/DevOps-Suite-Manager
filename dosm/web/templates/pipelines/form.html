@@ -65,11 +65,56 @@
       <textarea name="description" rows="2" placeholder="Optional notes for teammates">{{ pipeline.description or '' if pipeline else '' }}</textarea>
     </label>
 
-    <label>Inputs schema (one input name per line)
-      <textarea name="inputs_schema" rows="3" placeholder="environment&#10;version">{% if schema %}{% for s in schema %}{{ s.name }}
-{% endfor %}{% endif %}</textarea>
-      <span class="field-hint">Free-form list of expected input names. Not used by Terraform Cloud (set variables on the workspace instead).</span>
-    </label>
+    <fieldset style="border:1px solid var(--border); border-radius:6px; padding:12px">
+      <legend class="muted" style="padding:0 6px; font-size:12px">Inputs schema</legend>
+      <p class="field-hint" style="margin-top:0">
+        Declare each input the pipeline accepts. Type controls how the run form
+        renders (text box, checkbox, dropdown). Choice options are comma-separated.
+        Not used by Terraform Cloud (set variables on the workspace instead).
+      </p>
+      <table class="data schema-editor" id="schema-editor" style="width:100%">
+        <thead>
+          <tr>
+            <th style="width:18%">Name</th>
+            <th style="width:13%">Type</th>
+            <th style="width:24%">Options (choice)</th>
+            <th style="width:15%">Default</th>
+            <th style="width:8%">Required</th>
+            <th>Description</th>
+            <th style="width:48px"></th>
+          </tr>
+        </thead>
+        <tbody id="schema-rows">
+          {% for s in schema %}
+          <tr class="schema-row" data-row-index="{{ loop.index0 }}">
+            <td><input type="text" name="schema_name__{{ loop.index0 }}" value="{{ s.name }}" placeholder="environment" /></td>
+            <td>
+              <select name="schema_type__{{ loop.index0 }}" class="schema-type">
+                <option value="string"  {% if s.type == 'string'  %}selected{% endif %}>string</option>
+                <option value="boolean" {% if s.type == 'boolean' %}selected{% endif %}>boolean</option>
+                <option value="choice"  {% if s.type == 'choice'  %}selected{% endif %}>choice</option>
+                <option value="number"  {% if s.type == 'number'  %}selected{% endif %}>number</option>
+              </select>
+            </td>
+            <td><input type="text" name="schema_options__{{ loop.index0 }}"
+                       value="{{ (s.options or []) | join(', ') }}"
+                       placeholder="dev, staging, prod"
+                       {% if s.type != 'choice' %}disabled{% endif %} /></td>
+            <td><input type="text" name="schema_default__{{ loop.index0 }}" value="{{ s.default if s.default is defined else '' }}" /></td>
+            <td style="text-align:center">
+              <input type="checkbox" name="schema_required__{{ loop.index0 }}" value="1"
+                     {% if s.required %}checked{% endif %} />
+            </td>
+            <td><input type="text" name="schema_desc__{{ loop.index0 }}" value="{{ s.description or '' }}" placeholder="Optional help text" /></td>
+            <td><button type="button" class="btn btn-subtle schema-remove" title="Remove">×</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top:var(--sp-2)">
+        <button type="button" id="schema-add" class="btn btn-subtle">+ Add input</button>
+      </div>
+    </fieldset>
 
     <div class="row" style="margin-top:var(--sp-2)">
       <button type="submit">{{ 'Save changes' if pipeline else 'Create pipeline' }}</button>
@@ -90,6 +135,51 @@
   }
   sel.addEventListener('change', function () { showProvider(this.value); });
   showProvider(sel.value);
+}());
+
+(function () {
+  var tbody = document.getElementById('schema-rows');
+  var addBtn = document.getElementById('schema-add');
+  var counter = tbody.querySelectorAll('tr.schema-row').length;
+
+  function syncOptionsEnabled(row) {
+    var typeSel = row.querySelector('.schema-type');
+    var optsInput = row.querySelector('input[name^="schema_options__"]');
+    if (!typeSel || !optsInput) return;
+    optsInput.disabled = (typeSel.value !== 'choice');
+    if (optsInput.disabled) optsInput.value = '';
+  }
+
+  function wireRow(row) {
+    var typeSel = row.querySelector('.schema-type');
+    if (typeSel) typeSel.addEventListener('change', function () { syncOptionsEnabled(row); });
+    var rm = row.querySelector('.schema-remove');
+    if (rm) rm.addEventListener('click', function () { row.remove(); });
+  }
+
+  Array.prototype.forEach.call(tbody.querySelectorAll('tr.schema-row'), wireRow);
+
+  addBtn.addEventListener('click', function () {
+    var idx = counter++;
+    var tr = document.createElement('tr');
+    tr.className = 'schema-row';
+    tr.dataset.rowIndex = String(idx);
+    tr.innerHTML =
+      '<td><input type="text" name="schema_name__' + idx + '" placeholder="environment" /></td>' +
+      '<td><select name="schema_type__' + idx + '" class="schema-type">' +
+        '<option value="string">string</option>' +
+        '<option value="boolean">boolean</option>' +
+        '<option value="choice">choice</option>' +
+        '<option value="number">number</option>' +
+      '</select></td>' +
+      '<td><input type="text" name="schema_options__' + idx + '" placeholder="dev, staging, prod" disabled /></td>' +
+      '<td><input type="text" name="schema_default__' + idx + '" /></td>' +
+      '<td style="text-align:center"><input type="checkbox" name="schema_required__' + idx + '" value="1" /></td>' +
+      '<td><input type="text" name="schema_desc__' + idx + '" placeholder="Optional help text" /></td>' +
+      '<td><button type="button" class="btn btn-subtle schema-remove" title="Remove">×</button></td>';
+    tbody.appendChild(tr);
+    wireRow(tr);
+  });
 }());
 </script>
 {% endblock %}

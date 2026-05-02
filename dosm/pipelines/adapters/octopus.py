@@ -22,6 +22,7 @@ from dosm.pipelines.adapters.base import (
     PollResult,
     TriggerResult,
 )
+from dosm.pipelines.inputs import coerce_for_octopus
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -153,7 +154,7 @@ class OctopusDeployAdapter(PipelineAdapter):
             if cfg["tenant_id"]:
                 body["TenantId"] = cfg["tenant_id"]
             if inputs:
-                body["FormValues"] = {k: str(v) for k, v in inputs.items()}
+                body["FormValues"] = coerce_for_octopus(inputs)
 
             try:
                 dr = await c.post(

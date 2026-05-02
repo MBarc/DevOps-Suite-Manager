@@ -13,6 +13,12 @@ from dosm.hosts import repo as hosts_repo  # for credential helpers reuse
 from dosm.models import AuditLog, User
 from dosm.pipelines import repo
 from dosm.pipelines.adapters import PipelineProviderError, get_adapter, list_providers
+from dosm.pipelines.inputs import (
+    InputValidationError,
+    coerce_run_inputs,
+    normalize_schema,
+    parse_schema_form,
+)
 from dosm.recording import events as rec_events
 
 router = APIRouter(prefix="/pipelines")
@@ -32,7 +38,7 @@ def _form_context(db: Session, user: User, pipeline=None, error: str | None = No
             cfg = {}
         if pipeline.inputs_schema:
             try:
-                schema = json.loads(pipeline.inputs_schema) or []
+                schema = normalize_schema(json.loads(pipeline.inputs_schema) or [])
             except json.JSONDecodeError:
                 schema = []
     providers = list_providers()
@@ -55,8 +61,9 @@ def _form_context(db: Session, user: User, pipeline=None, error: str | None = No
     }
 
 
-def _decode_inputs(raw: str) -> dict:
-    """Form value: lines of `key=value`, or a JSON object. Empty -> {}."""
+def _decode_inputs_text(raw: str) -> dict:
+    """Free-form fallback for pipelines without a typed schema: lines of
+    `key=value`, or a JSON object. Empty -> {}."""
     s = (raw or "").strip()
     if not s:
         return {}
@@ -138,17 +145,12 @@ async def pipelines_create(
     provider: str = Form("github_actions"),
     description: str = Form(""),
     credential_id: str = Form(""),
-    inputs_schema: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
     form = await request.form()
     config = _decode_config_form(provider, form)
-    schema_lines = [
-        {"name": ln.strip()}
-        for ln in (inputs_schema or "").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    ]
+    schema_rows = parse_schema_form(form) or None
     try:
         p = repo.create_pipeline(
             db,
@@ -156,7 +158,7 @@ async def pipelines_create(
             provider=provider,
             description=description.strip() or None,
             config={k: v for k, v in config.items() if v not in (None, "")},
-            inputs_schema=schema_lines or None,
+            inputs_schema=schema_rows,
             credential_id=_parse_int_or_none(credential_id),
         )
     except (IntegrityError, PipelineProviderError) as e:
@@ -190,7 +192,7 @@ async def pipelines_detail(
         raise HTTPException(404)
     runs = repo.list_runs(db, p.id, limit=25)
     cfg = json.loads(p.config or "{}")
-    schema = json.loads(p.inputs_schema) if p.inputs_schema else []
+    schema = normalize_schema(json.loads(p.inputs_schema)) if p.inputs_schema else []
     runs_view = [
         {"r": r, "inputs": json.loads(r.inputs) if r.inputs else {}} for r in runs
     ]
@@ -232,7 +234,6 @@ async def pipelines_update(
     provider: str = Form("github_actions"),
     description: str = Form(""),
     credential_id: str = Form(""),
-    inputs_schema: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
@@ -241,11 +242,7 @@ async def pipelines_update(
         raise HTTPException(404)
     form = await request.form()
     config = _decode_config_form(provider, form)
-    schema_lines = [
-        {"name": ln.strip()}
-        for ln in (inputs_schema or "").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    ]
+    schema_rows = parse_schema_form(form) or None
     try:
         repo.update_pipeline(
             db,
@@ -254,7 +251,7 @@ async def pipelines_update(
             provider=provider,
             description=description.strip() or None,
             config={k: v for k, v in config.items() if v not in (None, "")},
-            inputs_schema=schema_lines or None,
+            inputs_schema=schema_rows,
             credential_id=_parse_int_or_none(credential_id),
         )
     except (IntegrityError, PipelineProviderError) as e:
@@ -289,7 +286,6 @@ async def pipelines_delete(
 async def pipelines_trigger(
     pid: int,
     request: Request,
-    inputs_text: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
@@ -297,7 +293,33 @@ async def pipelines_trigger(
     if p is None:
         raise HTTPException(404)
     cfg = request.app.state.config
-    inputs = _decode_inputs(inputs_text)
+    form = await request.form()
+    schema = normalize_schema(json.loads(p.inputs_schema)) if p.inputs_schema else []
+    if schema:
+        try:
+            inputs = coerce_run_inputs(schema, form)
+        except InputValidationError as e:
+            return _templates(request).TemplateResponse(
+                request,
+                "pipelines/detail.html",
+                {
+                    "p": p,
+                    "cfg": json.loads(p.config or "{}"),
+                    "schema": schema,
+                    "runs": [
+                        {"r": r, "inputs": json.loads(r.inputs) if r.inputs else {}}
+                        for r in repo.list_runs(db, p.id, limit=25)
+                    ],
+                    "user": user,
+                    "target_summary": get_adapter(p.provider).target_summary(json.loads(p.config or "{}")) if p.provider else "",
+                    "provider_name": get_adapter(p.provider).display_name or p.provider,
+                    "input_error": str(e),
+                    "submitted_inputs": {k: form.get(f"input__{k}") for k in (r["name"] for r in schema)},
+                },
+                status_code=400,
+            )
+    else:
+        inputs = _decode_inputs_text(form.get("inputs_text") or "")
     run = await repo.trigger_pipeline(cfg, db, p, inputs=inputs, user_id=user.id)
     rec_events.record_pipeline_triggered(user.id, p.name, run.id, p.provider)
     db.add(
