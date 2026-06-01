@@ -28,6 +28,7 @@ from dosm.db import get_session, init_engine
 from dosm.docs_index import docs_router
 from dosm.docs_index.indexer import reindex_async, warm_embedder_async
 from dosm.docs_index.watcher import start_watcher, stop_watcher
+from dosm.ftp import ftp_router
 from dosm.guacamole import guacamole_router
 from dosm.hosts import hosts_router
 from dosm.jumps import gc_loop, get_tunnel_manager
@@ -35,6 +36,7 @@ from dosm.llm import chat_router
 from dosm.metrics import metrics_router
 from dosm.models import AuditLog, Host, PipelineRun, User
 from dosm.monitoring import monitoring_router
+from dosm.network import network_router
 from dosm.org import org_router
 from dosm.pipelines import pipelines_router
 from dosm.pipelines.poller import pipeline_poll_loop
@@ -140,6 +142,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(chat_router)
     app.include_router(metrics_router)
     app.include_router(org_router)
+    app.include_router(network_router)
+    app.include_router(ftp_router)
     app.include_router(settings_router)
     app.include_router(recording_router)
     if cfg.terminals.enabled:

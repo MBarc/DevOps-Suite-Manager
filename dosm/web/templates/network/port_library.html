@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Port Library | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Port Library</h1>
+    <div class="subtitle">Master list of port definitions used when configuring network scans.</div>
+  </div>
+</header>
+
+{% if error %}
+<div class="alert alert-error" style="margin-bottom:16px">{{ error }}</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start">
+
+  <!-- Port table -->
+  <section class="card">
+
+    <!-- Search bar -->
+    <div style="margin-bottom:14px">
+      <div style="position:relative;display:flex;align-items:center;
+                  border:1px solid var(--divider);border-radius:8px;
+                  background:var(--surface-raised,rgba(255,255,255,.05));overflow:visible">
+        <button id="port-filter-btn" type="button"
+                style="display:flex;align-items:center;gap:4px;padding:6px 10px 6px 12px;
+                       font-size:12px;font-weight:600;white-space:nowrap;border:none;
+                       border-right:1px solid var(--divider);border-radius:8px 0 0 8px;
+                       background:transparent;color:var(--fg-muted);cursor:pointer">
+          <span id="port-filter-label">Any field</span>
+          <span style="font-size:10px;opacity:.6">▾</span>
+        </button>
+        <ul id="port-filter-menu"
+            style="display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:160px;
+                   background:var(--surface,#1e1e2e);border:1px solid var(--divider);border-radius:6px;
+                   list-style:none;margin:0;padding:4px 0;z-index:300;box-shadow:0 4px 16px rgba(0,0,0,.3)">
+          <li data-field=""       style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--fg)">Any field</li>
+          <li data-field="port"   style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--fg)">Port</li>
+          <li data-field="proto"  style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--fg)">Protocol</li>
+          <li data-field="desc"   style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--fg)">Description</li>
+          <li data-field="default" style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--fg)">Default</li>
+        </ul>
+        <input id="port-search" type="text" placeholder="Search ports…" autocomplete="off"
+               style="flex:1;padding:6px 32px 6px 10px;font-size:13px;border:none;
+                      background:transparent;color:var(--fg);outline:none">
+        <button id="port-clear" type="button"
+                style="display:none;position:absolute;right:8px;background:none;border:none;
+                       color:var(--fg-muted);cursor:pointer;font-size:16px;line-height:1;padding:0">×</button>
+      </div>
+    </div>
+
+    {% if ports %}
+    <table id="port-table" class="data">
+      <thead>
+        <tr>
+          <th>Port</th>
+          <th>Protocol</th>
+          <th>Description</th>
+          <th>Default</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for p in ports %}
+        <tr data-port="{{ p.port_number }}"
+            data-proto="{{ p.protocol | lower }}"
+            data-desc="{{ p.description | lower }}"
+            data-default="{{ 'yes' if p.is_default else 'no' }}">
+          <td><code>{{ p.port_number }}</code></td>
+          <td><span class="tag">{{ p.protocol | upper }}</span></td>
+          <td>
+            <span id="desc-view-{{ p.id }}">{{ p.description }}</span>
+            <input id="desc-edit-{{ p.id }}" value="{{ p.description }}"
+                   style="display:none;background:var(--input-bg,#27272a);border:1px solid var(--border,#3f3f46);border-radius:5px;color:var(--fg,#e4e4e7);padding:2px 7px;font-size:13px;width:100%">
+          </td>
+          <td>
+            <span id="def-view-{{ p.id }}">
+              {% if p.is_default %}<span class="badge badge-green">yes</span>{% else %}<span class="muted">—</span>{% endif %}
+            </span>
+            <input type="checkbox" id="def-edit-{{ p.id }}" {% if p.is_default %}checked{% endif %} style="display:none">
+          </td>
+          <td style="white-space:nowrap;text-align:right">
+            <button class="btn btn-sm" onclick="startEdit({{ p.id }})" id="edit-btn-{{ p.id }}">Edit</button>
+            <button class="btn btn-sm" onclick="saveEdit({{ p.id }})" id="save-btn-{{ p.id }}" style="display:none">Save</button>
+            <button class="btn btn-sm btn-ghost" onclick="cancelEdit({{ p.id }})" id="cancel-btn-{{ p.id }}" style="display:none">Cancel</button>
+            <form method="post" action="/network/ports/{{ p.id }}/delete" style="display:inline"
+                  onsubmit="return confirm('Delete port {{ p.port_number }}?')">
+              <button class="btn btn-sm btn-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      <tr id="port-empty-search" style="display:none">
+        <td colspan="5" style="text-align:center;padding:20px;color:var(--fg-muted,#a1a1aa);font-size:13px">
+          No ports match your search.
+        </td>
+      </tr>
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No ports defined yet. Add one using the form.</div>
+    {% endif %}
+  </section>
+
+  <!-- Add port form -->
+  <section class="card">
+    <h3 style="margin:0 0 16px;font-size:15px;font-weight:600">Add port</h3>
+    <form method="post" action="/network/ports/new" style="display:flex;flex-direction:column;gap:14px">
+      <div class="form-group">
+        <label>Port number</label>
+        <input type="number" name="port_number" min="0" max="65535" required placeholder="e.g. 8080 (0 = ICMP ping)">
+      </div>
+      <div class="form-group">
+        <label>Protocol</label>
+        <select name="protocol">
+          <option value="tcp" selected>TCP</option>
+          <option value="udp">UDP</option>
+          <option value="icmp">ICMP</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <input type="text" name="description" required placeholder="e.g. HTTP Alt">
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;flex-direction:row;cursor:pointer">
+        <input type="checkbox" name="is_default" value="1" class="custom-cb">
+        <span>Include in new scans by default</span>
+      </label>
+      <button class="btn" type="submit" style="width:100%">Add port</button>
+    </form>
+  </section>
+
+</div>
+
+<script>
+/* ── Port search / filter ─────────────────────────────────── */
+(function () {
+  var filterBtn   = document.getElementById('port-filter-btn');
+  var filterLabel = document.getElementById('port-filter-label');
+  var filterMenu  = document.getElementById('port-filter-menu');
+  var searchInput = document.getElementById('port-search');
+  var clearBtn    = document.getElementById('port-clear');
+  var activeField = '';
+
+  if (!filterBtn) return;
+
+  filterBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    filterMenu.style.display = filterMenu.style.display === 'none' ? 'block' : 'none';
+  });
+
+  Array.from(filterMenu.children).forEach(function (li) {
+    li.addEventListener('mouseenter', function () { li.style.background = 'var(--accent,#6366f1)'; li.style.color = '#fff'; });
+    li.addEventListener('mouseleave', function () { li.style.background = ''; li.style.color = 'var(--fg)'; });
+    li.addEventListener('click', function () {
+      activeField = li.getAttribute('data-field');
+      filterLabel.textContent = li.textContent;
+      filterBtn.style.color = activeField ? 'var(--accent,#6366f1)' : 'var(--fg-muted)';
+      filterMenu.style.display = 'none';
+      searchInput.value = '';
+      clearBtn.style.display = 'none';
+      applyFilter('');
+      searchInput.focus();
+    });
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!filterBtn.contains(e.target) && !filterMenu.contains(e.target))
+      filterMenu.style.display = 'none';
+  });
+
+  searchInput.addEventListener('input', function () {
+    var q = searchInput.value;
+    clearBtn.style.display = q ? 'block' : 'none';
+    applyFilter(q.toLowerCase());
+  });
+
+  clearBtn.addEventListener('click', function () {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    applyFilter('');
+    searchInput.focus();
+  });
+
+  var DATA_ATTRS = ['data-port', 'data-proto', 'data-desc', 'data-default'];
+
+  function applyFilter(q) {
+    var table = document.getElementById('port-table');
+    if (!table) return;
+    var empty = true;
+    Array.from(table.querySelector('tbody').rows).forEach(function (row) {
+      if (!row.hasAttribute('data-port')) return;
+      var show = true;
+      if (q) {
+        if (activeField) {
+          show = (row.getAttribute('data-' + activeField) || '').includes(q);
+        } else {
+          show = DATA_ATTRS.some(function (a) { return (row.getAttribute(a) || '').includes(q); });
+        }
+      }
+      row.style.display = show ? '' : 'none';
+      if (show) empty = false;
+    });
+    var emptyEl = document.getElementById('port-empty-search');
+    if (emptyEl) emptyEl.style.display = (q && empty) ? '' : 'none';
+  }
+}());
+
+/* ── Inline edit ──────────────────────────────────────────── */
+const _origDesc = {}, _origDef = {};
+
+function startEdit(id) {
+  const dv = document.getElementById(`desc-view-${id}`);
+  const de = document.getElementById(`desc-edit-${id}`);
+  const dfv = document.getElementById(`def-view-${id}`);
+  const dfe = document.getElementById(`def-edit-${id}`);
+  _origDesc[id] = dv.textContent.trim();
+  _origDef[id] = dfe.checked;
+  dv.style.display = 'none'; de.style.display = '';
+  dfv.style.display = 'none'; dfe.style.display = '';
+  document.getElementById(`edit-btn-${id}`).style.display = 'none';
+  document.getElementById(`save-btn-${id}`).style.display = '';
+  document.getElementById(`cancel-btn-${id}`).style.display = '';
+  de.focus();
+}
+
+function cancelEdit(id) {
+  document.getElementById(`desc-edit-${id}`).value = _origDesc[id];
+  document.getElementById(`def-edit-${id}`).checked = _origDef[id];
+  toggleViews(id, false);
+}
+
+function toggleViews(id, editing) {
+  ['desc-view','desc-edit','def-view','def-edit'].forEach((base, i) => {
+    const el = document.getElementById(`${base}-${id}`);
+    if (el) el.style.display = (i % 2 === 0) === !editing ? '' : 'none';
+  });
+  document.getElementById(`edit-btn-${id}`).style.display = editing ? 'none' : '';
+  document.getElementById(`save-btn-${id}`).style.display = editing ? '' : 'none';
+  document.getElementById(`cancel-btn-${id}`).style.display = editing ? '' : 'none';
+}
+
+async function saveEdit(id) {
+  const desc = document.getElementById(`desc-edit-${id}`).value.trim();
+  const isDef = document.getElementById(`def-edit-${id}`).checked;
+  const body = new FormData();
+  body.append('description', desc);
+  if (isDef) body.append('is_default', '1');
+  const res = await fetch(`/network/ports/${id}/edit`, {method:'POST', body});
+  if (res.redirected || res.ok) location.reload();
+}
+</script>
+{% endblock %}

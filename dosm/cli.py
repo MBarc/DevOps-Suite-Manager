@@ -29,6 +29,7 @@ guac_app = typer.Typer(help="Guacamole integration helpers.", no_args_is_help=Tr
 pipelines_app = typer.Typer(help="Pipeline runner commands.", no_args_is_help=True)
 folder_app = typer.Typer(help="Manage doc vault folders (taxonomy).", no_args_is_help=True)
 org_app = typer.Typer(help="Organisation directory (AD-backed) commands.", no_args_is_help=True)
+ftp_app = typer.Typer(help="File transfer (FTP / FTPS / SFTP), jump-aware.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
@@ -38,6 +39,7 @@ app.add_typer(guac_app, name="guacamole")
 app.add_typer(pipelines_app, name="pipelines")
 app.add_typer(folder_app, name="folder")
 app.add_typer(org_app, name="org")
+app.add_typer(ftp_app, name="ftp")
 
 console = Console()
 
@@ -647,6 +649,166 @@ def org_find(query: str = typer.Argument(..., help="Substring to match name/emai
         name = m.display_name if m.enabled else f"[strike]{m.display_name}[/strike]"
         table.add_row(name, m.title or "—", m.email or "—", d.name)
     console.print(table)
+
+
+# ---- ftp / file transfer --------------------------------------------------
+def _resolve_ft_host(s, name: str):
+    """Resolve a host by name and assert file transfer is configured on it."""
+    from dosm.ftp.service import host_has_file_transfer
+    from dosm.models import Host
+
+    host = s.execute(select(Host).where(Host.name == name)).scalar_one_or_none()
+    if host is None:
+        console.print(f"[red]No host named {name!r}.[/red]")
+        raise typer.Exit(1)
+    if not host_has_file_transfer(host):
+        console.print(
+            f"[red]Host {name!r} has no file transfer configured "
+            f"(set a method on the host).[/red]"
+        )
+        raise typer.Exit(1)
+    return host
+
+
+@ftp_app.command("ls")
+def ftp_ls(
+    host: str = typer.Argument(..., help="Inventory host name (ftp/ftps/sftp)."),
+    path: str = typer.Argument("", help="Directory, relative to the login home."),
+) -> None:
+    """List a remote directory."""
+    import asyncio
+
+    from dosm.ftp.base import FileTransferError
+    from dosm.ftp.service import get_file_backend
+
+    cfg = load_config()
+    init_engine(cfg)
+    with session_scope() as s:
+        h = _resolve_ft_host(s, host)
+        backend = get_file_backend(cfg, s, h)
+        try:
+            entries = asyncio.run(backend.list_dir(path))
+        except FileTransferError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    entries.sort(key=lambda e: (not e.is_dir, e.name.lower()))
+    table = Table("Type", "Name", "Size")
+    for e in entries:
+        table.add_row("dir" if e.is_dir else "file", e.name, "" if e.is_dir else str(e.size or 0))
+    console.print(table)
+
+
+@ftp_app.command("get")
+def ftp_get(
+    host: str = typer.Argument(..., help="Inventory host name."),
+    remote: str = typer.Argument(..., help="Remote file path (home-relative)."),
+    out: Path = typer.Option(None, "--out", "-o", help="Local destination (default: basename)."),
+) -> None:
+    """Download a remote file."""
+    import asyncio
+
+    from dosm.ftp.base import FileTransferError
+    from dosm.ftp.service import get_file_backend
+
+    dest = out or Path(remote.rsplit("/", 1)[-1] or "download")
+    cfg = load_config()
+    init_engine(cfg)
+    with session_scope() as s:
+        h = _resolve_ft_host(s, host)
+        backend = get_file_backend(cfg, s, h)
+        try:
+            with open(dest, "wb") as fh:
+                n = asyncio.run(backend.retrieve(remote, fh))
+        except FileTransferError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    console.print(f"[green]Downloaded[/green] {remote} → {dest} ({n} bytes)")
+
+
+@ftp_app.command("put")
+def ftp_put(
+    host: str = typer.Argument(..., help="Inventory host name."),
+    local: Path = typer.Argument(..., exists=True, dir_okay=False, help="Local file to upload."),
+    dest: str = typer.Option("", "--dest", "-d", help="Remote directory (home-relative)."),
+) -> None:
+    """Upload a local file."""
+    import asyncio
+
+    from dosm.ftp.base import FileTransferError
+    from dosm.ftp.service import get_file_backend
+
+    remote = f"{dest.strip('/')}/{local.name}" if dest.strip("/") else local.name
+    cfg = load_config()
+    init_engine(cfg)
+    with session_scope() as s:
+        h = _resolve_ft_host(s, host)
+        backend = get_file_backend(cfg, s, h)
+        try:
+            with open(local, "rb") as fh:
+                n = asyncio.run(backend.store(remote, fh))
+        except FileTransferError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    console.print(f"[green]Uploaded[/green] {local} → {remote} ({n} bytes)")
+
+
+@ftp_app.command("rm")
+def ftp_rm(
+    host: str = typer.Argument(..., help="Inventory host name."),
+    path: str = typer.Argument(..., help="Remote path to remove (home-relative)."),
+    is_dir: bool = typer.Option(False, "--dir", help="Remove an (empty) directory instead of a file."),
+) -> None:
+    """Delete a remote file, or an empty directory with --dir."""
+    import asyncio
+
+    from dosm.ftp.base import FileTransferError
+    from dosm.ftp.service import get_file_backend
+
+    cfg = load_config()
+    init_engine(cfg)
+    with session_scope() as s:
+        h = _resolve_ft_host(s, host)
+        backend = get_file_backend(cfg, s, h)
+        try:
+            asyncio.run(backend.rmdir(path) if is_dir else backend.delete(path))
+        except FileTransferError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    console.print(f"[green]Removed[/green] {path}")
+
+
+@ftp_app.command("cp")
+def ftp_cp(
+    src_host: str = typer.Argument(..., help="Source host name."),
+    src_path: str = typer.Argument(..., help="Source file path (home-relative)."),
+    dst_host: str = typer.Argument(..., help="Destination host name."),
+    dest: str = typer.Option("", "--dest", "-d", help="Destination directory (home-relative)."),
+    move: bool = typer.Option(False, "--move", "-m", help="Delete the source after copy (move)."),
+) -> None:
+    """Copy (or --move) a file from one host to another, server-side (jump-aware)."""
+    import asyncio
+
+    from dosm.ftp.base import FileTransferError
+    from dosm.ftp.service import transfer_between_hosts
+
+    cfg = load_config()
+    init_engine(cfg)
+    with session_scope() as s:
+        sh = _resolve_ft_host(s, src_host)
+        dh = _resolve_ft_host(s, dst_host)
+        basename = src_path.rsplit("/", 1)[-1]
+        dst_path = f"{dest.strip('/')}/{basename}" if dest.strip("/") else basename
+        try:
+            n = asyncio.run(
+                transfer_between_hosts(cfg, s, sh, src_path, dh, dst_path, move=move)
+            )
+        except FileTransferError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    verb = "Moved" if move else "Copied"
+    console.print(
+        f"[green]{verb}[/green] {src_host}:{src_path} → {dst_host}:{dst_path} ({n} bytes)"
+    )
 
 
 if __name__ == "__main__":

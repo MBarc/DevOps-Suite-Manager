@@ -66,6 +66,13 @@ class _JumpEntry:
     conn: Any  # asyncssh.SSHClientConnection
     forwards: dict[tuple[str, int], _ForwardEntry] = field(default_factory=dict)
     last_active: float = field(default_factory=time.monotonic)
+    # A single SOCKS5 listener multiplexed across all FTP sessions on this
+    # jump. Unlike a port forward (one fixed target), a SOCKS proxy reaches
+    # *any* host:port on demand — exactly what FTP passive data ports need.
+    socks_listener: Any = None
+    socks_bind_host: str = ""
+    socks_bind_port: int = 0
+    socks_lease_count: int = 0
 
 
 @dataclass
@@ -85,6 +92,23 @@ class TunnelLease:
             return
         self._released = True
         await self._manager._release(self._key)
+
+
+@dataclass
+class SocksLease:
+    """A leased SOCKS5 proxy through a jump chain. ``await release()`` when done."""
+
+    bind_host: str
+    bind_port: int
+    _manager: JumpTunnelManager
+    _sig: tuple[int, ...]
+    _released: bool = False
+
+    async def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        await self._manager._release_socks(self._sig)
 
 
 class JumpTunnelManager:
@@ -156,6 +180,64 @@ class JumpTunnelManager:
                 _manager=self,
                 _key=(sig, forward.target_host, forward.target_port),
             )
+
+    async def acquire_socks(
+        self,
+        db: Session,
+        cfg: Config,
+        host: Host,
+        *,
+        bind_host: str = "127.0.0.1",
+    ) -> SocksLease | None:
+        """Return a SOCKS5 ``SocksLease`` for reaching ``host`` through its jump
+        chain; ``None`` for a directly reachable host.
+
+        One SOCKS listener is opened per jump chain and shared by every leaser
+        — an FTP control connection plus all of its ephemeral passive data
+        ports tunnel through the same proxy, so dynamic data ports need no
+        per-transfer forward bookkeeping. Bound to loopback by default: the
+        proxy is no-auth and must never be exposed off-box.
+        """
+        jump_hops, _ = build_jump_chain(db, cfg, host)
+        if not jump_hops:
+            return None
+        sig = _chain_signature(jump_hops)
+        async with self._lock:
+            entry = self._jumps.get(sig)
+            if entry is None:
+                conn = await self._open_chain(jump_hops)
+                entry = _JumpEntry(chain_sig=sig, conn=conn)
+                self._jumps[sig] = entry
+            if entry.socks_listener is None:
+                listener = await entry.conn.forward_socks(bind_host, 0)
+                entry.socks_listener = listener
+                entry.socks_bind_host = bind_host
+                entry.socks_bind_port = listener.get_port()
+            entry.socks_lease_count += 1
+            entry.last_active = time.monotonic()
+            return SocksLease(
+                bind_host=entry.socks_bind_host,
+                bind_port=entry.socks_bind_port,
+                _manager=self,
+                _sig=sig,
+            )
+
+    async def _release_socks(self, sig: tuple[int, ...]) -> None:
+        async with self._lock:
+            entry = self._jumps.get(sig)
+            if entry is None:
+                return
+            entry.socks_lease_count -= 1
+            if entry.socks_lease_count <= 0:
+                entry.socks_lease_count = 0
+                if entry.socks_listener is not None:
+                    try:
+                        entry.socks_listener.close()
+                    except Exception:
+                        pass
+                    entry.socks_listener = None
+                    entry.socks_bind_port = 0
+            entry.last_active = time.monotonic()
 
     async def _open_chain(self, jump_hops: list[HopCreds]):
         import asyncssh  # type: ignore
@@ -237,6 +319,7 @@ class JumpTunnelManager:
         return {
             "open_jump_connections": len(jumps),
             "open_forwards": sum(len(e.forwards) for e in jumps),
+            "open_socks_proxies": sum(1 for e in jumps if e.socks_listener is not None),
             "active_sessions": len(self._sessions),
         }
 
@@ -248,7 +331,7 @@ class JumpTunnelManager:
         async with self._lock:
             for sig in list(self._jumps.keys()):
                 e = self._jumps[sig]
-                if e.forwards:
+                if e.forwards or e.socks_listener is not None:
                     continue
                 if now - e.last_active < IDLE_CLOSE_AFTER_SECONDS:
                     continue

@@ -277,7 +277,7 @@ register_query(QUERY_MONITORING)
 # ---------------------------------------------------------------------------
 
 async def _cert_check_runner(cfg, args: dict) -> QueryResult:
-    from dosm.certs.scanner import scan_all
+    from dosm.certs.routes import peek_cached
 
     host_filter = (args.get("host") or "").lower().strip()
     try:
@@ -285,23 +285,21 @@ async def _cert_check_runner(cfg, args: dict) -> QueryResult:
     except (KeyError, TypeError, ValueError):
         expires_days = None
 
-    cc = cfg.certs
-    try:
-        certs = scan_all(
-            warn_days=cc.expires_warn_days,
-            critical_days=cc.expires_critical_days,
-            scan_paths=cc.scan_paths,
-            windows_stores=cc.windows_stores,
-            force=False,
+    cached = peek_cached()
+    if cached is None:
+        return QueryResult(
+            ok=True,
+            summary="No cert data cached",
+            data="Certificate data not yet loaded. Visit /certs in the UI to fetch from monitoring sources.",
         )
-    except Exception as e:
-        return QueryResult(ok=False, summary=f"Cert scan failed: {e}", error=str(e))
+
+    certs, _ = cached
 
     if host_filter:
         certs = [
             c for c in certs
             if host_filter in c.subject_cn.lower()
-            or host_filter in c.source.lower()
+            or host_filter in c.endpoint.lower()
             or host_filter in c.subject.lower()
         ]
     if expires_days is not None:
@@ -312,7 +310,7 @@ async def _cert_check_runner(cfg, args: dict) -> QueryResult:
 
     lines = [
         f"{c.subject_cn}: {c.status} ({c.days_remaining}d remaining)"
-        f" issuer={c.issuer_cn} source={c.source}"
+        f" issuer={c.issuer_cn} source={c.source_name}"
         for c in certs[:50]
     ]
     suffix = f"\n(showing first 50 of {len(certs)})" if len(certs) > 50 else ""

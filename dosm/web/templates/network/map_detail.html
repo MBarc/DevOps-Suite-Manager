@@ -1,0 +1,530 @@
+{% extends "base.html" %}
+{% block title %}{{ scan.title }} | Network Map | DOSM{% endblock %}
+{% block head_extra %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <a href="/network/map"
+       style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--fg-muted,#a1a1aa);
+              text-decoration:none;margin-bottom:4px;transition:color .15s"
+       onmouseenter="this.style.color='var(--fg,#e4e4e7)'"
+       onmouseleave="this.style.color='var(--fg-muted,#a1a1aa)'">
+      ← Network Map
+    </a>
+    <h1 id="scan-title"
+        title="Click to rename"
+        style="cursor:pointer;border-radius:4px;padding:2px 6px;margin:-2px -6px;transition:background .15s"
+        onmouseenter="this.style.background='var(--surface-hover,#27272a)'"
+        onmouseleave="this.style.background=''"
+        onclick="startTitleEdit()">{{ scan.title }}</h1>
+    <input id="scan-title-input" type="text"
+           value="{{ scan.title }}"
+           style="display:none;font-size:inherit;font-weight:700;background:var(--surface,#18181b);
+                  color:inherit;border:1px solid var(--accent,#6366f1);border-radius:4px;
+                  padding:2px 6px;margin:-2px -6px;width:min(480px,80vw)"
+           onblur="commitTitleEdit()"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();commitTitleEdit()}
+                      else if(event.key==='Escape'){cancelTitleEdit()}">
+    <div class="subtitle" id="scan-subtitle">
+      {% if scan.status == 'completed' %}
+        {% if reachable == total %}
+          Completed — all {{ total }} open
+        {% elif reachable == 0 %}
+          Completed — all {{ total }} closed
+        {% else %}
+          Completed — {{ reachable }} of {{ total }} open
+        {% endif %}
+      {% elif scan.status == 'running' or running %}
+        Running…
+      {% elif scan.status == 'failed' %}
+        Failed{% if scan.error %}: {{ scan.error[:80] }}{% endif %}
+      {% else %}
+        {{ scan.status }}
+      {% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/network/map/{{ scan.id }}/rerun" style="display:inline">
+      <button class="btn btn-ghost">↺ Rerun</button>
+    </form>
+    <div style="position:relative">
+      <button class="btn btn-ghost" id="export-btn" onclick="toggleExportMenu()">Export ▾</button>
+      <div id="export-menu" style="display:none;position:absolute;right:0;top:calc(100%+4px);background:var(--surface,#18181b);
+           border:1px solid var(--border,#3f3f46);border-radius:8px;padding:4px 0;min-width:140px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.5)">
+        <a class="export-item" onclick="exportPDF()">PDF (graph image)</a>
+        <a class="export-item" href="/network/map/{{ scan.id }}/export/json">JSON (full data)</a>
+        <a class="export-item" href="/network/map/{{ scan.id }}/export/csv">CSV (flat table)</a>
+      </div>
+    </div>
+    <form method="post" action="/network/map/{{ scan.id }}/delete" style="display:inline"
+          onsubmit="return confirm('Delete this scan?')">
+      <button class="btn btn-danger btn-sm">Delete</button>
+    </form>
+  </div>
+</header>
+
+<!-- Progress bar (shown while running) -->
+<div id="progress-bar" style="background:var(--surface,#18181b);border:1px solid var(--border,#3f3f46);border-radius:8px;padding:12px 16px;
+     margin-bottom:16px;display:flex;align-items:center;gap:16px">
+  <div style="flex:1">
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+      <span id="prog-label">Scanning…</span>
+      <span id="prog-counts" class="muted"></span>
+    </div>
+    <div style="height:6px;background:var(--surface-raised,rgba(255,255,255,.06));border-radius:3px;overflow:hidden">
+      <div id="prog-fill" style="height:100%;background:#6366f1;border-radius:3px;transition:width .4s;width:0%"></div>
+    </div>
+    <div id="prog-last" style="margin-top:6px;font-size:11.5px;color:var(--fg-muted,#a1a1aa)">Waiting for first result…</div>
+  </div>
+</div>
+
+<!-- Summary chips -->
+<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+  <div class="stat-chip"><span id="chip-total">{{ total }}</span> total checks</div>
+  <div class="stat-chip chip-green"><span id="chip-ok">{{ reachable }}</span> open</div>
+  <div class="stat-chip chip-red"><span id="chip-fail">{{ checked - reachable }}</span> closed</div>
+  <div class="stat-chip chip-gray"><span id="chip-pending">{{ total - checked }}</span> pending</div>
+</div>
+
+<!-- Main layout: graph + detail panel -->
+<div style="display:grid;grid-template-columns:1fr 300px;gap:16px;height:560px">
+
+  <section class="card" style="padding:0;overflow:hidden;position:relative">
+    <div id="cy" style="width:100%;height:100%;background:#0f0f12"></div>
+    <div id="cy-legend" style="position:absolute;bottom:12px;left:12px;display:flex;gap:10px;flex-wrap:wrap">
+      <div class="leg-item"><span class="leg-dot" style="background:#6366f1"></span>Source</div>
+      <div class="leg-item"><span class="leg-dot" style="background:#14b8a6"></span>Both</div>
+      <div class="leg-item"><span class="leg-dot" style="background:#64748b"></span>Destination</div>
+      <div class="leg-sep"></div>
+      <div class="leg-item"><span class="leg-line" style="background:#22c55e"></span>All open</div>
+      <div class="leg-item"><span class="leg-line" style="background:#f59e0b"></span>Partial</div>
+      <div class="leg-item"><span class="leg-line" style="background:#ef4444"></span>All closed</div>
+      <div class="leg-item"><span class="leg-line" style="background:#3f3f46;border-style:dashed"></span>Pending</div>
+    </div>
+  </section>
+
+  <section class="card" id="detail-panel" style="overflow-y:auto">
+    <div id="detail-content">
+      <div style="color:var(--fg-muted,#a1a1aa);font-size:13px;text-align:center;padding:40px 0">
+        Click a node or edge to see details.
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<style>
+.stat-chip { padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;background:var(--surface-raised,rgba(255,255,255,.05));border:1px solid var(--border,#3f3f46) }
+.chip-green { color:#22c55e;border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.08) }
+.chip-red { color:#ef4444;border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08) }
+.chip-gray { color:#a1a1aa }
+.export-item { display:block;padding:7px 14px;font-size:13px;color:var(--fg,#e4e4e7);cursor:pointer;text-decoration:none }
+.export-item:hover { background:rgba(255,255,255,.06) }
+.leg-item { display:flex;align-items:center;gap:5px;font-size:11px;color:var(--fg-muted,#a1a1aa);background:rgba(0,0,0,.5);padding:3px 7px;border-radius:4px }
+.leg-dot { width:9px;height:9px;border-radius:50%;flex-shrink:0 }
+.leg-line { width:18px;height:3px;border-radius:2px;flex-shrink:0;border:1.5px solid transparent }
+.leg-sep { width:1px;background:var(--border,#3f3f46) }
+.port-row { display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border,#3f3f46);font-size:13px }
+.port-row:last-child { border-bottom:none }
+.port-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0 }
+</style>
+
+<script>
+const GRAPH = {{ graph_json | safe }};
+const SCAN_ID = {{ scan.id }};
+let cy;
+let livePolling = {{ 'true' if (running or scan.status == 'pending') else 'false' }};
+
+function edgeColor(edge) {
+  const { reachable_count: ok, checked_count: chk, total_count: tot } = edge;
+  if (chk === 0) return '#3f3f46';
+  if (ok === tot) return '#22c55e';
+  if (ok === 0) return '#ef4444';
+  return '#f59e0b';
+}
+
+function nodeColor(node) {
+  if (node.is_source && node.is_dest) return '#14b8a6';
+  if (node.is_source) return '#6366f1';
+  return '#64748b';
+}
+
+function buildElements(graph) {
+  const nodes = graph.nodes.map(n => ({
+    data: { id: n.id, label: n.label, is_source: n.is_source ? 1 : 0, is_dest: n.is_dest ? 1 : 0 }
+  }));
+  const edges = graph.edges.map(e => ({
+    data: {
+      id: e.id, source: e.source, target: e.target,
+      label: `${e.reachable_count}/${e.total_count}`,
+      color: edgeColor(e),
+      src_label: e.src_label,
+      dst_label: e.dst_label,
+      ports_json: JSON.stringify(e.ports || []),
+    }
+  }));
+  return [...nodes, ...edges];
+}
+
+function bipartiteLayout(graph) {
+  const container = document.getElementById('cy');
+  const W = container.offsetWidth;
+  const H = container.offsetHeight;
+  const pad = 60;
+  const usableH = H - pad * 2;
+
+  const sources = graph.nodes.filter(n => n.is_source && !n.is_dest);
+  const dests   = graph.nodes.filter(n => n.is_dest   && !n.is_source);
+  const both    = graph.nodes.filter(n => n.is_source && n.is_dest);
+
+  const positions = {};
+
+  function place(nodes, x) {
+    const step = nodes.length > 1 ? usableH / (nodes.length - 1) : 0;
+    const startY = nodes.length > 1 ? pad : H / 2;
+    nodes.forEach((n, i) => {
+      positions[n.id] = { x, y: startY + i * step };
+    });
+  }
+
+  place(sources, W * 0.18);
+  place(dests,   W * 0.82);
+  place(both,    W * 0.50);
+
+  return {
+    name: 'preset',
+    positions: n => positions[n.id()] || { x: W / 2, y: H / 2 },
+    fit: true,
+    padding: 40,
+  };
+}
+
+function initCy(graph) {
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: buildElements(graph),
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'background-color': '#64748b',
+          'label': 'data(label)',
+          'color': '#e4e4e7',
+          'font-size': '11px',
+          'font-family': 'Inter, sans-serif',
+          'text-valign': 'bottom',
+          'text-margin-y': '6px',
+          'text-outline-width': 2,
+          'text-outline-color': '#0f0f12',
+          'width': 32,
+          'height': 32,
+          'border-width': 2,
+          'border-color': 'rgba(255,255,255,.15)',
+        }
+      },
+      {
+        selector: 'node[is_source = 1][is_dest = 0]',
+        style: { 'background-color': '#6366f1' }
+      },
+      {
+        selector: 'node[is_source = 1][is_dest = 1]',
+        style: { 'background-color': '#14b8a6' }
+      },
+      {
+        selector: 'node:selected',
+        style: {
+          'border-color': '#fff',
+          'border-width': 3,
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'line-color': 'data(color)',
+          'target-arrow-color': 'data(color)',
+          'target-arrow-shape': 'triangle',
+          'arrow-scale': 1.2,
+          'width': 2,
+          'label': 'data(label)',
+          'font-size': '10px',
+          'color': '#a1a1aa',
+          'text-outline-width': 2,
+          'text-outline-color': '#0f0f12',
+          'curve-style': 'bezier',
+        }
+      },
+      {
+        selector: 'edge:selected',
+        style: { 'width': 3 }
+      },
+    ],
+    layout: bipartiteLayout(graph),
+  });
+
+  cy.on('tap', 'node', e => {
+    try {
+      const label = e.target.data('label');
+      const is_source = e.target.data('is_source') === 1;
+      const is_dest   = e.target.data('is_dest')   === 1;
+      const outEdges = e.target.outgoers('edge').map(ced => ({
+        src_label: ced.data('src_label'), dst_label: ced.data('dst_label'),
+        ports: JSON.parse(ced.data('ports_json') || '[]'),
+      }));
+      const inEdges = e.target.incomers('edge').map(ced => ({
+        src_label: ced.data('src_label'), dst_label: ced.data('dst_label'),
+        ports: JSON.parse(ced.data('ports_json') || '[]'),
+      }));
+      showNodeDetail({label, is_source, is_dest}, outEdges, inEdges);
+    } catch(err) { console.error('showNodeDetail:', err); }
+  });
+  cy.on('tap', 'edge', e => {
+    try {
+      const ports = JSON.parse(e.target.data('ports_json') || '[]');
+      showEdgeDetail({
+        src_label: e.target.data('src_label'),
+        dst_label: e.target.data('dst_label'),
+        reachable_count: ports.filter(p => p.reachable === true).length,
+        total_count: ports.length,
+        ports,
+      });
+    } catch(err) { console.error('showEdgeDetail:', err); }
+  });
+  cy.on('tap', e => { if (e.target === cy) clearDetail(); });
+}
+
+function aggregatePorts(edges) {
+  const map = {};
+  edges.forEach(edge => {
+    (edge.ports || []).forEach(p => {
+      if (!map[p.port]) map[p.port] = { protocol: p.protocol, open: 0, closed: 0, pending: 0, total: 0 };
+      map[p.port].total++;
+      if (p.reachable === true) map[p.port].open++;
+      else if (p.reachable === false) map[p.port].closed++;
+      else map[p.port].pending++;
+    });
+  });
+  return Object.entries(map).sort((a, b) => +a[0] - +b[0]);
+}
+
+function portAggRow(port, s) {
+  const allPending = s.pending === s.total;
+  const allOpen    = s.open === s.total && s.pending === 0;
+  const allClosed  = s.closed === s.total && s.pending === 0;
+  const color = allPending ? '#3f3f46' : allOpen ? '#22c55e' : allClosed ? '#ef4444' : '#f59e0b';
+  const label = allPending ? '—' : `${s.open} / ${s.total} open`;
+  return `<div class="port-row">
+    <span class="port-dot" style="background:${color}"></span>
+    <code style="min-width:36px;font-size:12px">${+port === 0 ? 'ping' : port}</code>
+    <span class="tag" style="font-size:10px">${esc((s.protocol || 'tcp').toUpperCase())}</span>
+    <span style="flex:1;font-size:12px;color:${color}">${label}</span>
+    ${s.pending && !allPending ? `<span style="font-size:11px;color:#71717a">${s.pending} pending</span>` : ''}
+  </div>`;
+}
+
+function sectionLabel(text) {
+  return `<div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--fg-muted,#a1a1aa);
+                       margin:14px 0 6px;text-transform:uppercase">${text}</div>`;
+}
+
+function showNodeDetail(node, outEdges, inEdges) {
+  let html = `<div style="font-size:14px;font-weight:600;margin-bottom:6px">${esc(node.label)}</div>`;
+  const badges = [];
+  if (node.is_source) badges.push(`<span class="badge badge-blue">source</span>`);
+  if (node.is_dest)   badges.push(`<span class="badge badge-gray">destination</span>`);
+  if (badges.length)  html += `<div style="display:flex;gap:4px;margin-bottom:4px">${badges.join('')}</div>`;
+
+  if (outEdges.length) {
+    html += sectionLabel(`Outbound — ${outEdges.length} destination${outEdges.length > 1 ? 's' : ''}`);
+    html += aggregatePorts(outEdges).map(([p, s]) => portAggRow(p, s)).join('');
+  }
+  if (inEdges.length) {
+    html += sectionLabel(`Inbound — ${inEdges.length} source${inEdges.length > 1 ? 's' : ''}`);
+    html += aggregatePorts(inEdges).map(([p, s]) => portAggRow(p, s)).join('');
+  }
+  if (!outEdges.length && !inEdges.length) {
+    html += `<div class="muted" style="font-size:13px;margin-top:12px">No connections for this node.</div>`;
+  }
+
+  document.getElementById('detail-content').innerHTML = html;
+}
+
+function showEdgeDetail(edge) {
+  const col = edgeColor(edge);
+  let html = `
+    <div style="font-size:13px;color:var(--fg-muted,#a1a1aa);margin-bottom:2px">FROM</div>
+    <div style="font-weight:600;margin-bottom:8px">${esc(edge.src_label)}</div>
+    <div style="font-size:13px;color:var(--fg-muted,#a1a1aa);margin-bottom:2px">TO</div>
+    <div style="font-weight:600;margin-bottom:12px">${esc(edge.dst_label)}</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+      <span style="color:${col};font-weight:600;font-size:14px">${edge.reachable_count}/${edge.total_count}</span>
+      <span class="muted" style="font-size:13px">ports open</span>
+    </div>`;
+
+  html += (edge.ports || []).sort((a, b) => a.port - b.port).map(p => {
+    const ok = p.reachable;
+    const dotColor = ok === null ? '#3f3f46' : ok ? '#22c55e' : '#ef4444';
+    const statusLabel = ok === null ? '—' : ok ? 'open' : 'closed';
+    const latency = p.latency_ms != null ? `<span class="muted" style="font-size:11px">${p.latency_ms}ms</span>` : '';
+    const err = p.error_msg
+      ? `<span title="${esc(p.error_msg)}" style="font-size:11px;color:#f59e0b;cursor:help">⚠</span>` : '';
+    return `<div class="port-row">
+      <span class="port-dot" style="background:${dotColor}"></span>
+      <code style="min-width:36px;font-size:12px">${p.port === 0 ? 'ping' : p.port}</code>
+      <span class="tag" style="font-size:10px">${esc((p.protocol || 'tcp').toUpperCase())}</span>
+      <span style="flex:1;font-size:12px;color:${dotColor}">${statusLabel}</span>
+      ${latency}${err}
+    </div>`;
+  }).join('');
+
+  document.getElementById('detail-content').innerHTML = html;
+}
+
+function clearDetail() {
+  document.getElementById('detail-content').innerHTML =
+    '<div style="color:var(--fg-muted,#a1a1aa);font-size:13px;text-align:center;padding:40px 0">Click a node or edge to see details.</div>';
+}
+
+function startTitleEdit() {
+  const h1 = document.getElementById('scan-title');
+  const inp = document.getElementById('scan-title-input');
+  h1.style.display = 'none';
+  inp.style.display = '';
+  inp.value = h1.textContent.trim();
+  inp.select();
+}
+
+function cancelTitleEdit() {
+  document.getElementById('scan-title').style.display = '';
+  document.getElementById('scan-title-input').style.display = 'none';
+}
+
+async function commitTitleEdit() {
+  const h1 = document.getElementById('scan-title');
+  const inp = document.getElementById('scan-title-input');
+  const title = inp.value.trim();
+  if (!title || title === h1.textContent.trim()) { cancelTitleEdit(); return; }
+  inp.disabled = true;
+  try {
+    const r = await fetch('/network/map/{{ scan.id }}/rename', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({title}),
+    });
+    if (r.ok) {
+      h1.textContent = title;
+      document.title = title + ' | Network Map | DOSM';
+    }
+  } finally {
+    inp.disabled = false;
+    cancelTitleEdit();
+  }
+}
+
+function toggleExportMenu() {
+  const m = document.getElementById('export-menu');
+  m.style.display = m.style.display === 'none' ? '' : 'none';
+}
+document.addEventListener('click', e => {
+  const btn = document.getElementById('export-btn');
+  const menu = document.getElementById('export-menu');
+  if (!btn.contains(e.target) && !menu.contains(e.target)) menu.style.display = 'none';
+});
+
+async function exportPDF() {
+  document.getElementById('export-menu').style.display = 'none';
+  const png = cy.png({ scale: 2, bg: '#0f0f12', full: true });
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [cy.width()*2, cy.height()*2] });
+  const img = new Image();
+  img.onload = () => {
+    pdf.addImage(img, 'PNG', 0, 0, cy.width()*2, cy.height()*2);
+    pdf.save(`scan_${SCAN_ID}_{{ scan.title[:30] | replace(' ', '_') }}.pdf`);
+  };
+  img.src = png;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Initialise graph
+initCy(GRAPH);
+
+// Hide progress bar immediately for already-finished scans
+if (!livePolling) document.getElementById('progress-bar').style.display = 'none';
+
+// Live polling while scan is running
+async function poll() {
+  try {
+    const res = await fetch(`/network/map/${SCAN_ID}/status`);
+    const d = await res.json();
+
+    document.getElementById('chip-total').textContent = d.total;
+    document.getElementById('chip-ok').textContent = d.reachable;
+    document.getElementById('chip-fail').textContent = d.unreachable;
+    document.getElementById('chip-pending').textContent = d.pending;
+
+    const pct = d.total ? Math.round(d.checked / d.total * 100) : 0;
+    document.getElementById('prog-fill').style.width = pct + '%';
+    document.getElementById('prog-counts').textContent = `${d.checked} / ${d.total} checked`;
+
+    if (d.running) {
+      const active = d.active_sources || [];
+      document.getElementById('prog-label').textContent = active.length
+        ? `Checking: ${active.join(', ')} (${pct}%)`
+        : `Starting… (${pct}%)`;
+      document.getElementById('prog-last').textContent = d.last_check || 'Waiting for first result…';
+    } else {
+      document.getElementById('prog-label').textContent = 'Scan complete';
+      document.getElementById('prog-last').textContent = '';
+      const sub = document.getElementById('scan-subtitle');
+      if (sub) {
+        if (d.status === 'failed') {
+          sub.textContent = 'Failed';
+        } else {
+          const open = d.reachable, total = d.total, closed = d.unreachable, pending = d.pending;
+          if (pending > 0) {
+            sub.textContent = `Completed — ${open} open, ${closed} closed, ${pending} pending`;
+          } else if (open === total) {
+            sub.textContent = `Completed — all ${total} open`;
+          } else if (open === 0) {
+            sub.textContent = `Completed — all ${total} closed`;
+          } else {
+            sub.textContent = `Completed — ${open} of ${total} open`;
+          }
+        }
+      }
+    }
+
+    // Push latest results into Cytoscape edge data (match by src/dst labels, not ID)
+    if (cy && d.graph) {
+      cy.edges().forEach(ced => {
+        const src = ced.data('src_label'), dst = ced.data('dst_label');
+        const se = d.graph.edges.find(e => e.src_label === src && e.dst_label === dst);
+        if (se) {
+          ced.data('color', edgeColor(se));
+          ced.data('label', `${se.reachable_count}/${se.total_count}`);
+          ced.data('ports_json', JSON.stringify(se.ports || []));
+        }
+      });
+    }
+
+    if (!d.running && d.status !== 'pending') {
+      livePolling = false;
+      document.getElementById('progress-bar').style.display = 'none';
+    }
+  } catch {}
+}
+
+if (livePolling) {
+  poll();
+  const interval = setInterval(async () => {
+    await poll();
+    if (!livePolling) clearInterval(interval);
+  }, 1500);
+}
+</script>
+{% endblock %}

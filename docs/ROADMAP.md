@@ -35,6 +35,7 @@ changelog; this is the one-line summary.
 | 12e   | (shipped)    | ServiceNow extended monitoring detail: discovery source/timestamp, monitoring relationships (cmdb_rel_ci), metric collection (metric_instance with ITOM Visibility fallback), thresholds note, multiple CMDB match surfacing. |
 | 14    | (shipped)    | Organisation directory: AD-backed via WinRM jumpbox + PowerShell `ActiveDirectory` cmdlets (no direct LDAP). Empty-state configure flow, mock adapter for dev/test, manager-chain hierarchy inference, per-member manager capture. Unified directory list (departments + people) with hosts-style search bar (field selector + clear), pan/zoom D3 tree, disabled accounts shown with strikethrough + tooltip. Each dept's roster is written to `docs/org/{slug}.md` so the agent can answer "who do I talk to about X". |
 | 17    | (shipped)    | Typed pipeline inputs: schema rows gain `type` (string/boolean/number/choice) + options/default/required/description. Row-based schema editor (add/remove rows, options field auto-disables for non-choice). Run form renders text / number / checkbox / `<select>` per type, server-side validates required + choice membership. Per-adapter wire coercion: GitHub stringifies all (booleans → `"true"/"false"`); Octopus stringifies `FormValues` the same way; ADO splits `var.`-prefixed inputs into `variables` (string-coerced) vs `templateParameters` (native types preserved); AWX passes through native (Ansible vars are typed); TFC adapter unchanged but run form shows an amber banner explaining inputs aren't sent (variables live on the workspace). Legacy `key=value` textarea kept as fallback for pipelines without a declared schema. 21 new tests (15 unit + 6 integration). |
+| 18    | (pending)    | File transfer (FTP / explicit FTPS / SFTP), jump-aware. `dosm/ftp/` with a `FileTransferBackend` ABC + `FtpBackend` (hand-rolled blocking FTP/FTPS client) and `SftpBackend` (asyncssh-native). Jumped FTP routes every socket through an `asyncssh` SOCKS5 listener leased from `JumpTunnelManager` (`acquire_socks`) — control + every passive data port tunnel through one proxy, so dynamic PASV ports need no per-transfer forwards. FTPS is explicit AUTH TLS with control-session reuse on the PROT P data channel (the thing `ftplib` can't do). File transfer is a **host capability**, not a host protocol: hosts gain `ft_method` (sftp/ftp/ftps) + `ft_port` + optional `ft_credential` override (idempotent column-add migration), set in a "File transfer" section on the host form — so an SSH box exposes SFTP without a duplicate inventory entry. Admin-only web file browser (breadcrumbs, list/upload/download/mkdir/rename/delete, drag-drop), reachable via a **Files** sidebar page (host picker), a Files button on the hosts list, and the host detail card; `dosm ftp ls/get/put/rm` CLI; `AuditLog` on every mutation + download. **Host-to-host copy/move**: `transfer_between_hosts` stages a file server-side (retrieve from source backend → store to dest backend, optional source delete = move) — each side traverses its own jump chain via `get_file_backend`; "Copy / move to another host" file action + picker modal, `/copy` + `/targets` routes, `dosm ftp cp [--move]`. Also fixed a latent `dosm.jumps` ↔ `dosm.hosts` import cycle (cold `import dosm.jumps` was broken) by lazy-importing `resolve_jump_chain` in `connections.build_jump_chain`. 12 new tests (in-process pyftpdlib FTPS + asyncssh SFTP/jump, no Docker). |
 
 ## Open backlog (recommended order)
 
@@ -125,6 +126,49 @@ pattern:
 into `dosm/directory/adapters/`, register it in the factory at
 `dosm/directory/adapters/__init__.py:get_directory_source`. Match the
 pattern of monitoring/pipeline adapters elsewhere.
+
+### Phase 18 — File transfer through a jump box
+
+The hard part of FTP-through-a-jump isn't the jump; it's that FTP opens a
+**second, dynamically-negotiated data connection** per transfer. Tunnelling
+only port 21 makes the control channel work but every `LIST`/`RETR` hangs,
+because passive mode hands back a fresh port that was never forwarded.
+
+The solution — **route every FTP socket through an `asyncssh` SOCKS5 proxy**
+opened over the jump (`JumpTunnelManager.acquire_socks`). A SOCKS proxy
+forwards whatever host:port a connection asks for, on demand, so the control
+connection *and* each ephemeral passive data port tunnel through one listener,
+shared across sessions and GC-reaped like the existing port forwards. The
+client prefers EPSV and, for PASV, ignores the server-advertised IP (often a
+wrong NAT address) in favour of the control host.
+
+FTPS forced two more decisions:
+- The client is **hand-rolled and blocking** (`dosm/ftp/ftp_client.py`), run
+  in a thread executor. Explicit FTPS needs the data connection to **reuse the
+  control connection's TLS session** (strict servers: vsftpd
+  `require_ssl_reuse=YES`). `ftplib.FTP_TLS` does not do this and asyncio's
+  `start_tls` can't pass a session; blocking `ssl.wrap_socket(session=...)`
+  can. That one capability is why the client exists.
+- A clean TLS `close_notify` (`SSLSocket.unwrap()`) is required on the data
+  socket or a `tls_data_required` server discards uploads as aborted.
+
+**Backends sit behind a `FileTransferBackend` ABC** so the web browser, CLI,
+and audit logging are backend-agnostic. `SftpBackend` is asyncssh-native and
+tunnels through the chain for free via `connect_through_chain`. **Active mode
+is unsupported** (server-connect-back is unroutable through a jump) — passive
+only, documented, not built.
+
+**File transfer is a host capability, not a host protocol.** A host keeps its
+primary protocol (ssh/rdp/vnc for Guacamole) and *additionally* carries
+`ft_method` / `ft_port` / `ft_credential_id` (override; falls back to the host
+credential). `service.get_file_backend` selects the backend from `ft_method`
+and resolves the effective port + credential (`resolve_ft_target`). This avoids
+forcing a duplicate inventory entry just to SFTP into an existing SSH box. The
+Files sidebar page lists hosts where `ft_method` is set.
+
+**Adding a backend**: implement the ABC in `dosm/ftp/`, register it in
+`dosm/ftp/service.py:get_file_backend`. Same shape as the monitoring/pipeline
+adapter factories.
 
 ## Design decisions worth preserving
 
@@ -217,6 +261,11 @@ limitations). Preserve this.
   pass-through. For environments that need it (no sudoers, no saved
   `runas` creds), needs `pywin32 LogonUser` on Windows and `SUDO_ASKPASS`
   on Linux. Not yet built.
+- **FTPS strict session-reuse is unproven against a real server.** The
+  Phase 18 client *performs* data-channel TLS session reuse, but the test
+  server (pyftpdlib) doesn't *enforce* `require_ssl_reuse=YES`. Confirm
+  against a real vsftpd-behind-a-jump target when one is available. FTP/FTPS
+  active mode is intentionally unsupported (unroutable through a jump).
 - **Documentation embedder requires a one-time HuggingFace download** for
   the bge-small-en-v1.5 ONNX model on first use. Air-gapped environments
   need to pre-fetch the model into `$HOME/.cache/fastembed/`. The

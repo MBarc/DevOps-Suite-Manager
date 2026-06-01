@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Files | DOSM{% endblock %}
+{% block content %}
+<style>
+  .ft-list { display:flex; flex-direction:column; gap:8px; }
+  .ft-row {
+    display:flex; align-items:center; gap:14px; padding:14px 16px;
+    border:1px solid var(--border); border-radius:10px; background:var(--surface);
+    text-decoration:none; color:inherit; transition:border-color .12s, transform .12s, background .12s;
+  }
+  .ft-row:hover { border-color: color-mix(in srgb, var(--text) 26%, var(--border)); background: color-mix(in srgb, var(--text) 3%, var(--surface)); transform: translateX(2px); }
+  .ft-ico { width:38px; height:38px; flex:none; display:grid; place-items:center; border-radius:9px;
+            background: color-mix(in srgb, #6366f1 16%, transparent); color:#a5b4fc; }
+  .ft-ico svg { width:20px; height:20px; }
+  .ft-main { min-width:0; flex:1; }
+  .ft-name { font-weight:600; color:var(--text); }
+  .ft-meta { font-size:12.5px; color:var(--text-muted); font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; margin-top:2px; }
+  .ft-proto {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    padding:2px 8px; border-radius:5px; border:1px solid var(--border); color:var(--text-muted);
+  }
+  .ft-proto[data-p="ftps"], .ft-proto[data-p="sftp"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+  .ft-arrow { color: var(--text-muted); flex:none; }
+  .ft-empty { padding:48px 16px; text-align:center; color:var(--text-muted); }
+  .ft-empty .big { font-size:30px; opacity:.4; margin-bottom:10px; }
+</style>
+
+<header class="page-header">
+  <div>
+    <h1>Files</h1>
+    <div class="subtitle">Browse and transfer files on FTP, FTPS, and SFTP hosts.</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-subtle" href="/hosts">Manage hosts</a>
+  </div>
+</header>
+
+<section class="card">
+  {% if hosts %}
+  <div class="ft-list">
+    {% for h in hosts %}
+    <a class="ft-row" href="/files/{{ h.id }}">
+      <span class="ft-ico">
+        {% if h.ft_method == 'sftp' %}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M9 13l2 2 4-4"/></svg>
+        {% else %}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        {% endif %}
+      </span>
+      <span class="ft-main">
+        <div class="ft-name">{{ h.name }}</div>
+        <div class="ft-meta">{{ h.hostname }}:{{ h.ft_port or '—' }}{% if h.jump_host %} · via {{ h.jump_host.name }}{% endif %}</div>
+      </span>
+      <span class="ft-proto" data-p="{{ h.ft_method }}">{{ h.ft_method }}</span>
+      <svg class="ft-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ft-empty">
+    <div class="big">⌗</div>
+    No hosts have file transfer configured yet.<br>
+    Open a host and set a <strong>File transfer</strong> method (SFTP / FTP / FTPS)
+    in its connection settings to browse its files.
+    <div style="margin-top:12px"><a href="/hosts" style="color:var(--accent, #818cf8)">Browse hosts →</a></div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

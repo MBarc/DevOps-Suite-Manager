@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dosm.monitoring.adapters.base import HostCheckResult, MonitoringAdapter
+from dosm.monitoring.adapters.base import CertInfo, HostCheckResult, MonitoringAdapter
 from dosm.monitoring.adapters.datadog import DatadogAdapter
 from dosm.monitoring.adapters.dynatrace import DynatraceAdapter
 from dosm.monitoring.adapters.prometheus import PrometheusAdapter
@@ -31,6 +31,7 @@ def make_adapter(source, token: str, token2: str) -> MonitoringAdapter | None:
 
 
 __all__ = [
+    "CertInfo",
     "HostCheckResult",
     "MonitoringAdapter",
     "DynatraceAdapter",

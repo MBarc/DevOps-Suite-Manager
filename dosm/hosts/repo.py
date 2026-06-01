@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session, selectinload
 from dosm.models import Credential, Host, HostTag, Tag
 
 SUPPORTED_PROTOCOLS = ("ssh", "rdp", "vnc")
+# File-transfer methods a host can additionally expose (a capability, not the
+# host's primary protocol). None/"" = file transfer not configured.
+FILE_TRANSFER_METHODS = ("sftp", "ftp", "ftps")
 JUMP_CHAIN_MAX_DEPTH = 5
 
 
@@ -123,6 +126,13 @@ def _validate_jump(db: Session, host_id: int | None, jump_host_id: int | None) -
         depth += 1
 
 
+def _validate_ft(method: str | None) -> str | None:
+    method = (method or "").strip().lower() or None
+    if method is not None and method not in FILE_TRANSFER_METHODS:
+        raise HostValidationError(f"Unsupported file-transfer method: {method!r}")
+    return method
+
+
 def create_host(
     db: Session,
     *,
@@ -136,9 +146,16 @@ def create_host(
     tags_csv: str,
     is_jumpbox: bool = False,
     source_module: str | None = None,
+    ft_method: str | None = None,
+    ft_port: int | None = None,
+    ft_credential_id: int | None = None,
 ) -> Host:
     if protocol not in SUPPORTED_PROTOCOLS:
         raise HostValidationError(f"Unsupported protocol: {protocol!r}")
+    ft_method = _validate_ft(ft_method)
+    if ft_method is None:
+        ft_port = None
+        ft_credential_id = None
     if is_jumpbox:
         jump_host_id = None  # jumpboxes connect directly — no chained jumps
     _validate_jump(db, host_id=None, jump_host_id=jump_host_id)
@@ -152,6 +169,9 @@ def create_host(
         jump_host_id=jump_host_id,
         is_jumpbox=is_jumpbox,
         source_module=source_module,
+        ft_method=ft_method,
+        ft_port=ft_port,
+        ft_credential_id=ft_credential_id,
     )
     db.add(host)
     db.flush()
@@ -175,9 +195,16 @@ def update_host(
     jump_host_id: int | None,
     tags_csv: str,
     is_jumpbox: bool = False,
+    ft_method: str | None = None,
+    ft_port: int | None = None,
+    ft_credential_id: int | None = None,
 ) -> Host:
     if protocol not in SUPPORTED_PROTOCOLS:
         raise HostValidationError(f"Unsupported protocol: {protocol!r}")
+    ft_method = _validate_ft(ft_method)
+    if ft_method is None:
+        ft_port = None
+        ft_credential_id = None
     if host.is_jumpbox and not is_jumpbox:
         in_use = db.execute(
             select(Host.id).where(Host.jump_host_id == host.id).limit(1)
@@ -197,6 +224,9 @@ def update_host(
     host.credential_id = credential_id
     host.jump_host_id = jump_host_id
     host.is_jumpbox = is_jumpbox
+    host.ft_method = ft_method
+    host.ft_port = ft_port
+    host.ft_credential_id = ft_credential_id
     db.query(HostTag).filter(HostTag.host_id == host.id).delete()
     for tag_name in _normalize_tags(tags_csv):
         tag = get_or_create_tag(db, tag_name)

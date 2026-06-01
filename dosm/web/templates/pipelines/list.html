@@ -14,7 +14,7 @@
 <section class="card">
   {% if rows %}
   <table class="data">
-    <thead><tr><th>Name</th><th>Provider</th><th>Target</th><th>Latest run</th></tr></thead>
+    <thead><tr><th>Name</th><th>Provider</th><th>Target</th><th>Latest run</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}
       <tr>
@@ -42,6 +42,9 @@
           {% else %}
             <span class="muted">never run</span>
           {% endif %}
+        </td>
+        <td style="text-align:right; white-space:nowrap">
+          <a href="/pipelines/{{ r.p.id }}" class="btn btn-sm">View</a>
         </td>
       </tr>
     {% endfor %}

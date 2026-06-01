@@ -45,6 +45,10 @@ dev = [
     "pytest>=8.3",
     "httpx>=0.27",
     "ruff>=0.7",
+    # FTP/FTPS test server for the file-transfer integration tests. pyftpdlib's
+    # TLS handler needs pyOpenSSL. Test-only — not a runtime dependency.
+    "pyftpdlib>=1.5",
+    "pyopenssl>=24.0",
 ]
 
 [project.scripts]

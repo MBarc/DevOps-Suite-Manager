@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+{% block title %}New Scan | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>New network scan</h1>
+    <div class="subtitle">Select sources, ports, and destinations — then start the scan.</div>
+  </div>
+  <div class="actions">
+    <a href="/network/map" class="btn btn-ghost">Cancel</a>
+  </div>
+</header>
+
+{% if error %}
+<div class="alert alert-error" style="margin-bottom:16px">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/network/map/new" style="display:flex;flex-direction:column;gap:16px">
+
+  <!-- Scan title -->
+  <section class="card">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;margin-bottom:6px">Scan title</div>
+        <input type="text" name="title" placeholder="e.g. DMZ connectivity audit" style="width:100%">
+      </div>
+    </div>
+  </section>
+
+  <!-- 3-column: Sources | Ports | Destinations -->
+  <div class="scan-cols">
+
+    <!-- Source hosts -->
+    <section class="card scan-col">
+      <div class="col-header">
+        <div>
+          <div class="col-title">Source hosts</div>
+          <div class="hint">Checks run from here.</div>
+        </div>
+        <span class="sel-count" id="src-count" style="display:none"></span>
+      </div>
+      {% if hosts %}
+      <div class="host-search-wrap">
+        <svg class="host-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="6.5" cy="6.5" r="4"/><path d="M11 11l2.5 2.5"/>
+        </svg>
+        <input class="host-search" type="text" placeholder="Filter…"
+               oninput="filterHosts(this,'src-list','src-count')">
+      </div>
+      <div id="src-list" class="check-list">
+        {% for h in hosts %}
+        <label class="port-row" data-search="{{ h.name|lower }} {{ h.hostname|lower }}">
+          <input class="custom-cb" type="checkbox" name="source_host_ids" value="{{ h.id }}"
+                 onchange="updateCount('src-list','src-count')">
+          <span style="flex:1;font-size:13px">{{ h.name }}</span>
+          <span class="muted" style="font-size:11.5px">{{ h.hostname }}</span>
+          {% if h.protocol == 'rdp' %}<span class="tag tag-win">WIN</span>
+          {% elif h.protocol == 'local' %}<span class="tag" style="background:#6366f1;color:#fff;font-size:10px">LOCAL</span>
+          {% endif %}
+        </label>
+        {% endfor %}
+        <div class="host-empty">No hosts match.</div>
+      </div>
+      <div class="col-actions">
+        <button type="button" class="btn btn-sm btn-ghost"
+                onclick="selectVisible('src-list','source_host_ids',true,'src-count')">All</button>
+        <button type="button" class="btn btn-sm btn-ghost"
+                onclick="selectVisible('src-list','source_host_ids',false,'src-count')">None</button>
+      </div>
+      {% else %}
+        <div class="empty-state">No hosts in inventory.</div>
+      {% endif %}
+    </section>
+
+    <!-- Ports to check -->
+    <section class="card scan-col">
+      <div class="col-header">
+        <div class="col-title">Ports to check</div>
+      </div>
+      {% if ports %}
+      <div class="check-list">
+        {% for p in ports %}
+        <label class="port-row">
+          <input class="custom-cb" type="checkbox" name="port_ids" value="{{ p.id }}"
+                 {% if p.is_default %}checked{% endif %}>
+          <code style="min-width:36px;font-size:12px">{{ p.port_number }}</code>
+          <span class="tag" style="font-size:10px;flex-shrink:0">{{ p.protocol | upper }}</span>
+          <span style="flex:1;font-size:13px">{{ p.description }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <div class="col-actions">
+        <button type="button" class="btn btn-sm btn-ghost"
+                onclick="document.querySelectorAll('[name=port_ids]').forEach(c=>c.checked=true)">All</button>
+        <button type="button" class="btn btn-sm btn-ghost"
+                onclick="document.querySelectorAll('[name=port_ids]').forEach(c=>c.checked=false)">None</button>
+        <button type="button" class="btn btn-sm btn-ghost"
+                onclick="document.querySelectorAll('[name=port_ids]').forEach(c=>c.checked=c.dataset.def==='1')">Defaults</button>
+      </div>
+      {% else %}
+        <div class="empty-state">No ports defined. <a href="/network/ports">Add ports</a> first.</div>
+      {% endif %}
+    </section>
+
+    <!-- Destination hosts -->
+    <section class="card scan-col">
+      <div class="col-header">
+        <div>
+          <div class="col-title">Destination hosts</div>
+          <div class="hint">Inventory or ad-hoc.</div>
+        </div>
+        <span class="sel-count" id="dst-count" style="display:none"></span>
+      </div>
+      {% if hosts %}
+      <div class="host-search-wrap">
+        <svg class="host-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="6.5" cy="6.5" r="4"/><path d="M11 11l2.5 2.5"/>
+        </svg>
+        <input class="host-search" type="text" placeholder="Filter…"
+               oninput="filterHosts(this,'dst-list','dst-count')">
+      </div>
+      <div id="dst-list" class="check-list">
+        {% for h in hosts %}
+        <label class="port-row" data-search="{{ h.name|lower }} {{ h.hostname|lower }}">
+          <input class="custom-cb" type="checkbox" name="dest_host_ids" value="{{ h.id }}"
+                 onchange="updateCount('dst-list','dst-count')">
+          <span style="flex:1;font-size:13px">{{ h.name }}</span>
+          <span class="muted" style="font-size:11.5px">{{ h.hostname }}</span>
+        </label>
+        {% endfor %}
+        <div class="host-empty">No hosts match.</div>
+      </div>
+      <div class="col-actions">
+        <button type="button" class="btn btn-sm btn-ghost"
+                onclick="selectVisible('dst-list','dest_host_ids',true,'dst-count')">All</button>
+        <button type="button" class="btn btn-sm btn-ghost"
+                onclick="selectVisible('dst-list','dest_host_ids',false,'dst-count')">None</button>
+      </div>
+      {% else %}
+        <div class="empty-state" style="margin-bottom:8px">No hosts in inventory.</div>
+      {% endif %}
+      <!-- Ad-hoc -->
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+        <button type="button" id="adhoc-toggle" onclick="toggleAdhoc()"
+                style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;
+                       color:var(--accent,#6366f1);font-size:13px;padding:0;width:100%">
+          <svg id="adhoc-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"
+               style="width:12px;height:12px;flex-shrink:0;transition:transform 0.15s;transform:rotate(-90deg)">
+            <path d="M4 6l4 4 4-4"/>
+          </svg>
+          Add ad-hoc destinations
+        </button>
+        <div id="adhoc-body" style="display:none;margin-top:10px">
+          <div class="hint" style="margin-bottom:6px">One per line — <code>address</code> or <code>label|address</code></div>
+          <textarea name="adhoc_destinations" rows="4"
+                    placeholder="8.8.8.8&#10;gateway|10.0.0.1&#10;external-api.example.com"
+                    style="width:100%;font-size:13px;font-family:monospace;resize:vertical"></textarea>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Start scan footer -->
+  <section class="card" style="background:var(--surface-raised,rgba(255,255,255,.03))">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:20px">
+      <p style="margin:0;font-size:13px;color:var(--fg-muted,#a1a1aa)">
+        Scan runs in the background — live progress visible on the results page.
+      </p>
+      <button class="btn" type="submit" style="white-space:nowrap;font-size:14px;padding:9px 24px;flex-shrink:0">
+        Start scan →
+      </button>
+    </div>
+  </section>
+
+</form>
+
+<style>
+/* Layout */
+.scan-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  height: 420px;
+}
+.scan-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.col-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.col-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.col-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Thin custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong, #3f3f46) transparent;
+}
+.check-list::-webkit-scrollbar { width: 4px; }
+.check-list::-webkit-scrollbar-track { background: transparent; }
+.check-list::-webkit-scrollbar-thumb {
+  background: var(--border-strong, #3f3f46);
+  border-radius: 2px;
+}
+.check-list::-webkit-scrollbar-thumb:hover { background: var(--fg-muted, #71717a); }
+.tag-win {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+/* Host search */
+.host-search-wrap {
+  position: relative;
+  margin-bottom: 8px;
+}
+.host-search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 13px;
+  height: 13px;
+  color: var(--fg-muted, #71717a);
+  pointer-events: none;
+}
+input.host-search {
+  width: 100%;
+  padding: 6px 10px 6px 30px;
+  font-size: 12.5px;
+  background: var(--bg-elev-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  box-sizing: border-box;
+}
+input.host-search:focus { border-color: var(--accent, #6366f1); }
+input.host-search::placeholder { color: var(--fg-muted, #71717a); }
+
+/* No-match message */
+.host-empty {
+  display: none;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+/* Selected count badge */
+.sel-count {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent, #6366f1);
+  background: rgba(99,102,241,.12);
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+/* Checkbox rows */
+.port-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+  user-select: none;
+}
+.port-row:hover {
+  background: var(--surface-raised, rgba(255,255,255,.04));
+  border-color: var(--border);
+}
+.port-row:has(.custom-cb:checked) {
+  background: rgba(99,102,241,.1);
+  border-color: rgba(99,102,241,.4);
+}
+</style>
+
+<script>
+document.querySelectorAll('[name=port_ids]').forEach(c => {
+  if (c.checked) c.dataset.def = '1';
+});
+
+function filterHosts(input, listId, countId) {
+  const q = input.value.toLowerCase();
+  const list = document.getElementById(listId);
+  let visible = 0;
+  list.querySelectorAll('.port-row').forEach(row => {
+    if (row.dataset.pinned) return; // always show pinned rows
+    const match = !q || (row.dataset.search || '').includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  list.querySelector('.host-empty').style.display = visible === 0 ? '' : 'none';
+  updateCount(listId, countId);
+}
+
+function updateCount(listId, countId) {
+  const list = document.getElementById(listId);
+  const total = list.querySelectorAll('.custom-cb').length;
+  const checked = list.querySelectorAll('.custom-cb:checked').length;
+  const badge = document.getElementById(countId);
+  if (!badge) return;
+  badge.textContent = checked + ' of ' + total + ' selected';
+  badge.style.display = checked === 0 ? 'none' : '';
+}
+
+function selectVisible(listId, fieldName, state, countId) {
+  const list = document.getElementById(listId);
+  list.querySelectorAll('.port-row').forEach(row => {
+    if (row.style.display === 'none') return;
+    const cb = row.querySelector('.custom-cb');
+    if (cb) cb.checked = state;
+  });
+  updateCount(listId, countId);
+}
+
+function toggleAdhoc() {
+  const body = document.getElementById('adhoc-body');
+  const chevron = document.getElementById('adhoc-chevron');
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  chevron.style.transform = open ? 'rotate(0deg)' : 'rotate(-90deg)';
+}
+</script>
+{% endblock %}

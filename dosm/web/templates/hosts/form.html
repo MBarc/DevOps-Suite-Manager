@@ -32,8 +32,16 @@
           {% endfor %}
         </select>
       </label>
-      <label style="width:120px">Port
-        <input type="number" name="port" required value="{{ host.port if host else 22 }}" />
+      <label style="width:160px">Port
+        {% set curport = host.port if host else 22 %}
+        <select name="port" id="port-number" required>
+          {% for num, label in port_options %}
+          <option value="{{ num }}" {% if curport == num %}selected{% endif %}>{{ num }}{% if label %} · {{ label }}{% endif %}</option>
+          {% endfor %}
+          {% if curport not in port_numbers %}
+          <option value="{{ curport }}" selected>{{ curport }}</option>
+          {% endif %}
+        </select>
       </label>
     </div>
     <label>Credential profile
@@ -66,6 +74,45 @@
       </select>
       <span class="field-hint">If set, sessions reach this host through that jumpbox. Only hosts flagged as jumpboxes are listed.</span>
     </label>
+    <fieldset style="border:1px solid var(--border); border-radius:6px; padding:12px; min-width:0; margin:0;">
+      <legend style="font-size:12px; color:var(--fg-muted); padding:0 6px;">File transfer (optional)</legend>
+      <label>Method
+        <select name="ft_method" id="ft-method-select">
+          <option value="">Not enabled</option>
+          {% for m in ft_methods %}
+          <option value="{{ m }}" {% if host and host.ft_method == m %}selected{% endif %}>{{ m|upper }}</option>
+          {% endfor %}
+        </select>
+        <span class="field-hint">SFTP reuses the host's SSH login; FTP/FTPS is a separate service (usually port 21).</span>
+      </label>
+      <div id="ft-detail-rows" {% if not (host and host.ft_method) %}style="display:none"{% endif %}>
+        <div class="row" style="margin-top:var(--sp-2)">
+          <label style="width:160px">Port
+            {% set ft_cur = (host.ft_port if host and host.ft_port else (ft_default_ports.get(host.ft_method) if host and host.ft_method else None)) %}
+            <select name="ft_port" id="ft-port-input">
+              {% for num, label in port_options %}
+              <option value="{{ num }}" {% if ft_cur == num %}selected{% endif %}>{{ num }}{% if label %} · {{ label }}{% endif %}</option>
+              {% endfor %}
+              {% if host and host.ft_port and host.ft_port not in port_numbers %}
+              <option value="{{ host.ft_port }}" selected>{{ host.ft_port }}</option>
+              {% endif %}
+            </select>
+          </label>
+          <label style="flex:1">Credential override
+            <select name="ft_credential_id">
+              <option value="">(use host credential)</option>
+              {% for c in credentials %}
+              <option value="{{ c.id }}"
+                {% if host and host.ft_credential_id == c.id %}selected{% endif %}>
+                {{ c.name }} ({{ c.kind }})
+              </option>
+              {% endfor %}
+            </select>
+            <span class="field-hint">For FTP/FTPS logins that differ from SSH.</span>
+          </label>
+        </div>
+      </div>
+    </fieldset>
     <label>Tags
       <input type="text" name="tags"
         placeholder="prod, linux"
@@ -83,9 +130,21 @@
 <script>
   const defaults = {{ default_ports|tojson }};
   const sel = document.getElementById('protocol-select');
-  const portInput = document.querySelector('input[name="port"]');
+  const portSelect = document.getElementById('port-number');
   sel?.addEventListener('change', () => {
-    if (defaults[sel.value]) portInput.value = defaults[sel.value];
+    // Snap the Port dropdown to the protocol's standard port (it's an option).
+    if (defaults[sel.value]) portSelect.value = String(defaults[sel.value]);
+  });
+
+  // File-transfer section: reveal the port/credential row when a method is set,
+  // and snap the FT port to that method's standard port (22 / 21).
+  const ftDefaults = {{ ft_default_ports|tojson }};
+  const ftSel = document.getElementById('ft-method-select');
+  const ftRows = document.getElementById('ft-detail-rows');
+  const ftPort = document.getElementById('ft-port-input');
+  ftSel?.addEventListener('change', () => {
+    ftRows.style.display = ftSel.value ? '' : 'none';
+    if (ftSel.value && ftDefaults[ftSel.value]) ftPort.value = String(ftDefaults[ftSel.value]);
   });
 
   (function () {

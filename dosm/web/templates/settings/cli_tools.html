@@ -8,7 +8,7 @@
 </header>
 
 <div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider)">
-  <a href="/settings" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-strong); border-bottom:2px solid var(--accent,#6366f1); margin-bottom:-1px">CLI Tools</a>
+  <a href="/settings" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-strong); border-bottom:2px solid var(--accent,#6366f1); margin-bottom:-1px">Terminal launchers</a>
   <a href="/settings/integrations" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-muted); border-bottom:2px solid transparent; margin-bottom:-1px">Integrations</a>
 </div>
 
@@ -21,6 +21,11 @@
 
 <section class="card">
   <h2>CLI tool catalog</h2>
+  <p class="muted" style="margin-top:var(--sp-1); margin-bottom:var(--sp-4); font-size:13px; max-width:640px">
+    Enable any installed tool below and it will appear as a quick-launch tab on the
+    <a href="/terminals" style="color:var(--accent)">Terminals</a> page — opening a shell with that tool on <code>PATH</code> and ready to use.
+    Tools that aren't installed on this machine are shown but can't be toggled.
+  </p>
   <form method="post" action="/settings">
     <table class="data">
       <thead>

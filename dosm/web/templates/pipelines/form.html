@@ -3,6 +3,27 @@
 {% block content %}
 {% set cfg = cfg_parsed or {} %}
 {% set schema = schema_parsed or [] %}
+<style>
+  /* Keep the fieldset's right edge flush with the labelled inputs above it.
+     The table's intrinsic min-content width can otherwise blow past 100% of
+     the form's narrow column. */
+  .schema-fieldset {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+  .schema-editor { width: 100%; table-layout: fixed; }
+  .schema-editor td { vertical-align: middle; }
+  .schema-editor input[type="text"],
+  .schema-editor select {
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+  }
+</style>
 <header class="page-header">
   <div>
     <h1>{{ 'Edit pipeline' if pipeline else 'New pipeline' }}</h1>
@@ -65,14 +86,14 @@
       <textarea name="description" rows="2" placeholder="Optional notes for teammates">{{ pipeline.description or '' if pipeline else '' }}</textarea>
     </label>
 
-    <fieldset style="border:1px solid var(--border); border-radius:6px; padding:12px">
+    <fieldset class="schema-fieldset">
       <legend class="muted" style="padding:0 6px; font-size:12px">Inputs schema</legend>
       <p class="field-hint" style="margin-top:0">
         Declare each input the pipeline accepts. Type controls how the run form
         renders (text box, checkbox, dropdown). Choice options are comma-separated.
         Not used by Terraform Cloud (set variables on the workspace instead).
       </p>
-      <table class="data schema-editor" id="schema-editor" style="width:100%">
+      <table class="data schema-editor" id="schema-editor">
         <thead>
           <tr>
             <th style="width:18%">Name</th>

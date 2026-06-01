@@ -110,5 +110,17 @@
     <p class="muted">Guacamole integration is disabled. Set <code>guacamole.enabled: true</code> in <code>config.yaml</code> and bring up the
       <code>docker compose</code> stack to enable browser SSH/RDP/VNC.</p>
   {% endif %}
+
+  {% if host.ft_method %}
+    <div class="row" style="margin-top:var(--sp-3)">
+      <a class="btn btn-subtle" href="/files/{{ host.id }}">
+        Browse files ({{ host.ft_method|upper }})
+      </a>
+      <span class="muted" style="font-size:12.5px; align-self:center">
+        {% if host.ft_method == 'ftps' %}Explicit FTPS (AUTH TLS){% elif host.ft_method == 'ftp' %}Plain FTP{% else %}SFTP over SSH{% endif %}
+        on port {{ host.ft_port or '—' }}{% if jump_chain %}, via {{ jump_chain|length }} jump host{{ '' if jump_chain|length == 1 else 's' }}{% endif %}.
+      </span>
+    </div>
+  {% endif %}
 </section>
 {% endblock %}

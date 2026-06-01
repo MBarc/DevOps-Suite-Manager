@@ -19,3 +19,6 @@ dosm-home/
 guacamole/
 scripts/
 docs/
+# Keep docs/cli/ — pyproject.toml force-includes its files into the wheel.
+!docs/cli/
+!docs/cli/**

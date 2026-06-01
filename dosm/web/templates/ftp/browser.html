@@ -1,0 +1,420 @@
+{% extends "base.html" %}
+{% block title %}Files · {{ host.name }} | DOSM{% endblock %}
+{% block content %}
+<style>
+  /* ── File browser — cohesive with DOSM's dark system, elevated with a
+     monospace path rail, crisp rows, and a staggered reveal. ─────────────── */
+  .fb-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .fb-proto {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    padding: 2px 8px; border-radius: 5px; text-transform: uppercase;
+    border: 1px solid var(--border); color: var(--text-muted);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+  }
+  .fb-proto[data-p="ftps"], .fb-proto[data-p="sftp"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+
+  /* Path rail — the spine of the browser. */
+  .fb-rail {
+    display:flex; align-items:center; gap:2px; flex-wrap:wrap;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 13px; padding: 9px 12px; margin: 0 0 14px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .fb-crumb { color: var(--text-muted); background:none; border:none; cursor:pointer; padding: 2px 6px; border-radius: 5px; font: inherit; }
+  .fb-crumb:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+  .fb-crumb.cur { color: var(--text); font-weight: 600; cursor: default; }
+  .fb-sep { color: var(--border); user-select:none; }
+
+  .fb-toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 12px; }
+  .fb-toolbar .spacer { flex: 1; }
+  .fb-icon-btn { display:inline-flex; align-items:center; gap:7px; }
+  .fb-icon-btn svg { width:15px; height:15px; }
+
+  .fb-zone { position: relative; }
+  .fb-zone.drag::after {
+    content: "Drop to upload here"; position:absolute; inset:0; z-index:5;
+    display:flex; align-items:center; justify-content:center;
+    font-size: 14px; font-weight: 600; letter-spacing: .02em; color: var(--text);
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    border: 2px dashed color-mix(in srgb, var(--success) 60%, var(--border));
+    border-radius: 10px; backdrop-filter: blur(2px);
+  }
+
+  table.fb { width:100%; border-collapse: collapse; }
+  table.fb th {
+    text-align:left; font-size: 11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+    color: var(--text-muted); padding: 0 12px 9px; border-bottom: 1px solid var(--border);
+  }
+  table.fb th.num, table.fb td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.fb th.act { text-align: right; width: 1%; white-space: nowrap; }
+  table.fb td { padding: 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); vertical-align: middle; }
+  table.fb tbody tr { animation: fb-in .26s ease both; }
+  @keyframes fb-in { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform:none; } }
+  table.fb tbody tr:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+
+  .fb-name { display:flex; align-items:center; gap:10px; min-width:0; }
+  .fb-name svg { width:18px; height:18px; flex:none; }
+  .fb-name .ico-dir { color: #6366f1; }
+  .fb-name .ico-file { color: var(--text-muted); }
+  .fb-name .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fb-dir .nm { color: var(--text); cursor:pointer; font-weight: 500; }
+  .fb-dir .nm:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .fb-file .nm { color: var(--text-muted); }
+  .fb-mtime { color: var(--text-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space:nowrap; }
+
+  .fb-rowact { display:inline-flex; gap:4px; opacity:0; transition: opacity .12s; }
+  table.fb tbody tr:hover .fb-rowact, table.fb tbody tr:focus-within .fb-rowact { opacity:1; }
+  .fb-act { background:none; border:1px solid transparent; color: var(--text-muted); cursor:pointer; border-radius:6px; padding:5px; display:inline-flex; line-height:0; }
+  .fb-act:hover { color: var(--text); border-color: var(--border); background: var(--surface); }
+  .fb-act.danger:hover { color: #fca5a5; border-color: color-mix(in srgb, #f43f5e 50%, var(--border)); }
+  .fb-act svg { width:15px; height:15px; }
+
+  .fb-rename-input {
+    font: inherit; background: var(--input-bg, #27272a); color: var(--text);
+    border: 1px solid color-mix(in srgb, var(--success) 50%, var(--border)); border-radius: 5px; padding: 3px 7px; min-width: 160px;
+  }
+  .fb-state { padding: 40px 16px; text-align:center; color: var(--text-muted); font-size: 13.5px; }
+  .fb-state .big { font-size: 26px; opacity:.5; margin-bottom: 8px; }
+  .fb-error { display:none; margin-bottom: 12px; }
+  .fb-spin { display:inline-block; width:15px; height:15px; border:2px solid var(--border); border-top-color: var(--text); border-radius:50%; animation: fb-spin .7s linear infinite; vertical-align:-3px; margin-right:7px; }
+  @keyframes fb-spin { to { transform: rotate(360deg); } }
+  .fb-toast { position: fixed; bottom: 72px; right: 20px; background: var(--surface); border:1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 8px; font-size: 12.5px; z-index: 1001; max-width: 340px; box-shadow: 0 4px 16px rgba(0,0,0,.5); animation: fb-in .2s ease; }
+
+  /* Copy/move modal */
+  .fb-modal { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center;
+              background: rgba(0,0,0,.55); backdrop-filter: blur(2px); animation: fb-in .15s ease; }
+  .fb-modal-box { width: min(440px, 92vw); background: var(--surface); border: 1px solid var(--border);
+                  border-radius: 12px; padding: 20px; box-shadow: 0 16px 48px rgba(0,0,0,.6); }
+  .fb-modal-box h3 { margin: 0 0 4px; font-size: 15px; color: var(--text); }
+  .fb-modal-sub { font-size: 12.5px; color: var(--text-muted); margin-bottom: 16px; word-break: break-all; }
+  .fb-modal-field { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px; }
+  .fb-modal-field select, .fb-modal-field input { width: 100%; box-sizing: border-box; margin-top: 5px;
+    background: var(--input-bg, #27272a); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 9px; font: inherit; }
+  .fb-modal-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px; cursor: pointer; }
+  .fb-modal-error { color: #fca5a5; font-size: 12.5px; min-height: 16px; margin-bottom: 10px; word-break: break-all; }
+  .fb-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+
+<header class="page-header fb-head">
+  <div>
+    <h1>{{ host.name }}</h1>
+    <div class="subtitle">
+      <code>{{ host.hostname }}:{{ host.ft_port or host.port }}</code> ·
+      <span class="fb-proto" data-p="{{ host.ft_method }}">{{ host.ft_method }}</span>
+      file browser
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/hosts/{{ host.id }}">Back to host</a>
+  </div>
+</header>
+
+<section class="card">
+  <div class="badge badge-red fb-error" id="fb-error"></div>
+
+  <nav class="fb-rail" id="fb-rail" aria-label="Path"></nav>
+
+  <div class="fb-toolbar">
+    <button class="btn btn-subtle fb-icon-btn" id="fb-up" type="button" title="Parent directory">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      Up
+    </button>
+    <button class="btn btn-subtle fb-icon-btn" id="fb-refresh" type="button" title="Refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
+      Refresh
+    </button>
+    <div class="spacer"></div>
+    <button class="btn btn-subtle fb-icon-btn" id="fb-mkdir" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v4M10 13h4"/></svg>
+      New folder
+    </button>
+    <button class="btn fb-icon-btn" id="fb-upload-btn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 20h14"/></svg>
+      Upload
+    </button>
+    <input type="file" id="fb-file-input" multiple style="display:none" />
+  </div>
+
+  <div class="fb-zone" id="fb-zone">
+    <div id="fb-body"></div>
+  </div>
+</section>
+
+<div id="fb-copy-modal" class="fb-modal" style="display:none">
+  <div class="fb-modal-box">
+    <h3>Copy to another host</h3>
+    <div class="fb-modal-sub" id="fb-copy-sub"></div>
+    <label class="fb-modal-field">Destination host
+      <select id="fb-copy-host"></select>
+    </label>
+    <label class="fb-modal-field">Destination folder (optional)
+      <input type="text" id="fb-copy-dir" placeholder="(login home directory)" />
+    </label>
+    <label class="fb-modal-check">
+      <input type="checkbox" id="fb-copy-move" /> Remove original after copy (move)
+    </label>
+    <div class="fb-modal-error" id="fb-copy-error"></div>
+    <div class="fb-modal-actions">
+      <button class="btn btn-ghost" id="fb-copy-cancel" type="button">Cancel</button>
+      <button class="btn" id="fb-copy-go" type="button">Copy</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const HOST_ID = {{ host.id }};
+  const base = `/files/${HOST_ID}`;
+
+  let state = { path: "", entries: [], loading: false };
+
+  const $ = (id) => document.getElementById(id);
+  const errBox = $("fb-error");
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  function join(cur, name) { cur = (cur || "").replace(/^\/+|\/+$/g, ""); return cur ? `${cur}/${name}` : name; }
+  function parent(p) { p = (p || "").replace(/\/+$/, ""); const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
+
+  function humanSize(n) {
+    if (n === null || n === undefined) return "";
+    const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0, v = n;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+  }
+  function fmtTime(raw) {
+    if (!raw) return "";
+    const s = String(raw);
+    // MLSD facts: YYYYMMDDHHMMSS
+    if (/^\d{14}$/.test(s)) {
+      const d = new Date(Date.UTC(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8), +s.slice(8,10), +s.slice(10,12), +s.slice(12,14)));
+      return iso(d);
+    }
+    // SFTP mtime: epoch seconds
+    if (/^\d{6,12}$/.test(s)) { const d = new Date(+s * 1000); if (!isNaN(d)) return iso(d); }
+    return s;
+  }
+  function iso(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function esc(s) { const e = document.createElement("div"); e.textContent = s; return e.innerHTML; }
+
+  function showError(msg) { errBox.textContent = msg; errBox.style.display = "block"; }
+  function clearError() { errBox.style.display = "none"; }
+  function toast(msg) {
+    const t = document.createElement("div"); t.className = "fb-toast"; t.textContent = msg;
+    document.body.appendChild(t); setTimeout(() => t.remove(), 4500);
+  }
+
+  // ── breadcrumb ─────────────────────────────────────────────────────────────
+  function renderRail() {
+    const rail = $("fb-rail");
+    const segs = state.path ? state.path.split("/").filter(Boolean) : [];
+    let html = `<button class="fb-crumb ${segs.length ? "" : "cur"}" data-go="">~ home</button>`;
+    let acc = "";
+    segs.forEach((seg, i) => {
+      acc = acc ? `${acc}/${seg}` : seg;
+      const cur = i === segs.length - 1;
+      html += `<span class="fb-sep">/</span><button class="fb-crumb ${cur ? "cur" : ""}" data-go="${esc(acc)}">${esc(seg)}</button>`;
+    });
+    rail.innerHTML = html;
+    rail.querySelectorAll(".fb-crumb").forEach(b => {
+      b.onclick = () => { if (!b.classList.contains("cur")) navigate(b.dataset.go); };
+    });
+  }
+
+  // ── listing ────────────────────────────────────────────────────────────────
+  async function load() {
+    state.loading = true;
+    renderRail();
+    $("fb-body").innerHTML = `<div class="fb-state"><span class="fb-spin"></span>Listing…</div>`;
+    clearError();
+    try {
+      const res = await fetch(`${base}/list?path=${encodeURIComponent(state.path)}`);
+      const d = await res.json();
+      if (!res.ok) { showError(d.error || `List failed (${res.status})`); renderEmpty("Could not list this directory."); return; }
+      state.entries = d.entries;
+      renderTable();
+    } catch (e) {
+      showError(`Request failed: ${e}`); renderEmpty("Connection error.");
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  function navigate(path) { state.path = path; load(); }
+
+  function renderEmpty(msg) {
+    $("fb-body").innerHTML = `<div class="fb-state"><div class="big">∅</div>${esc(msg)}</div>`;
+  }
+
+  function renderTable() {
+    if (!state.entries.length) {
+      $("fb-body").innerHTML = `<div class="fb-state"><div class="big">⌀</div>This folder is empty.</div>`;
+      return;
+    }
+    const rows = state.entries.map((e, i) => {
+      const icon = e.is_dir
+        ? `<svg class="ico-dir" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
+        : `<svg class="ico-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M15 3v4h4"/></svg>`;
+      const dl = e.is_dir ? "" :
+        `<button class="fb-act" title="Download" data-act="download" data-i="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/></svg></button>`;
+      const cp = e.is_dir ? "" :
+        `<button class="fb-act" title="Copy / move to another host" data-act="copy" data-i="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16V5a2 2 0 0 1 2-2h9"/><rect x="8" y="7" width="12" height="14" rx="2"/></svg></button>`;
+      return `<tr class="${e.is_dir ? "fb-dir" : "fb-file"}" style="animation-delay:${Math.min(i, 18) * 14}ms" data-i="${i}">
+        <td><span class="fb-name">${icon}<span class="nm" ${e.is_dir ? `data-act="open" data-i="${i}" role="link" tabindex="0"` : ""}>${esc(e.name)}</span></span></td>
+        <td class="num">${e.is_dir ? "" : esc(humanSize(e.size))}</td>
+        <td><span class="fb-mtime">${esc(fmtTime(e.modify))}</span></td>
+        <td class="act"><span class="fb-rowact">
+          ${dl}
+          ${cp}
+          <button class="fb-act" title="Rename" data-act="rename" data-i="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+          <button class="fb-act danger" title="Delete" data-act="delete" data-i="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+        </span></td>
+      </tr>`;
+    }).join("");
+    $("fb-body").innerHTML = `<table class="fb">
+      <thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th><th class="act"></th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+
+    $("fb-body").querySelectorAll("[data-act]").forEach(el => {
+      const i = +el.dataset.i, e = state.entries[i];
+      const act = el.dataset.act;
+      if (act === "open") { el.onclick = () => navigate(join(state.path, e.name)); el.onkeydown = (ev) => { if (ev.key === "Enter") navigate(join(state.path, e.name)); }; }
+      if (act === "download") el.onclick = () => { window.location = `${base}/download?path=${encodeURIComponent(join(state.path, e.name))}`; };
+      if (act === "copy") el.onclick = () => openCopy(e);
+      if (act === "delete") el.onclick = () => doDelete(e);
+      if (act === "rename") el.onclick = () => beginRename(el, e);
+    });
+  }
+
+  // ── mutations ────────────────────────────────────────────────────────────
+  async function post(path, form) {
+    const res = await fetch(`${base}/${path}`, { method: "POST", body: form });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || `${path} failed (${res.status})`);
+    return d;
+  }
+
+  async function doDelete(e) {
+    if (!confirm(`Delete ${e.is_dir ? "folder" : "file"} "${e.name}"?${e.is_dir ? " It must be empty." : ""}`)) return;
+    const f = new FormData(); f.set("path", join(state.path, e.name)); if (e.is_dir) f.set("is_dir", "1");
+    try { await post("delete", f); toast(`Deleted ${e.name}`); load(); }
+    catch (err) { showError(String(err.message)); }
+  }
+
+  function beginRename(btn, e) {
+    const cell = btn.closest("tr").querySelector(".fb-name .nm");
+    const old = e.name;
+    cell.innerHTML = `<input class="fb-rename-input" value="${esc(old)}" />`;
+    const inp = cell.querySelector("input");
+    inp.focus(); inp.select();
+    const commit = async () => {
+      const next = inp.value.trim();
+      if (!next || next === old) { renderTable(); return; }
+      const f = new FormData(); f.set("path", state.path); f.set("src", old); f.set("dst", next);
+      try { await post("rename", f); toast(`Renamed to ${next}`); load(); }
+      catch (err) { showError(String(err.message)); renderTable(); }
+    };
+    inp.onkeydown = (ev) => { if (ev.key === "Enter") commit(); if (ev.key === "Escape") renderTable(); };
+    inp.onblur = commit;
+  }
+
+  async function doMkdir() {
+    const name = prompt("New folder name:");
+    if (!name || !name.trim()) return;
+    const f = new FormData(); f.set("path", state.path); f.set("name", name.trim());
+    try { await post("mkdir", f); toast(`Created ${name.trim()}`); load(); }
+    catch (err) { showError(String(err.message)); }
+  }
+
+  async function uploadFiles(files) {
+    for (const file of files) {
+      const f = new FormData(); f.set("path", state.path); f.set("file", file);
+      try { const d = await post("upload", f); toast(`Uploaded ${file.name} (${humanSize(d.bytes)})`); }
+      catch (err) { showError(`${file.name}: ${err.message}`); }
+    }
+    load();
+  }
+
+  // ── copy / move to another host ────────────────────────────────────────────
+  const copyModal = $("fb-copy-modal");
+  let copySrc = null;
+
+  async function openCopy(e) {
+    copySrc = e;
+    $("fb-copy-sub").textContent = `${e.name}  →  another host`;
+    $("fb-copy-error").textContent = "";
+    $("fb-copy-dir").value = "";
+    $("fb-copy-move").checked = false;
+    const go = $("fb-copy-go");
+    go.textContent = "Copy";
+    go.disabled = true;
+    const sel = $("fb-copy-host");
+    sel.innerHTML = `<option value="">Loading…</option>`;
+    copyModal.style.display = "";
+    try {
+      const d = await (await fetch(`${base}/targets`)).json();
+      if (!d.targets || !d.targets.length) {
+        sel.innerHTML = `<option value="">(no other file-transfer hosts)</option>`;
+        return;
+      }
+      sel.innerHTML = d.targets
+        .map(t => `<option value="${t.id}">${esc(t.name)} (${t.method})</option>`).join("");
+      go.disabled = false;
+    } catch {
+      sel.innerHTML = `<option value="">(failed to load hosts)</option>`;
+    }
+  }
+
+  function closeCopy() { copyModal.style.display = "none"; copySrc = null; }
+  $("fb-copy-cancel").onclick = closeCopy;
+  copyModal.addEventListener("click", (ev) => { if (ev.target === copyModal) closeCopy(); });
+  $("fb-copy-move").onchange = (ev) => { $("fb-copy-go").textContent = ev.target.checked ? "Move" : "Copy"; };
+  $("fb-copy-go").onclick = async () => {
+    const dstHost = $("fb-copy-host").value;
+    if (!copySrc || !dstHost) return;
+    const srcName = copySrc.name;
+    const isMove = $("fb-copy-move").checked;
+    const f = new FormData();
+    f.set("src", join(state.path, srcName));
+    f.set("dst_host_id", dstHost);
+    f.set("dst_dir", $("fb-copy-dir").value.trim());
+    if (isMove) f.set("move", "1");
+    const go = $("fb-copy-go");
+    go.disabled = true; go.textContent = isMove ? "Moving…" : "Copying…";
+    $("fb-copy-error").textContent = "";
+    try {
+      const d = await post("copy", f);
+      closeCopy();
+      toast(`${isMove ? "Moved" : "Copied"} ${srcName} → ${d.dst_host} (${humanSize(d.bytes)})`);
+      if (isMove) load();  // source removed — refresh listing
+    } catch (err) {
+      $("fb-copy-error").textContent = String(err.message);
+      go.disabled = false; go.textContent = isMove ? "Move" : "Copy";
+    }
+  };
+
+  // ── wiring ─────────────────────────────────────────────────────────────────
+  $("fb-up").onclick = () => navigate(parent(state.path));
+  $("fb-refresh").onclick = () => load();
+  $("fb-mkdir").onclick = doMkdir;
+  $("fb-upload-btn").onclick = () => $("fb-file-input").click();
+  $("fb-file-input").onchange = (e) => { if (e.target.files.length) uploadFiles([...e.target.files]); e.target.value = ""; };
+
+  const zone = $("fb-zone");
+  let dragDepth = 0;
+  zone.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; zone.classList.add("drag"); });
+  zone.addEventListener("dragover", (e) => e.preventDefault());
+  zone.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; zone.classList.remove("drag"); } });
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault(); dragDepth = 0; zone.classList.remove("drag");
+    if (e.dataTransfer.files.length) uploadFiles([...e.dataTransfer.files]);
+  });
+
+  load();
+})();
+</script>
+{% endblock %}

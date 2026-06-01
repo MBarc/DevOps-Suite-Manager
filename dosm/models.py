@@ -92,12 +92,28 @@ class Host(Base):
     )
     is_jumpbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source_module: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # File transfer is a capability of the host, separate from its primary
+    # remote-access protocol: an SSH box can also expose SFTP/FTP/FTPS. None =
+    # not configured. ft_credential overrides the host credential when the FTP
+    # login differs from the SSH login; falls back to ``credential``.
+    ft_method: Mapped[str | None] = mapped_column(String(8), nullable=True)  # sftp | ftp | ftps
+    ft_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ft_credential_id: Mapped[int | None] = mapped_column(
+        ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
-    credential: Mapped[Credential | None] = relationship("Credential")
+    credential: Mapped[Credential | None] = relationship(
+        "Credential", foreign_keys=lambda: [Host.credential_id]
+    )
+    ft_credential: Mapped[Credential | None] = relationship(
+        "Credential", foreign_keys=lambda: [Host.ft_credential_id]
+    )
     jump_host: Mapped[Host | None] = relationship(
         "Host", remote_side=lambda: [Host.id], foreign_keys=lambda: [Host.jump_host_id]
     )
@@ -468,6 +484,70 @@ class RecordingSession(Base):
     # active | finalized | aborted
 
 
+# ---- Network tools --------------------------------------------------------
+
+
+class NetworkPort(Base):
+    """Master port library — reusable definitions for network scans."""
+
+    __tablename__ = "network_ports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    port_number: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    protocol: Mapped[str] = mapped_column(String(8), nullable=False, default="tcp")
+    description: Mapped[str] = mapped_column(String(128), nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class NetworkScan(Base):
+    """A saved network connectivity scan job."""
+
+    __tablename__ = "network_scans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    # pending | running | completed | failed
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    # {"sources":[host_id,…],"destinations":[{"type":"inventory"|"adhoc","host_id":int|null,"address":str,"label":str},…],"port_ids":[int,…]}
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    results: Mapped[list[NetworkScanResult]] = relationship(
+        "NetworkScanResult", back_populates="scan", cascade="all, delete-orphan"
+    )
+
+
+class NetworkScanResult(Base):
+    """One source→destination×port check within a NetworkScan."""
+
+    __tablename__ = "network_scan_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scan_id: Mapped[int] = mapped_column(
+        ForeignKey("network_scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    src_host_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hosts.id", ondelete="SET NULL"), nullable=True
+    )
+    src_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    dst_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    dst_address: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False)
+    protocol: Mapped[str] = mapped_column(String(8), nullable=False, default="tcp")
+    reachable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    scan: Mapped[NetworkScan] = relationship("NetworkScan", back_populates="results")
+
+
 __all__ = [
     "Base",
     "User",
@@ -488,6 +568,9 @@ __all__ = [
     "Pipeline",
     "PipelineRun",
     "RecordingSession",
+    "NetworkPort",
+    "NetworkScan",
+    "NetworkScanResult",
 ]
 
 

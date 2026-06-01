@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Port Checker | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Port Checker</h1>
+    <div class="subtitle">Test if a port is reachable from a source host to a destination.</div>
+  </div>
+</header>
+
+<div style="display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start">
+
+  <section class="card">
+    <h3 style="margin:0 0 16px;font-size:15px;font-weight:600">Run a check</h3>
+    <form id="check-form">
+      <div class="form-group">
+        <label>Source host <span class="muted">(checks originate here)</span></label>
+        <select name="source_host_id" required>
+          <option value="">— select source —</option>
+          {% for h in hosts %}
+          <option value="{{ h.id }}">{{ h.name }} ({{ h.hostname }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Destination address</label>
+        <input type="text" name="dst_address" required placeholder="192.168.1.10 or hostname">
+      </div>
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" name="port" min="1" max="65535" required placeholder="e.g. 443">
+      </div>
+      <button class="btn" type="submit" id="check-btn" style="width:100%">Check port</button>
+    </form>
+  </section>
+
+  <section class="card" id="result-panel" style="display:none">
+    <h3 style="margin:0 0 16px;font-size:15px;font-weight:600">Result</h3>
+    <div id="result-body"></div>
+  </section>
+
+</div>
+
+<section class="card" style="margin-top:20px" id="history-panel">
+  <h3 style="margin:0 0 12px;font-size:14px;font-weight:600;color:var(--fg-muted,#a1a1aa)">Check history (this session)</h3>
+  <div id="history-list" style="display:flex;flex-direction:column;gap:8px">
+    <div class="muted" style="font-size:13px">No checks yet.</div>
+  </div>
+</section>
+
+<style>
+.result-ok { display:flex;align-items:center;gap:12px;padding:16px;border-radius:8px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25) }
+.result-fail { display:flex;align-items:center;gap:12px;padding:16px;border-radius:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25) }
+.result-icon { font-size:28px;flex-shrink:0 }
+.result-detail { font-size:13px;color:var(--fg-muted,#a1a1aa);margin-top:4px }
+.hist-row { display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:6px;background:var(--surface-raised,rgba(255,255,255,.04));font-size:13px }
+.hist-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0 }
+.hist-dot.ok { background:#22c55e }
+.hist-dot.fail { background:#ef4444 }
+.hist-dot.pending { background:#71717a }
+</style>
+
+<script>
+const history = [];
+
+document.getElementById('check-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('check-btn');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+
+  const form = e.target;
+  const body = new FormData(form);
+
+  const srcSelect = form.querySelector('[name=source_host_id]');
+  const srcLabel = srcSelect.options[srcSelect.selectedIndex]?.text || '?';
+  const dst = form.querySelector('[name=dst_address]').value.trim();
+  const port = form.querySelector('[name=port]').value;
+
+  try {
+    const res = await fetch('/network/port-checker/check', { method: 'POST', body });
+    const data = await res.json();
+    showResult(data, srcLabel);
+    history.unshift({ data, srcLabel, ts: new Date() });
+    renderHistory();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check port';
+  }
+});
+
+function showResult(data, srcLabel) {
+  const panel = document.getElementById('result-panel');
+  const body = document.getElementById('result-body');
+  panel.style.display = '';
+
+  if (data.error) {
+    body.innerHTML = `<div class="result-fail"><div class="result-icon">✗</div><div><strong>Error</strong><div class="result-detail">${esc(data.error)}</div></div></div>`;
+    return;
+  }
+
+  const ok = data.reachable;
+  const cls = ok ? 'result-ok' : 'result-fail';
+  const icon = ok ? '✓' : '✗';
+  const label = ok ? 'Reachable' : 'Unreachable';
+  const latency = data.latency_ms != null ? `${data.latency_ms} ms` : '—';
+  const errLine = data.error_msg ? `<div class="result-detail">Error: ${esc(data.error_msg)}</div>` : '';
+
+  body.innerHTML = `
+    <div class="${cls}">
+      <div class="result-icon" style="color:${ok?'#22c55e':'#ef4444'}">${icon}</div>
+      <div>
+        <strong>${label}</strong>
+        <div class="result-detail">
+          From <code>${esc(srcLabel)}</code> → <code>${esc(data.dst_address)}:${data.port}</code> &nbsp;·&nbsp; Latency: ${latency}
+        </div>
+        ${errLine}
+      </div>
+    </div>`;
+}
+
+function showError(msg) {
+  document.getElementById('result-panel').style.display = '';
+  document.getElementById('result-body').innerHTML =
+    `<div class="result-fail"><div class="result-icon">✗</div><div><strong>Request failed</strong><div class="result-detail">${esc(msg)}</div></div></div>`;
+}
+
+function renderHistory() {
+  const el = document.getElementById('history-list');
+  if (!history.length) { el.innerHTML = '<div class="muted" style="font-size:13px">No checks yet.</div>'; return; }
+  el.innerHTML = history.map(h => {
+    const ok = h.data.reachable;
+    const dotCls = h.data.error ? 'pending' : (ok ? 'ok' : 'fail');
+    const label = h.data.error ? 'error' : (ok ? 'open' : 'closed');
+    const lat = h.data.latency_ms != null ? ` · ${h.data.latency_ms}ms` : '';
+    return `<div class="hist-row">
+      <div class="hist-dot ${dotCls}"></div>
+      <div style="flex:1"><code>${esc(h.srcLabel)}</code> → <code>${esc(h.data.dst_address)}:${h.data.port}</code></div>
+      <div style="color:${ok?'#22c55e':h.data.error?'#a1a1aa':'#ef4444'}">${label}${lat}</div>
+      <div class="muted" style="font-size:11px">${h.ts.toLocaleTimeString()}</div>
+    </div>`;
+  }).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+{% endblock %}

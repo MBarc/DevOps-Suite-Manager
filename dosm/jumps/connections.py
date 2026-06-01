@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from dosm.config import Config
-from dosm.hosts.repo import resolve_jump_chain
 from dosm.models import Credential, Host
 from dosm.secrets import SecretNotFound, get_backend
 
@@ -26,6 +25,7 @@ class HopCreds:
     name: str
     hostname: str
     port: int
+    protocol: str   # "ssh" | "rdp" | "vnc" — drives SSH vs WinRM routing
     username: str
     password: str | None
     private_key: str | None
@@ -52,6 +52,7 @@ def _resolve_creds(cfg: Config, host: Host) -> HopCreds:
         name=host.name,
         hostname=host.hostname,
         port=host.port,
+        protocol=host.protocol,
         username=username,
         password=password,
         private_key=private_key,
@@ -60,6 +61,11 @@ def _resolve_creds(cfg: Config, host: Host) -> HopCreds:
 
 def build_jump_chain(db: Session, cfg: Config, host: Host) -> tuple[list[HopCreds], HopCreds]:
     """Return (jump_hops, target). jump_hops is empty if the target is direct."""
+    # Imported here, not at module top, to break the dosm.jumps ↔ dosm.hosts
+    # import cycle (hosts.routes imports from dosm.jumps). Keeps `import
+    # dosm.jumps` working cold, independent of import order.
+    from dosm.hosts.repo import resolve_jump_chain
+
     chain = resolve_jump_chain(db, host)
     jump_hops = [_resolve_creds(cfg, h) for h in chain]
     target = _resolve_creds(cfg, host)

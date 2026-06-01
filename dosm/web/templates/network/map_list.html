@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Network Map | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Network Map</h1>
+    <div class="subtitle">Batch connectivity scans across your host inventory. Saved and titled for reference.</div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/network/map/new">+ New scan</a>
+  </div>
+</header>
+
+<section class="card">
+  {% if scans %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Status</th>
+        <th>Results</th>
+        <th>Created</th>
+        <th>Last ran</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in scans %}
+      {% set scan = s.scan %}
+      <tr>
+        <td>
+          <a href="/network/map/{{ scan.id }}" style="color:var(--fg-strong);font-weight:500">{{ scan.title }}</a>
+        </td>
+        <td>
+          {% if s.running %}
+            <span class="badge badge-blue">running</span>
+          {% elif scan.status == 'completed' %}
+            <span class="badge badge-green">completed</span>
+          {% elif scan.status == 'failed' %}
+            <span class="badge badge-red">failed</span>
+          {% else %}
+            <span class="badge badge-gray">{{ scan.status }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if s.total %}
+            <span style="color:#22c55e">{{ s.reachable }}</span>
+            <span class="muted">/ {{ s.total }} ports open</span>
+            {% if s.checked < s.total %}
+              <span class="muted" style="font-size:11px">({{ s.checked }}/{{ s.total }} checked)</span>
+            {% endif %}
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="muted" style="font-size:12px">{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td class="muted" style="font-size:12px">
+          {% if scan.completed_at %}{{ scan.completed_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap">
+          <a href="/network/map/{{ scan.id }}" class="btn btn-sm">View</a>
+          <form method="post" action="/network/map/{{ scan.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Delete this scan?')">
+            <button class="btn btn-sm btn-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state">No scans yet. <a href="/network/map/new">Run your first scan</a>.</div>
+  {% endif %}
+</section>
+{% endblock %}

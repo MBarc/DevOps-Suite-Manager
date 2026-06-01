@@ -7,6 +7,7 @@ import time
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,20 +22,43 @@ from dosm.jumps import (
     get_tunnel_manager,
     probe_forward,
 )
-from dosm.models import AuditLog, User
+from dosm.models import AuditLog, NetworkPort, User
 
 PING_TIMEOUT_SECONDS = 5.0
 
 router = APIRouter(prefix="/hosts")
 
 PROTOCOL_DEFAULT_PORTS = {"ssh": 22, "rdp": 3389, "vnc": 5900}
+# Default ports for the file-transfer section (ftps = explicit AUTH TLS on 21).
+FT_DEFAULT_PORTS = {"sftp": 22, "ftp": 21, "ftps": 21}
 
 
 def _templates(request: Request):
     return request.app.state.templates
 
 
+# Standard labels so the suggestions are useful even on a sparsely-seeded
+# Port Library — merged with, and overridden by, the library's own entries.
+# Fallback labels merged with the Port Library (library descriptions win).
+# Implicit FTPS (990) is intentionally omitted — our FTPS is explicit on 21.
+_STANDARD_PORT_LABELS = {
+    22: "SSH / SFTP", 21: "FTP / explicit FTPS", 3389: "RDP", 5900: "VNC",
+}
+
+
+def _port_options(db: Session) -> list[tuple[int, str]]:
+    """Port suggestions for the connection/FT port comboboxes, drawn from the
+    Port Library and merged with the standard defaults. Sorted by port number."""
+    labels = dict(_STANDARD_PORT_LABELS)
+    for p in db.execute(
+        select(NetworkPort).order_by(NetworkPort.port_number)
+    ).scalars():
+        labels[p.port_number] = p.description or labels.get(p.port_number, "")
+    return sorted(labels.items())
+
+
 def _form_context(db: Session, user: User, host=None, error: str | None = None) -> dict:
+    port_opts = _port_options(db)
     return {
         "host": host,
         "credentials": repo.list_credentials(db),
@@ -43,6 +67,10 @@ def _form_context(db: Session, user: User, host=None, error: str | None = None) 
         ),
         "protocols": list(repo.SUPPORTED_PROTOCOLS),
         "default_ports": PROTOCOL_DEFAULT_PORTS,
+        "ft_methods": list(repo.FILE_TRANSFER_METHODS),
+        "ft_default_ports": FT_DEFAULT_PORTS,
+        "port_options": port_opts,
+        "port_numbers": [n for n, _ in port_opts],
         "user": user,
         "error": error,
     }
@@ -63,12 +91,17 @@ async def hosts_list(
     jump_candidates = repo.list_jump_candidates(db)
     n_servers, n_jumpboxes = repo.count_by_kind(db)
     all_tags = repo.list_tags(db)
+    port_opts = _port_options(db)
     return _templates(request).TemplateResponse(
         request, "hosts/list.html", {
             "hosts": hosts,
             "credentials": credentials,
             "jump_candidates": jump_candidates,
             "protocols": list(repo.SUPPORTED_PROTOCOLS),
+            "ft_methods": list(repo.FILE_TRANSFER_METHODS),
+            "ft_default_ports": FT_DEFAULT_PORTS,
+            "port_options": port_opts,
+            "port_numbers": [n for n, _ in port_opts],
             "kind": kind,
             "tag": tag,
             "all_tags": all_tags,
@@ -142,6 +175,9 @@ async def hosts_create(
     jump_host_id: str = Form(""),
     tags: str = Form(""),
     is_jumpbox: str | None = Form(None),
+    ft_method: str = Form(""),
+    ft_port: str = Form(""),
+    ft_credential_id: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
@@ -159,6 +195,9 @@ async def hosts_create(
             jump_host_id=jump_id,
             tags_csv=tags,
             is_jumpbox=is_jumpbox is not None,
+            ft_method=ft_method or None,
+            ft_port=_parse_int_or_none(ft_port),
+            ft_credential_id=_parse_int_or_none(ft_credential_id),
         )
     except IntegrityError as e:
         db.rollback()
@@ -334,6 +373,9 @@ async def hosts_update(
     jump_host_id: str = Form(""),
     tags: str = Form(""),
     is_jumpbox: str | None = Form(None),
+    ft_method: str = Form(""),
+    ft_port: str = Form(""),
+    ft_credential_id: str = Form(""),
     back: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
@@ -356,6 +398,9 @@ async def hosts_update(
             jump_host_id=jump_id,
             tags_csv=tags,
             is_jumpbox=is_jumpbox is not None,
+            ft_method=ft_method or None,
+            ft_port=_parse_int_or_none(ft_port),
+            ft_credential_id=_parse_int_or_none(ft_credential_id),
         )
     except IntegrityError as e:
         db.rollback()
