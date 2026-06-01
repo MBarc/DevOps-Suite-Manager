@@ -170,6 +170,72 @@
   {% endif %}
 </section>
 
+<!-- ── Vault certificates (cloud sources) ──────────────────────────────────── -->
+<header class="page-header" style="margin-top:36px">
+  <div>
+    <h2 style="margin:0; font-size:18px">Vault certificates</h2>
+    <div class="subtitle">Azure Key Vault · AWS ACM · GCP Certificate Manager</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-subtle" href="/certs/sources">Manage sources</a>
+  </div>
+</header>
+<section class="card" style="padding:0; overflow:hidden">
+  {% if vault_certs %}
+  <div style="overflow-x:auto">
+    <table style="width:100%; border-collapse:collapse; font-size:13px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--divider); text-align:left">
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Status</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Certificate</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Subject</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Issuer</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Expires</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Days</th>
+          <th style="padding:10px 16px; font-weight:600; color:var(--fg-muted)">Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cert in vault_certs %}
+        {% if cert.status == 'expired' %}{% set row_bg='rgba(239,68,68,0.06)' %}{% set bc='#ef4444' %}
+        {% elif cert.status == 'critical' %}{% set row_bg='rgba(249,115,22,0.06)' %}{% set bc='#f97316' %}
+        {% elif cert.status == 'warn' %}{% set row_bg='rgba(234,179,8,0.06)' %}{% set bc='#ca8a04' %}
+        {% else %}{% set row_bg='transparent' %}{% set bc='#16a34a' %}{% endif %}
+        <tr style="border-top:1px solid var(--divider); background:{{ row_bg }}">
+          <td style="padding:10px 16px">
+            <span style="display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; text-transform:uppercase; background:{{ bc }}22; color:{{ bc }}">{{ cert.status }}</span>
+          </td>
+          <td style="padding:10px 16px; max-width:240px">
+            {% if cert.entity_url %}<a href="{{ cert.entity_url }}" target="_blank" rel="noopener" style="color:var(--accent,#6366f1); text-decoration:none">{{ cert.subject_cn }}</a>
+            {% else %}<span style="font-weight:500">{{ cert.subject_cn }}</span>{% endif %}
+          </td>
+          <td style="padding:10px 16px; color:var(--fg-muted)"><span title="{{ cert.subject }}">{{ cert.subject_cn or "—" }}</span></td>
+          <td style="padding:10px 16px; color:var(--fg-muted)"><span title="{{ cert.issuer }}">{{ cert.issuer_cn or "—" }}</span></td>
+          <td style="padding:10px 16px; white-space:nowrap; color:var(--fg-muted)">{{ cert.not_after.strftime('%Y-%m-%d') }}</td>
+          <td style="padding:10px 16px; font-weight:600; white-space:nowrap; color:{{ bc }}">
+            {% if cert.days_remaining < 0 %}{{ cert.days_remaining|abs }}d ago{% else %}{{ cert.days_remaining }}d{% endif %}
+          </td>
+          <td style="padding:10px 16px; white-space:nowrap">
+            <span style="font-size:12px; font-weight:500">{{ cert.source_name }}</span>
+            <span style="font-size:11px; color:var(--fg-muted); margin-left:4px">({{ cert.tool }})</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state" style="padding:40px 24px">
+    {% if vault_source_count %}
+      No certificates returned from your {{ vault_source_count }} enabled cloud source{{ '' if vault_source_count == 1 else 's' }}.
+    {% else %}
+      No cloud certificate sources yet.
+      <a href="/certs/sources">Add a source</a> to track certs in Azure Key Vault, AWS ACM, or GCP Certificate Manager.
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
 <script>
 (function () {
   var filterBtn   = document.getElementById('cert-filter-btn');

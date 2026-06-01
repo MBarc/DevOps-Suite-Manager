@@ -75,6 +75,35 @@ class Credential(Base):
     )
 
 
+class CertSource(Base):
+    """A cloud certificate source — Azure Key Vault / AWS ACM / GCP Certificate
+    Manager (or a mock). Certificates are fetched live + cached, not persisted;
+    this row holds the source's config. Auth is either a credential profile
+    (``auth_mode='profile'`` + ``credential``) or the cloud SDK's ambient
+    identity (``auth_mode='ambient'`` — managed identity / instance role)."""
+
+    __tablename__ = "cert_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Non-secret provider config as JSON: vault_url / region / project+location.
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    auth_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="profile")
+    credential_id: Mapped[int | None] = mapped_column(
+        ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    credential: Mapped[Credential | None] = relationship(
+        "Credential", foreign_keys=lambda: [CertSource.credential_id]
+    )
+
+
 class Host(Base):
     __tablename__ = "hosts"
 
@@ -510,7 +539,9 @@ class NetworkScan(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     # pending | running | completed | failed
     config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    # {"sources":[host_id,…],"destinations":[{"type":"inventory"|"adhoc","host_id":int|null,"address":str,"label":str},…],"port_ids":[int,…]}
+    # config_json shape: {"sources":[host_id,…], "destinations":[{"type":
+    #   "inventory"|"adhoc","host_id":int|null,"address":str,"label":str},…],
+    #   "port_ids":[int,…]}
     created_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

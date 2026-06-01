@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-from collections import defaultdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -554,7 +553,10 @@ async def map_export_csv(
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["source", "destination", "dst_address", "port", "port_description", "protocol", "reachable", "latency_ms", "error"])
+    writer.writerow([
+        "source", "destination", "dst_address", "port", "port_description",
+        "protocol", "reachable", "latency_ms", "error",
+    ])
     for r in results:
         writer.writerow([r.src_label, r.dst_label, r.dst_address, r.port,
                          port_desc.get(r.port, ""), r.protocol,

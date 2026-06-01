@@ -50,6 +50,11 @@ dev = [
     "pyftpdlib>=1.5",
     "pyopenssl>=24.0",
 ]
+# Cloud certificate sources (Phase 19) — opt-in, lazily imported. Install only
+# the cloud(s) you track certs in, e.g. pip install 'dosm[azure]'.
+azure = ["azure-identity>=1.16", "azure-keyvault-certificates>=4.8"]
+aws = ["boto3>=1.34"]
+gcp = ["google-cloud-certificate-manager>=1.7"]
 
 [project.scripts]
 dosm = "dosm.cli:app"

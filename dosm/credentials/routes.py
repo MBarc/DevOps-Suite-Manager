@@ -16,12 +16,15 @@ from dosm.secrets import SecretNotFound, get_backend
 
 router = APIRouter(prefix="/credentials")
 
-CRED_KINDS = ("login", "ssh_key", "pat")
+CRED_KINDS = ("login", "ssh_key", "pat", "azure_sp", "aws_keys", "gcp_sa")
 
 KIND_LABELS = {
     "login": "Login (username + password)",
     "ssh_key": "SSH Key",
     "pat": "Personal Access Token (PAT)",
+    "azure_sp": "Azure service principal",
+    "aws_keys": "AWS access keys",
+    "gcp_sa": "GCP service account",
 }
 
 

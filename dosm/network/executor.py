@@ -247,7 +247,7 @@ async def _ssh_check_one(conn, dst_address: str, port: int) -> tuple[bool, int |
                 latency = wall_ms
             return True, latency, None
         return False, None, None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return False, None, timeout_msg
     except Exception as exc:
         return False, None, f"{err_prefix}: {type(exc).__name__}: {str(exc)[:120]}"
@@ -486,7 +486,7 @@ def _local_tcp_check_sync(dst_address: str, port: int) -> tuple[bool, int | None
         with socket.create_connection((dst_address, port), timeout=_CHECK_TIMEOUT):
             latency_ms = int((time.monotonic() - start) * 1000)
             return True, latency_ms, None
-    except socket.timeout:
+    except TimeoutError:
         return False, None, f"connection to {dst_address}:{port} timed out"
     except ConnectionRefusedError:
         return False, None, None
@@ -607,12 +607,10 @@ async def _quick_check_windows(
             "or enable OpenSSH on the Windows jump box and set its protocol to 'ssh'."
         )
 
-    # All jump hops are SSH (Linux) → forward WinRM port through the tunnel
-    from dosm.jumps import get_tunnel_manager
-    tunnel_manager = get_tunnel_manager()
-    # JumpTunnelManager.acquire needs a DB session + Host object;
-    # caller (scanner) handles this path directly for bulk scans.
-    # For the quick_check single-shot path, fall back to a clear message.
+    # All jump hops are SSH (Linux) → would forward the WinRM port through the
+    # tunnel, but JumpTunnelManager.acquire needs a DB session + Host object;
+    # the scanner handles that path directly for bulk scans. For the
+    # quick_check single-shot path, fall back to a clear message.
     return False, None, (
         "Port Checker for a Windows source behind a Linux jump box requires "
         "the scanner path (use Network Map instead of Port Checker for this host)."

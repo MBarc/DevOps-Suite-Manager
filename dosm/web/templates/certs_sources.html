@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Certificate Sources | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Certificate Sources</h1>
+    <div class="subtitle">Cloud vaults DOSM reads certificates from — Azure Key Vault, AWS ACM, GCP Certificate Manager.</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/certs">Back to certificates</a>
+  </div>
+</header>
+
+<section class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0; font-size:15px">Add a source</h2>
+  <form method="post" action="/certs/sources/new" class="stack" id="src-form">
+    <div class="row">
+      <label style="flex:1">Name
+        <input type="text" name="name" required placeholder="prod-keyvault" />
+      </label>
+      <label style="width:220px">Provider
+        <select name="provider" id="provider-select">
+          {% for key, label in providers.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <!-- Provider-specific config (shown by JS per provider) -->
+    <div class="prov prov-azure_kv" style="display:none">
+      <label>Key Vault URL
+        <input type="text" name="vault_url" placeholder="https://my-vault.vault.azure.net/" />
+      </label>
+    </div>
+    <div class="prov prov-aws_acm" style="display:none">
+      <label>Region
+        <input type="text" name="region" placeholder="us-east-1" />
+      </label>
+    </div>
+    <div class="prov prov-gcp_certmgr" style="display:none">
+      <div class="row">
+        <label style="flex:1">Project
+          <input type="text" name="project" placeholder="my-gcp-project" />
+        </label>
+        <label style="flex:1">Location
+          <input type="text" name="location" placeholder="global" />
+        </label>
+      </div>
+    </div>
+
+    <div class="row" id="auth-row" style="display:none; align-items:flex-start">
+      <label style="width:240px">Authentication
+        <select name="auth_mode" id="auth-mode">
+          <option value="profile">Credential profile</option>
+          <option value="ambient">Ambient identity (managed identity / instance role)</option>
+        </select>
+      </label>
+      <label style="flex:1" id="cred-row">Credential profile
+        <select name="credential_id">
+          <option value="">(none)</option>
+          {% for c in credentials %}
+          <option value="{{ c.id }}">{{ c.name }} ({{ c.kind }})</option>
+          {% endfor %}
+        </select>
+        <span class="field-hint">Use an Azure service principal / AWS access keys / GCP service-account profile. <a href="/credentials">Manage profiles →</a></span>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:var(--sp-2)">
+      <button type="submit">Add source</button>
+    </div>
+  </form>
+</section>
+
+<section class="card" style="padding:0; overflow:hidden">
+  {% if sources %}
+  <table style="width:100%; border-collapse:collapse; font-size:13px">
+    <thead>
+      <tr style="border-bottom:1px solid var(--divider); text-align:left">
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Name</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Provider</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Auth</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Enabled</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600; text-align:right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sources %}
+      <tr style="border-top:1px solid var(--divider)">
+        <td style="padding:10px 16px; font-weight:500">{{ s.name }}</td>
+        <td style="padding:10px 16px"><code>{{ providers.get(s.provider, s.provider) }}</code></td>
+        <td style="padding:10px 16px; color:var(--fg-muted)">{{ s.auth_mode }}{% if s.credential %} · {{ s.credential.name }}{% endif %}</td>
+        <td style="padding:10px 16px">
+          {% if s.enabled %}<span style="color:var(--success,#16a34a)">●</span> on{% else %}<span style="color:var(--fg-dim)">○</span> off{% endif %}
+        </td>
+        <td style="padding:10px 16px; text-align:right; white-space:nowrap">
+          <button type="button" class="btn btn-ghost btn-sm test-btn" data-id="{{ s.id }}">Test</button>
+          <form method="post" action="/certs/sources/{{ s.id }}/toggle" style="display:inline">
+            <button type="submit" class="btn btn-ghost btn-sm">{{ 'Disable' if s.enabled else 'Enable' }}</button>
+          </form>
+          <form method="post" action="/certs/sources/{{ s.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Delete source {{ s.name }}?')">
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
+          </form>
+          <span class="test-result" data-id="{{ s.id }}" style="font-size:12px; margin-left:8px"></span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state" style="padding:40px 24px">No certificate sources yet. Add one above.</div>
+  {% endif %}
+</section>
+
+<script>
+(function () {
+  // Show only the selected provider's config fields + the auth row.
+  var sel = document.getElementById('provider-select');
+  var authRow = document.getElementById('auth-row');
+  function syncProvider() {
+    var p = sel.value;
+    document.querySelectorAll('.prov').forEach(function (el) {
+      el.style.display = el.classList.contains('prov-' + p) ? '' : 'none';
+    });
+    authRow.style.display = '';  // restore .row (side-by-side, top-aligned)
+  }
+  sel.addEventListener('change', syncProvider);
+  syncProvider();
+
+  // Credential dropdown only relevant in 'profile' auth mode.
+  var authMode = document.getElementById('auth-mode');
+  var credRow = document.getElementById('cred-row');
+  function syncAuth() { if (credRow) credRow.style.display = authMode.value === 'profile' ? '' : 'none'; }
+  authMode.addEventListener('change', syncAuth);
+  syncAuth();
+
+  // Inline connection test.
+  document.querySelectorAll('.test-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      var id = btn.dataset.id;
+      var out = document.querySelector('.test-result[data-id="' + id + '"]');
+      out.textContent = 'Testing…'; out.style.color = 'var(--fg-muted)';
+      try {
+        var res = await fetch('/certs/sources/' + id + '/test', {method: 'POST'});
+        var d = await res.json();
+        out.textContent = (d.ok ? '✓ ' : '✗ ') + d.message;
+        out.style.color = d.ok ? 'var(--success,#16a34a)' : 'var(--danger,#ef4444)';
+      } catch (e) {
+        out.textContent = '✗ ' + e; out.style.color = 'var(--danger,#ef4444)';
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}
