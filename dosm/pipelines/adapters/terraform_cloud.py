@@ -3,7 +3,7 @@
 Creates a run via POST /api/v2/runs (JSON:API format) and polls
 GET /api/v2/runs/{id} for status.
 
-Auth: bearer token (TFC/TFE → User Settings → Tokens, or a team token).
+Auth: bearer token (TFC/TFE to User Settings to Tokens, or a team token).
 Config keys: base_url, workspace_id, auto_apply, is_destroy, message.
 Note: TFC variables live on the workspace, not on the run — trigger-time
 inputs are not forwarded. Configure workspace variables in TFC itself.
@@ -66,7 +66,7 @@ class TerraformCloudAdapter(PipelineAdapter):
     provider = "terraform_cloud"
     display_name = "Terraform Cloud"
     credential_hint = (
-        "API token — TFC/TFE → User Settings → Tokens, or a team/org token."
+        "API token — TFC/TFE to User Settings to Tokens, or a team/org token."
     )
 
     DEFAULT_BASE = "https://app.terraform.io"

@@ -28,8 +28,8 @@ from dosm.network.executor import (
 log = logging.getLogger(__name__)
 
 _active_tasks: dict[int, asyncio.Task] = {}
-_active_sources: dict[int, set[str]] = {}   # scan_id → source names currently in flight
-_last_check: dict[int, str] = {}            # scan_id → most recent "src → dst:port ✓/✗"
+_active_sources: dict[int, set[str]] = {}   # scan_id to source names currently in flight
+_last_check: dict[int, str] = {}            # scan_id to most recent "src to dst:port ✓/✗"
 
 
 def get_scan_activity(scan_id: int) -> dict:
@@ -114,7 +114,7 @@ async def _check_local_source(scan_id: int, result_ids: list[int]) -> None:
     """Run checks directly from the DOSM process — no credentials needed."""
     source_name = "DOSM Server"
     _active_sources.setdefault(scan_id, set()).add(source_name)
-    _last_check[scan_id] = "DOSM Server → checking…"
+    _last_check[scan_id] = "DOSM Server to checking…"
     try:
         check_params: list[tuple[int, str, int]] = []
         with session_scope() as db:
@@ -143,7 +143,7 @@ async def _check_local_source(scan_id: int, result_ids: list[int]) -> None:
                     r.checked_at = datetime.now(UTC)
                     icon = "✓" if reachable else ("✗" if reachable is False else "?")
                     _last_check[scan_id] = (
-                        f"{source_name} → {r.dst_label or addr}:{port} {icon}"
+                        f"{source_name} to {r.dst_label or addr}:{port} {icon}"
                     )
 
         raw_results = await local_group_check(checks, on_result=commit_result)
@@ -163,7 +163,7 @@ async def _check_local_source(scan_id: int, result_ids: list[int]) -> None:
                     r.checked_at = now
                     icon = "✓" if reachable else ("✗" if reachable is False else "?")
                     _last_check[scan_id] = (
-                        f"{source_name} → {r.dst_label or addr}:{port} {icon}"
+                        f"{source_name} to {r.dst_label or addr}:{port} {icon}"
                     )
     finally:
         _active_sources.get(scan_id, set()).discard(source_name)
@@ -191,7 +191,7 @@ async def _check_source(scan_id: int, src_host_id: int, result_ids: list[int], c
                 return
 
     _active_sources.setdefault(scan_id, set()).add(source_name)
-    _last_check[scan_id] = f"{source_name} → {'checking' if is_local else 'connecting'}…"
+    _last_check[scan_id] = f"{source_name} to {'checking' if is_local else 'connecting'}…"
     try:
         # Load the check parameters for each result
         check_params: list[tuple[int, str, int]] = []
@@ -222,7 +222,7 @@ async def _check_source(scan_id: int, src_host_id: int, result_ids: list[int], c
                     r.checked_at = datetime.now(UTC)
                     icon = "✓" if reachable else ("✗" if reachable is False else "?")
                     _last_check[scan_id] = (
-                        f"{source_name} → {r.dst_label or addr}:{port} {icon}"
+                        f"{source_name} to {r.dst_label or addr}:{port} {icon}"
                     )
 
         async def commit_result(
@@ -261,7 +261,7 @@ async def _check_source(scan_id: int, src_host_id: int, result_ids: list[int], c
                     r.checked_at = now
                     icon = "✓" if reachable else ("✗" if reachable is False else "?")
                     _last_check[scan_id] = (
-                        f"{source_name} → {r.dst_label or addr}:{port} {icon}"
+                        f"{source_name} to {r.dst_label or addr}:{port} {icon}"
                     )
     finally:
         _active_sources.get(scan_id, set()).discard(source_name)
@@ -278,10 +278,10 @@ async def _check_windows_source(
 ) -> list[tuple[bool, int | None, str | None]]:
     """Route a Windows source check through the appropriate jump path.
 
-    No hops        → direct WinRM to target
-    Last hop = rdp → Windows jump box via Invoke-Command + CredSSP
-    All hops = ssh → Linux jump(s): forward WinRM port via JumpTunnelManager
-    Mixed chain    → unsupported, clear error
+    No hops to direct WinRM to target
+    Last hop = rdp to Windows jump box via Invoke-Command + CredSSP
+    All hops = ssh to Linux jump(s): forward WinRM port via JumpTunnelManager
+    Mixed chain to unsupported, clear error
     """
     if target.password is None:
         err = "WinRM requires a password credential (SSH key not supported for Windows)"
@@ -302,7 +302,7 @@ async def _check_windows_source(
     last_hop = jump_hops[-1]
 
     if last_hop.protocol == "rdp":
-        # Windows jump → Windows source via Invoke-Command + CredSSP
+        # Windows jump to Windows source via Invoke-Command + CredSSP
         if last_hop.password is None:
             return [(False, None,
                 f"Windows jump box {last_hop.name!r} requires a password credential for WinRM"
@@ -326,7 +326,7 @@ async def _check_windows_source(
             "Windows jump box and set its protocol to 'ssh'."
         )] * len(checks)
 
-    # All jump hops are SSH (Linux) → forward WinRM port through the tunnel
+    # All jump hops are SSH (Linux) to forward WinRM port through the tunnel
     from dosm.jumps import get_tunnel_manager
     tunnel_manager = get_tunnel_manager()
 

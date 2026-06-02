@@ -67,7 +67,7 @@ async def _poll_one(cfg: Config, run_id: int) -> bool:
                     actor_id=None,
                     action="pipeline.run.status",
                     target=f"pipeline_run:{run.id}",
-                    details=f"{old_status}→{run.status}",
+                    details=f"{old_status} to {run.status}",
                 )
             )
             if run.triggered_by_user_id and pipeline:

@@ -4,16 +4,16 @@ Linux sources: SSH in (jump-chain aware), run bash /dev/tcp or nc.
 Windows sources: WinRM, run Test-NetConnection via PowerShell.
 
 Jump box routing:
-  Linux jump → Linux source  : SSH chain (asyncssh tunnel)
-  Linux jump → Windows source: caller forwards WinRM port via JumpTunnelManager,
+  Linux jump to Linux source  : SSH chain (asyncssh tunnel)
+  Linux jump to Windows source: caller forwards WinRM port via JumpTunnelManager,
                                then calls winrm_group_check_sync with the local port
-  Windows jump → Windows src : winrm_invoke_group_check_sync (Invoke-Command)
-  Windows jump → Linux source: unsupported — Windows has no native SSH client by
+  Windows jump to Windows src : winrm_invoke_group_check_sync (Invoke-Command)
+  Windows jump to Linux source: unsupported — Windows has no native SSH client by
                                default; enable OpenSSH on the jump box and set its
                                protocol to 'ssh' in the inventory
 
 Error messages name which hop failed and why, so the operator immediately knows
-whether the problem is DOSM→jumpbox, jumpbox→target, or credentials.
+whether the problem is DOSM to jumpbox, jumpbox to target, or credentials.
 """
 from __future__ import annotations
 
@@ -143,7 +143,7 @@ async def _connect_tracked(jump_hops: list[HopCreds], target: HopCreds) -> objec
     """Connect through the SSH jump chain with per-hop error context.
 
     Raises _HopConnectError with a message that names exactly which hop failed
-    and why — distinguishing DOSM→jumpbox failures from jumpbox→target failures.
+    and why — distinguishing DOSM to jumpbox failures from jumpbox to target failures.
 
     A Windows hop (protocol='rdp') in the SSH chain raises immediately with a
     clear message directing the operator to enable OpenSSH on that host.
@@ -299,7 +299,7 @@ def winrm_group_check_sync(
     """Run Test-NetConnection checks from a Windows source via WinRM.
 
     winrm_port can be overridden when the caller has forwarded WinRM through
-    an SSH tunnel (e.g. Linux jump box → Windows source).
+    an SSH tunnel (e.g. Linux jump box to Windows source).
     """
     try:
         import winrm  # type: ignore
@@ -358,7 +358,7 @@ def winrm_group_check_sync(
     return results
 
 
-# ── WinRM Invoke-Command check (Windows jump box → Windows source) ────────────
+# ── WinRM Invoke-Command check (Windows jump box to Windows source) ────────────
 
 def winrm_invoke_group_check_sync(
     jump_hostname: str,
@@ -586,7 +586,7 @@ async def _quick_check_windows(
     last_hop = jump_hops[-1]
 
     if last_hop.protocol == "rdp":
-        # Windows jump box → Windows source: use Invoke-Command
+        # Windows jump box to Windows source: use Invoke-Command
         if last_hop.password is None:
             return False, None, (
                 f"Windows jump box {last_hop.name!r} requires a password credential for WinRM"
@@ -607,7 +607,7 @@ async def _quick_check_windows(
             "or enable OpenSSH on the Windows jump box and set its protocol to 'ssh'."
         )
 
-    # All jump hops are SSH (Linux) → would forward the WinRM port through the
+    # All jump hops are SSH (Linux) to would forward the WinRM port through the
     # tunnel, but JumpTunnelManager.acquire needs a DB session + Host object;
     # the scanner handles that path directly for bulk scans. For the
     # quick_check single-shot path, fall back to a clear message.

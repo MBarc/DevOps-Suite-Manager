@@ -32,7 +32,7 @@
       {% if jump_chain %}
         {% for j in jump_chain %}
           <a href="/hosts/{{ j.id }}"><code>{{ j.name }}</code></a>
-          <span class="muted">→</span>
+          <span class="muted">to</span>
         {% endfor %}
         <code>{{ host.name }}</code>
         <div class="muted" style="font-size:12px; margin-top:2px">

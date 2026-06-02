@@ -120,7 +120,7 @@ class JumpTunnelManager:
         self._jumps: dict[tuple[int, ...], _JumpEntry] = {}
         # Browser-session registry: maps an opaque session id to the lease
         # held for that connect call. Released on explicit disconnect (e.g.
-        # tab close → pagehide beacon) or by the TTL backstop task.
+        # tab close to pagehide beacon) or by the TTL backstop task.
         self._sessions: dict[str, TunnelLease] = {}
 
     async def acquire(

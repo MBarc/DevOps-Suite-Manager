@@ -49,6 +49,7 @@
 </section>
 
 <style>
+.form-group { margin-bottom:14px; }
 .result-ok { display:flex;align-items:center;gap:12px;padding:16px;border-radius:8px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25) }
 .result-fail { display:flex;align-items:center;gap:12px;padding:16px;border-radius:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25) }
 .result-icon { font-size:28px;flex-shrink:0 }
@@ -114,7 +115,7 @@ function showResult(data, srcLabel) {
       <div>
         <strong>${label}</strong>
         <div class="result-detail">
-          From <code>${esc(srcLabel)}</code> → <code>${esc(data.dst_address)}:${data.port}</code> &nbsp;·&nbsp; Latency: ${latency}
+          From <code>${esc(srcLabel)}</code> to <code>${esc(data.dst_address)}:${data.port}</code> &nbsp;·&nbsp; Latency: ${latency}
         </div>
         ${errLine}
       </div>
@@ -137,7 +138,7 @@ function renderHistory() {
     const lat = h.data.latency_ms != null ? ` · ${h.data.latency_ms}ms` : '';
     return `<div class="hist-row">
       <div class="hist-dot ${dotCls}"></div>
-      <div style="flex:1"><code>${esc(h.srcLabel)}</code> → <code>${esc(h.data.dst_address)}:${h.data.port}</code></div>
+      <div style="flex:1"><code>${esc(h.srcLabel)}</code> to <code>${esc(h.data.dst_address)}:${h.data.port}</code></div>
       <div style="color:${ok?'#22c55e':h.data.error?'#a1a1aa':'#ef4444'}">${label}${lat}</div>
       <div class="muted" style="font-size:11px">${h.ts.toLocaleTimeString()}</div>
     </div>`;

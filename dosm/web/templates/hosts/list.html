@@ -352,7 +352,7 @@
   });
 
   // File transfer: reveal the port/credential pair when a method is set and
-  // snap the FT port to that method's standard port (SFTP→22, FTP/FTPS→21).
+  // snap the FT port to that method's standard port (SFTP to 22, FTP/FTPS to 21).
   var FT_DEFAULTS = {sftp: 22, ftp: 21, ftps: 21};
   document.querySelectorAll('.ft-method-select').forEach(function (sel) {
     sel.addEventListener('change', function () {

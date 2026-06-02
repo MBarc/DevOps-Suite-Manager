@@ -177,7 +177,7 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
         ok = res.exit_status == 0
         chain_note = f" via {jump_count} jump host{'' if jump_count == 1 else 's'}" if jump_count else ""
         summary = (
-            f"{host_label}: {command}{chain_note} → exit {res.exit_status} in {duration_ms}ms"
+            f"{host_label}: {command}{chain_note} to exit {res.exit_status} in {duration_ms}ms"
             if ok
             else f"{host_label}: {command}{chain_note} FAILED (exit {res.exit_status})"
         )
@@ -309,7 +309,7 @@ async def _local_exec_runner(cfg: Config, args: dict) -> ActionResult:
     duration_ms = int((time.monotonic() - started) * 1000)
     ok = proc.returncode == 0
     summary = (
-        f"local: {command} → exit {proc.returncode} in {duration_ms}ms"
+        f"local: {command} to exit {proc.returncode} in {duration_ms}ms"
         if ok
         else f"local: {command} FAILED (exit {proc.returncode})"
     )
@@ -464,7 +464,7 @@ async def _winrm_exec_runner(cfg: Config, args: dict) -> ActionResult:
         ok = result.status_code == 0
         chain_note = " via jump host" if lease else ""
         summary = (
-            f"{host_label}: PowerShell{chain_note} → exit {result.status_code} in {duration_ms}ms"
+            f"{host_label}: PowerShell{chain_note} to exit {result.status_code} in {duration_ms}ms"
             if ok
             else f"{host_label}: PowerShell{chain_note} FAILED (exit {result.status_code})"
         )
@@ -549,7 +549,7 @@ async def _run_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
 
     duration_ms = int((time.monotonic() - started) * 1000)
     ok = run_status not in ("failed", "cancelled")
-    summary_parts = [f"pipeline {name!r} → {run_status}"]
+    summary_parts = [f"pipeline {name!r} to {run_status}"]
     if run_external:
         summary_parts.append(f"external={run_external}")
     summary_parts.append(f"in {duration_ms}ms")

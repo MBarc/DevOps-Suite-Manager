@@ -22,7 +22,7 @@
 <!-- Search -->
 <section class="card" style="margin-bottom:24px">
   <form method="get" action="/monitoring" autocomplete="off" id="coverage-form">
-    <div style="display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
       <div style="flex:1; min-width:220px; position:relative">
         <input
           id="host-search"
@@ -47,6 +47,10 @@
     <strong style="color:var(--danger)">Error:</strong> {{ error }}
   </div>
   {% elif results %}
+    <div style="display:flex; justify-content:flex-end; margin-bottom:8px">
+      <a class="btn btn-ghost btn-sm" href="/monitoring?hostname={{ hostname|urlencode }}&amp;refresh=1"
+         title="Bypass the local cache and re-query the monitoring APIs">Refresh (re-query)</a>
+    </div>
     {% set tools_present = results | map(attribute='tool') | list | unique | list %}
     {% for tool in ['dynatrace', 'datadog', 'servicenow', 'prometheus'] %}
       {% set tool_results = results | selectattr('tool', 'equalto', tool) | list %}

@@ -65,7 +65,7 @@
     try { frame.contentWindow.focus(); } catch (_) {}
   });
 
-  // Tab close / navigation away → release DOSM's jump tunnel lease so the
+  // Tab close / navigation away to release DOSM's jump tunnel lease so the
   // forward and SSH conn don't leak. sendBeacon is the only reliable
   // unload-time POST (fetch with keepalive is best-effort, XHR may be
   // cancelled). The TTL backstop on the server handles cases where this

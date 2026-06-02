@@ -70,7 +70,7 @@ class MemberRecord:
     phone: str | None = None
     enabled: bool = True
     # AD ``manager`` attribute (DN), plus the resolved display name. The
-    # adapter is responsible for resolving DN→name in a single round trip;
+    # adapter is responsible for resolving DN to name in a single round trip;
     # the orchestrator just stores both.
     manager_dn: str | None = None
     manager_name: str | None = None

@@ -345,7 +345,7 @@
 
   async function openCopy(e) {
     copySrc = e;
-    $("fb-copy-sub").textContent = `${e.name}  →  another host`;
+    $("fb-copy-sub").textContent = `${e.name} to another host`;
     $("fb-copy-error").textContent = "";
     $("fb-copy-dir").value = "";
     $("fb-copy-move").checked = false;
@@ -389,7 +389,7 @@
     try {
       const d = await post("copy", f);
       closeCopy();
-      toast(`${isMove ? "Moved" : "Copied"} ${srcName} → ${d.dst_host} (${humanSize(d.bytes)})`);
+      toast(`${isMove ? "Moved" : "Copied"} ${srcName} to ${d.dst_host} (${humanSize(d.bytes)})`);
       if (isMove) load();  // source removed — refresh listing
     } catch (err) {
       $("fb-copy-error").textContent = String(err.message);

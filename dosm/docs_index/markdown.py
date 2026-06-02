@@ -1,4 +1,4 @@
-"""Markdown → safe HTML rendering for the docs vault view."""
+"""Markdown to safe HTML rendering for the docs vault view."""
 from __future__ import annotations
 
 import nh3  # type: ignore

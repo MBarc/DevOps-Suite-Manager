@@ -37,7 +37,7 @@ MAX_QUERY_ROUNDS = 5
 _COMMAND_CLASSIFY_TOOLS = {"ssh_exec", "local_exec", "winrm_exec"}
 
 # Process-local registry of in-flight reply generations.
-# key: conv_id  →  (reply_to_msg_id, Future[result_dict], Queue[SSE bytes | None])
+# key: conv_id to (reply_to_msg_id, Future[result_dict], Queue[SSE bytes | None])
 # The asyncio.Task runs independently of the SSE connection, so navigating
 # away and coming back reconnects to the same generation rather than
 # restarting it.
@@ -178,7 +178,7 @@ async def chat_view(
             }
         )
 
-    # confirm_fields: tool name → elevated_confirm_field name, for template use.
+    # confirm_fields: tool name to elevated_confirm_field name, for template use.
     confirm_fields: dict[str, str] = {
         spec.name: spec.elevated_confirm_field
         for spec in list_actions()

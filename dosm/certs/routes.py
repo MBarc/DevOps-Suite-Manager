@@ -100,7 +100,7 @@ async def certs_page(
         )
         if not sources:
             certs: list[CertInfo] = []
-            error = "No monitoring sources enabled. Configure sources under Monitoring → Sources."
+            error = "No monitoring sources enabled. Configure sources under Monitoring to Sources."
         else:
             backend = get_backend(cfg)
             try:

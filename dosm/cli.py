@@ -722,7 +722,7 @@ def ftp_get(
         except FileTransferError as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1)
-    console.print(f"[green]Downloaded[/green] {remote} → {dest} ({n} bytes)")
+    console.print(f"[green]Downloaded[/green] {remote} to {dest} ({n} bytes)")
 
 
 @ftp_app.command("put")
@@ -749,7 +749,7 @@ def ftp_put(
         except FileTransferError as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1)
-    console.print(f"[green]Uploaded[/green] {local} → {remote} ({n} bytes)")
+    console.print(f"[green]Uploaded[/green] {local} to {remote} ({n} bytes)")
 
 
 @ftp_app.command("rm")
@@ -807,7 +807,7 @@ def ftp_cp(
             raise typer.Exit(1)
     verb = "Moved" if move else "Copied"
     console.print(
-        f"[green]{verb}[/green] {src_host}:{src_path} → {dst_host}:{dst_path} ({n} bytes)"
+        f"[green]{verb}[/green] {src_host}:{src_path} to {dst_host}:{dst_path} ({n} bytes)"
     )
 
 

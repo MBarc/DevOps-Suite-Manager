@@ -31,7 +31,7 @@ _T = TypeVar("_T")
 def resolve_ftp_login(cfg: Config, cred: Credential | None) -> tuple[str, str]:
     """Resolve (username, password) for FTP from a credential profile.
 
-    No credential → anonymous. An SSH-key credential is rejected: FTP cannot
+    No credential to anonymous. An SSH-key credential is rejected: FTP cannot
     use a private key.
     """
     if cred is None:

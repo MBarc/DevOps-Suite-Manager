@@ -400,7 +400,7 @@ async def map_status(
         if last_result is not None:
             icon = "✓" if last_result.reachable else "✗"
             dst = last_result.dst_label or last_result.dst_address
-            last_check = f"{last_result.src_label} → {dst}:{last_result.port} {icon}"
+            last_check = f"{last_result.src_label} to {dst}:{last_result.port} {icon}"
 
     return JSONResponse({
         "status": scan.status,

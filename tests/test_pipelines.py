@@ -126,7 +126,7 @@ def test_run_with_valid_inputs_creates_run(auth_client, db):
         },
         follow_redirects=False,
     )
-    # Either 303 to the run detail (no creds → fails inside trigger_pipeline,
+    # Either 303 to the run detail (no creds to fails inside trigger_pipeline,
     # but the run row still gets persisted with status='failed').
     assert resp.status_code == 303
     assert "/pipelines/runs/" in resp.headers["location"]

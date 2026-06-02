@@ -456,6 +456,29 @@ class MonitoringSource(Base):
     )
 
 
+class MonitoringMatch(Base):
+    """Persisted result of a host-check against a monitoring source — a local
+    cache so repeat lookups don't re-hit the API. Served while ``checked_at`` is
+    within the TTL; stale/missing entries trigger a fresh query (and a manual
+    Refresh forces it). Identity/presence only — live alert state isn't cached."""
+
+    __tablename__ = "monitoring_matches"
+    __table_args__ = (UniqueConstraint("hostname", "source_id", name="uq_monmatch_host_src"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False, index=True)  # lower-cased
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    found: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    entity_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    entity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    entity_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    extra_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 # ---- Secrets storage (local backend) --------------------------------------
 
 
@@ -555,7 +578,7 @@ class NetworkScan(Base):
 
 
 class NetworkScanResult(Base):
-    """One source→destination×port check within a NetworkScan."""
+    """One source to destination×port check within a NetworkScan."""
 
     __tablename__ = "network_scan_results"
 

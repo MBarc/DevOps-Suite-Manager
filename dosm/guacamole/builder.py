@@ -88,7 +88,7 @@ def _resolve_credential(cfg: Config, cred: Credential | None) -> tuple[str | Non
         ) from e
     if cred.kind == "ssh_key":
         return cred.username, None, secret_text, None
-    # login → username + password; pat → token used as password
+    # login to username + password; pat to token used as password
     return cred.username, secret_text, None, cred.domain
 
 

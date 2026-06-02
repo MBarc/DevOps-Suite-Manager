@@ -155,8 +155,8 @@ def coerce_run_inputs(schema: list[dict], form: dict) -> dict[str, Any]:
 
 
 def _stringify_for_wire(inputs: dict[str, Any]) -> dict[str, str]:
-    """Generic string-coercion: bool → "true"/"false", None dropped, everything
-    else → str(v). Lowercase booleans are the common-denominator convention
+    """Generic string-coercion: bool"true"/"false", None dropped, everything
+    else to str(v). Lowercase booleans are the common-denominator convention
     (GitHub / Octopus / shells all expect them)."""
     out: dict[str, str] = {}
     for k, v in (inputs or {}).items():
@@ -187,10 +187,10 @@ def split_azure_devops_inputs(
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Split inputs for the Azure DevOps Pipelines API.
 
-    Plain keys → templateParameters with **native types preserved** (ADO's
+    Plain keys to templateParameters with **native types preserved** (ADO's
     runtime parameters are typed: string / boolean / number).
 
-    Keys prefixed with ``var.`` → runtime variables. ADO's variable wire
+    Keys prefixed with ``var.`` to runtime variables. ADO's variable wire
     format wraps each as ``{"value": "..."}`` and the value is documented
     as a string, so we string-coerce that bucket the same way as GitHub.
 

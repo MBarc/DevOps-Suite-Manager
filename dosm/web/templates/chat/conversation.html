@@ -60,7 +60,7 @@
                   <code class="thinking-tool">{{ t.tool }}({% if t.args %}{{ t.args | tojson }}{% endif %})</code>
                   <span class="thinking-elapsed muted">{{ t.elapsed_ms }}ms</span>
                 </div>
-                <div class="thinking-step-summary">→ {{ t.summary }}</div>
+                <div class="thinking-step-summary"> to {{ t.summary }}</div>
                 {% if t.data_preview %}
                 <details class="thinking-data">
                   <summary class="muted" style="font-size:11.5px">data preview</summary>
@@ -344,7 +344,7 @@
       head.appendChild(elapsed);
       const summary = li.querySelector('.thinking-step-summary');
       summary.classList.remove('muted');
-      summary.textContent = `→ ${d.summary}`;
+      summary.textContent = ` to ${d.summary}`;
       if (d.data_preview) {
         const det = document.createElement('details');
         det.className = 'thinking-data';
@@ -391,7 +391,7 @@
           <div class="thinking-step-head">
             <code class="thinking-tool">${escapeHtml(d.tool)}(${escapeHtml(JSON.stringify(d.args || {}))})</code>
           </div>
-          <div class="thinking-step-summary">→ awaiting your approval</div>`;
+          <div class="thinking-step-summary"> to awaiting your approval</div>`;
         pendingThinkingSteps.appendChild(li);
       }
     } catch {}

@@ -36,7 +36,7 @@ def _recv_exactly(sock: socket.socket, n: int) -> bytes:
     return b"".join(chunks)
 
 
-# SOCKS5 reply codes (RFC 1928 §6) → human-readable, so a jump that can't
+# SOCKS5 reply codes (RFC 1928 §6) to human-readable, so a jump that can't
 # reach the FTP target produces a message naming why rather than a bare byte.
 _REPLY_MESSAGES = {
     0x01: "general SOCKS server failure",

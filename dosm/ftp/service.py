@@ -56,7 +56,7 @@ def resolve_ft_target(host: Host) -> FtTarget:
 def credential_material(cfg: Config, cred: Credential | None) -> tuple[str, str | None, str | None]:
     """Resolve a credential to (username, password, private_key) from secrets.
 
-    No credential → anonymous. SSH-key creds yield a private key (valid for
+    No credential to anonymous. SSH-key creds yield a private key (valid for
     SFTP, rejected by the FTP backend).
     """
     from dosm.secrets import SecretNotFound, get_backend

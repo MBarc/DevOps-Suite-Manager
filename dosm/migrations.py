@@ -162,8 +162,8 @@ def run_migrations(engine: Engine) -> list[str]:
             ))
         applied.append("hosts.is_jumpbox")
     # Credential kind consolidation: collapse protocol-specific kinds into
-    # protocol-agnostic ones (ssh_password/rdp_password/vnc_password → login,
-    # api_token → pat). The UPDATEs are no-ops if already migrated.
+    # protocol-agnostic ones (ssh_password/rdp_password/vnc_password to login,
+    # api_token to pat). The UPDATEs are no-ops if already migrated.
     with engine.begin() as conn:
         r1 = conn.execute(text(
             "UPDATE credentials SET kind = 'login'"

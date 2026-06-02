@@ -178,7 +178,7 @@ def _index_one(
         if doc is not None and not force and doc.sha256 == digest and doc.status == "indexed":
             return "unchanged"
 
-        # Resolve folder slug → id inside the session.
+        # Resolve folder slug to id inside the session.
         if _fm_app_slug:
             folder_row = s.execute(
                 select(Folder).where(Folder.slug == _fm_app_slug)

@@ -283,7 +283,7 @@
       if (e.key === 'Enter') { e.preventDefault(); submit(); }
       if (e.key === 'Escape') { card.remove(); }
     });
-    // blur → submit after a tick (avoids firing on Escape)
+    // blur to submit after a tick (avoids firing on Escape)
     input.addEventListener('blur', () => setTimeout(() => { if (!done) submit(); }, 120));
   }
 })();

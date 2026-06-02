@@ -106,7 +106,7 @@ _USERS: dict[str, UserRecord] = {
 
 
 _GROUPS: dict[str, tuple[GroupRecord, list[str]]] = {
-    # name → (group, list of member DNs)
+    # name to (group, list of member DNs)
     "engineering": (
         GroupRecord(
             distinguished_name="CN=Engineering,OU=Groups,DC=acme,DC=local",

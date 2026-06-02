@@ -207,7 +207,7 @@ def test_sftp_backend_roundtrip(session_factory, test_config, tmp_path):
     asyncio.run(run())
 
 
-# ── host-to-host: FTPS source → SFTP destination (server-side) ───────────────
+# ── host-to-host: FTPS source to SFTP destination (server-side) ───────────────
 def test_copy_between_hosts_ftps_to_sftp(session_factory, test_config, ftps, tmp_path):
     from dosm.ftp.service import transfer_between_hosts
 
@@ -236,7 +236,7 @@ def test_copy_between_hosts_ftps_to_sftp(session_factory, test_config, ftps, tmp
 
 
 def test_copy_route_and_targets(auth_client, session_factory, test_config, ftps, tmp_path):
-    # FTPS source → SFTP destination. The SFTP server runs in its own thread so
+    # FTPS source to SFTP destination. The SFTP server runs in its own thread so
     # the synchronous TestClient and the route handler's loop don't collide, and
     # we avoid two in-process TLS stacks at once.
     srv, root = ftps

@@ -3,7 +3,7 @@
 Launches a job template via POST /api/v2/job_templates/{id}/launch/ and
 polls /api/v2/jobs/{id}/ for status.
 
-Auth: bearer token (Users → Tokens → Add in the AWX UI).
+Auth: bearer token (Users to Tokens to Add in the AWX UI).
 Config keys: base_url, job_template_id, inventory_id, limit, verify_ssl.
 Inputs: passed as extra_vars to the job template.
 """
@@ -47,7 +47,7 @@ def _map_status(status: str | None) -> str:
 class AWXAdapter(PipelineAdapter):
     provider = "awx"
     display_name = "Ansible AWX"
-    credential_hint = "AWX bearer token — Users → Tokens → Add in the AWX UI."
+    credential_hint = "AWX bearer token — Users to Tokens to Add in the AWX UI."
 
     @classmethod
     def field_schema(cls) -> list[FieldSpec]:

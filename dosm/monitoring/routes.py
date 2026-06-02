@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
-import time
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
 from dosm.db import get_session
 from dosm.hosts.repo import list_hosts
-from dosm.models import AuditLog, MonitoringSource, Tag, User
+from dosm.models import AuditLog, MonitoringMatch, MonitoringSource, Tag, User
 from dosm.monitoring import repo
 from dosm.monitoring.adapters import TOOL_LABELS, HostCheckResult, MonitoringAdapter, make_adapter
 from dosm.secrets import SecretNotFound, get_backend
@@ -20,29 +21,61 @@ from dosm.secrets import SecretNotFound, get_backend
 router = APIRouter(prefix="/monitoring")
 
 # ---------------------------------------------------------------------------
-# In-process result cache  (hostname.lower(), source_id) -> (ts, result)
+# Persistent host-check cache (monitoring_matches table). A found/known entry
+# is served locally until it ages past the TTL; stale/missing entries trigger a
+# fresh API query, and a manual Refresh forces a re-query. Presence/identity
+# only — live alert state (fetch_alerts) is never cached here.
 # ---------------------------------------------------------------------------
 
-_result_cache: dict[tuple[str, int], tuple[float, HostCheckResult]] = {}
-_CACHE_TTL = 60.0
+_MATCH_TTL = timedelta(hours=24)
 
 
-def _cache_get(hostname: str, source_id: int) -> HostCheckResult | None:
-    entry = _result_cache.get((hostname.lower(), source_id))
-    if entry and (time.monotonic() - entry[0]) < _CACHE_TTL:
-        return entry[1]
-    return None
+def _match_fresh(m: MonitoringMatch | None) -> bool:
+    if m is None:
+        return False
+    ts = m.checked_at if m.checked_at.tzinfo else m.checked_at.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - ts) < _MATCH_TTL
 
 
-def _cache_put(hostname: str, result: HostCheckResult) -> None:
-    _result_cache[(hostname.lower(), result.source_id)] = (time.monotonic(), result)
+def _match_to_result(source: MonitoringSource, m: MonitoringMatch) -> HostCheckResult:
+    return HostCheckResult(
+        source_id=source.id, source_name=source.name, tool=source.tool,
+        found=m.found, entity_id=m.entity_id, entity_name=m.entity_name,
+        entity_url=m.entity_url, extra=json.loads(m.extra_json or "{}"), error=m.error,
+    )
 
 
-def _cache_clear_host(hostname: str) -> None:
-    k = hostname.lower()
-    for key in list(_result_cache):
-        if key[0] == k:
-            del _result_cache[key]
+def _match_store(db: Session, hostname: str, r: HostCheckResult) -> None:
+    key = hostname.lower()
+    m = db.execute(
+        select(MonitoringMatch).where(
+            MonitoringMatch.hostname == key, MonitoringMatch.source_id == r.source_id
+        )
+    ).scalar_one_or_none()
+    if m is None:
+        m = MonitoringMatch(hostname=key, source_id=r.source_id)
+        db.add(m)
+    m.found = r.found
+    m.entity_id = r.entity_id
+    m.entity_name = r.entity_name
+    m.entity_url = r.entity_url
+    m.extra_json = json.dumps(r.extra or {})
+    m.error = r.error
+    m.checked_at = datetime.now(UTC)
+
+
+def _matches_for(db: Session, hostnames: list[str]) -> dict[tuple[str, int], MonitoringMatch]:
+    keys = [h.lower() for h in hostnames]
+    if not keys:
+        return {}
+    rows = db.execute(
+        select(MonitoringMatch).where(MonitoringMatch.hostname.in_(keys))
+    ).scalars()
+    return {(m.hostname, m.source_id): m for m in rows}
+
+
+def _match_clear_host(db: Session, hostname: str) -> None:
+    db.execute(delete(MonitoringMatch).where(MonitoringMatch.hostname == hostname.lower()))
 
 TOOL_CHOICES = ["dynatrace", "datadog", "servicenow", "prometheus"]
 DD_SITES = ["datadoghq.com", "datadoghq.eu", "us3.datadoghq.com", "us5.datadoghq.com", "ap1.datadoghq.com", "ddog-gov.com"]
@@ -82,6 +115,7 @@ async def search_hosts(
 async def monitoring_page(
     request: Request,
     hostname: str = "",
+    refresh: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
 ) -> HTMLResponse:
@@ -95,7 +129,7 @@ async def monitoring_page(
         else:
             cfg = request.app.state.config
             backend = get_backend(cfg)
-            results = await _run_checks(hostname, sources, backend)
+            results = await _run_checks(db, hostname, sources, backend, force=bool(refresh))
 
     return _t(request).TemplateResponse(
         request,
@@ -348,17 +382,13 @@ async def coverage_page(
     selected_tags = [t for t in tags.split(",") if t.strip()] if tags else []
     hosts = _filter_hosts(all_hosts, pattern.strip(), selected_tags)
 
-    if refresh:
-        for h in hosts:
-            _cache_clear_host(h.hostname)
-
     rows: list[dict] = []
     col_found = [0] * len(sources)
 
     if hosts and sources:
         cfg = request.app.state.config
         backend = get_backend(cfg)
-        matrix = await _run_checks_fleet(hosts, sources, backend)
+        matrix = await _run_checks_fleet(db, hosts, sources, backend, force=bool(refresh))
 
         for host in hosts:
             cells = []
@@ -409,32 +439,8 @@ async def coverage_page(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-async def _fleet_check_one(
-    sem: asyncio.Semaphore,
-    hostname: str,
-    adapter: MonitoringAdapter,
-    tool: str,
-) -> HostCheckResult:
-    cached = _cache_get(hostname, adapter.source_id)
-    if cached:
-        return cached
-    async with sem:
-        try:
-            r = await adapter.check_host(hostname)
-        except Exception as exc:
-            r = HostCheckResult(
-                source_id=adapter.source_id,
-                source_name=adapter.source_name,
-                tool=tool,
-                found=False,
-                error=str(exc),
-            )
-    _cache_put(hostname, r)
-    return r
-
-
-async def _run_checks_fleet(hosts, sources: list[MonitoringSource], backend) -> dict[tuple[str, int], HostCheckResult]:
-    adapters: list[tuple[MonitoringAdapter, str]] = []
+def _adapters_for(sources: list[MonitoringSource], backend) -> list[tuple[MonitoringAdapter, MonitoringSource]]:
+    out: list[tuple[MonitoringAdapter, MonitoringSource]] = []
     for source in sources:
         try:
             token = backend.get_str(source.token_secret) if source.token_secret else ""
@@ -446,74 +452,77 @@ async def _run_checks_fleet(hosts, sources: list[MonitoringSource], backend) -> 
             token2 = ""
         adapter = make_adapter(source, token, token2)
         if adapter:
-            adapters.append((adapter, source.tool))
-
-    if not adapters or not hosts:
-        return {}
-
-    sem = asyncio.Semaphore(20)
-    tasks = [
-        _fleet_check_one(sem, h.hostname, adapter, tool)
-        for h in hosts
-        for adapter, tool in adapters
-    ]
-    task_keys = [
-        (h.hostname, adapter.source_id)
-        for h in hosts
-        for adapter, tool in adapters
-    ]
-
-    raw = await asyncio.gather(*tasks, return_exceptions=True)
-
-    matrix: dict[tuple[str, int], HostCheckResult] = {}
-    for (hostname, source_id), item in zip(task_keys, raw):
-        if not isinstance(item, Exception):
-            matrix[(hostname.lower(), source_id)] = item
-    return matrix
+            out.append((adapter, source))
+    return out
 
 
-async def _run_checks(hostname: str, sources: list[MonitoringSource], backend) -> list[HostCheckResult]:
-    fresh_sources = []
+def _error_result(adapter: MonitoringAdapter, source: MonitoringSource, exc: BaseException) -> HostCheckResult:
+    return HostCheckResult(
+        source_id=adapter.source_id, source_name=adapter.source_name,
+        tool=source.tool, found=False, error=str(exc),
+    )
+
+
+async def _run_checks(
+    db: Session, hostname: str, sources: list[MonitoringSource], backend, *, force: bool = False
+) -> list[HostCheckResult]:
     results: list[HostCheckResult] = []
-
+    matches = _matches_for(db, [hostname])
+    fresh_sources: list[MonitoringSource] = []
     for source in sources:
-        cached = _cache_get(hostname, source.id)
-        if cached:
-            results.append(cached)
+        m = matches.get((hostname.lower(), source.id))
+        if not force and _match_fresh(m):
+            results.append(_match_to_result(source, m))
         else:
             fresh_sources.append(source)
 
-    if not fresh_sources:
-        return results
-
-    adapters: list[tuple[MonitoringAdapter, str]] = []
-    for source in fresh_sources:
-        try:
-            token = backend.get_str(source.token_secret) if source.token_secret else ""
-        except SecretNotFound:
-            token = ""
-        try:
-            token2 = backend.get_str(source.token2_secret) if source.token2_secret else ""
-        except SecretNotFound:
-            token2 = ""
-        adapter = make_adapter(source, token, token2)
-        if adapter:
-            adapters.append((adapter, source.tool))
-
+    adapters = _adapters_for(fresh_sources, backend)
     if not adapters:
         return results
 
     raw = await asyncio.gather(*(a.check_host(hostname) for a, _ in adapters), return_exceptions=True)
-    for i, r in enumerate(raw):
-        adapter, tool = adapters[i]
+    for (adapter, source), r in zip(adapters, raw):
         if isinstance(r, Exception):
-            r = HostCheckResult(
-                source_id=adapter.source_id,
-                source_name=adapter.source_name,
-                tool=tool,
-                found=False,
-                error=str(r),
-            )
-        _cache_put(hostname, r)
+            r = _error_result(adapter, source, r)
+        _match_store(db, hostname, r)   # DB write outside the gather — single session
         results.append(r)
+    db.commit()
     return results
+
+
+async def _run_checks_fleet(
+    db: Session, hosts, sources: list[MonitoringSource], backend, *, force: bool = False
+) -> dict[tuple[str, int], HostCheckResult]:
+    adapters = _adapters_for(sources, backend)
+    if not adapters or not hosts:
+        return {}
+
+    matches = _matches_for(db, [h.hostname for h in hosts])
+    matrix: dict[tuple[str, int], HostCheckResult] = {}
+    to_check: list[tuple[object, MonitoringAdapter, MonitoringSource]] = []
+    for h in hosts:
+        for adapter, source in adapters:
+            m = matches.get((h.hostname.lower(), source.id))
+            if not force and _match_fresh(m):
+                matrix[(h.hostname.lower(), source.id)] = _match_to_result(source, m)
+            else:
+                to_check.append((h, adapter, source))
+
+    if to_check:
+        sem = asyncio.Semaphore(20)
+
+        async def _check(adapter, hostname):
+            async with sem:
+                return await adapter.check_host(hostname)
+
+        raw = await asyncio.gather(
+            *(_check(a, h.hostname) for h, a, _ in to_check), return_exceptions=True
+        )
+        # DB writes happen here, sequentially — never inside the gather above.
+        for (h, adapter, source), r in zip(to_check, raw):
+            if isinstance(r, Exception):
+                r = _error_result(adapter, source, r)
+            _match_store(db, h.hostname, r)
+            matrix[(h.hostname.lower(), source.id)] = r
+        db.commit()
+    return matrix

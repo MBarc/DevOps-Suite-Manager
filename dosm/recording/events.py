@@ -28,7 +28,7 @@ def record_pipeline_status(
         return
     run_part = f" #{run_id}" if run_id else ""
     rec.writer.write_event(
-        "Pipeline status", f"`{pipeline_name}`{run_part} → **{status}**"
+        "Pipeline status", f"`{pipeline_name}`{run_part} to **{status}**"
     )
 
 
