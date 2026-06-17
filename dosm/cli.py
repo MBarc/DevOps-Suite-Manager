@@ -16,7 +16,7 @@ from dosm.config import load_config
 from dosm.db import create_all, init_engine, session_scope
 from dosm.docs_index.indexer import get_index_status, reindex
 from dosm.guacamole.auth_json import KEY_BYTES, load_secret_key
-from dosm.models import Credential, User
+from dosm.models import AuditLog, Credential, Host, User
 from dosm.secrets import SecretNotFound, get_backend
 
 app = typer.Typer(help="DevOps Operations Suite Manager.", no_args_is_help=True, add_completion=False)
@@ -24,6 +24,7 @@ db_app = typer.Typer(help="Database admin commands.", no_args_is_help=True)
 user_app = typer.Typer(help="Local user management.", no_args_is_help=True)
 secret_app = typer.Typer(help="Manage secrets via the configured backend.", no_args_is_help=True)
 cred_app = typer.Typer(help="Manage credential records (references into the secrets backend).", no_args_is_help=True)
+hosts_app = typer.Typer(help="Manage host inventory entries.", no_args_is_help=True)
 docs_app = typer.Typer(help="Documentation index commands.", no_args_is_help=True)
 guac_app = typer.Typer(help="Guacamole integration helpers.", no_args_is_help=True)
 pipelines_app = typer.Typer(help="Pipeline runner commands.", no_args_is_help=True)
@@ -34,6 +35,7 @@ app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
 app.add_typer(cred_app, name="credential")
+app.add_typer(hosts_app, name="hosts")
 app.add_typer(docs_app, name="docs")
 app.add_typer(guac_app, name="guacamole")
 app.add_typer(pipelines_app, name="pipelines")
@@ -241,6 +243,121 @@ def credential_list() -> None:
     for cid, name, kind, username, secret_ref in rows:
         table.add_row(str(cid), name, kind, username or "", secret_ref)
     console.print(table)
+
+
+# ---- hosts ----------------------------------------------------------------
+
+
+def _get_host_by_name(s, name: str) -> Host:
+    """Resolve a host by its unique inventory name, or exit with an error."""
+    host = s.execute(select(Host).where(Host.name == name)).scalar_one_or_none()
+    if host is None:
+        console.print(f"[red]No host named {name!r}.[/red]")
+        raise typer.Exit(1)
+    return host
+
+
+@hosts_app.command("list")
+def hosts_list() -> None:
+    """List host inventory entries."""
+    _load()
+    from dosm.hosts import repo
+
+    with session_scope() as s:
+        rows = [
+            (
+                h.id,
+                h.name,
+                h.hostname,
+                h.port,
+                h.protocol,
+                h.credential.name if h.credential else "",
+                "yes" if h.is_jumpbox else "",
+                h.jump_host.name if h.jump_host else "",
+            )
+            for h in repo.list_hosts(s)
+        ]
+    table = Table("ID", "Name", "Hostname", "Port", "Proto", "Credential", "Jumpbox", "Jump via")
+    for hid, name, hostname, port, proto, cred, jb, via in rows:
+        table.add_row(str(hid), name, hostname, str(port), proto, cred, jb, via)
+    console.print(table)
+
+
+@hosts_app.command("show")
+def hosts_show(name: str = typer.Argument(..., help="Host name.")) -> None:
+    """Show full details for one host."""
+    _load()
+    with session_scope() as s:
+        h = _get_host_by_name(s, name)
+        console.print(f"[bold]{h.name}[/bold] (id={h.id})")
+        console.print(f"  hostname  : {h.hostname}")
+        console.print(f"  port      : {h.port}")
+        console.print(f"  protocol  : {h.protocol}")
+        console.print(f"  credential: {h.credential.name if h.credential else '—'}")
+        console.print(f"  jumpbox   : {'yes' if h.is_jumpbox else 'no'}")
+        console.print(f"  jump via  : {h.jump_host.name if h.jump_host else '—'}")
+        if h.ft_method:
+            console.print(f"  file xfer : {h.ft_method} (port {h.ft_port or 'default'})")
+        if h.description:
+            console.print(f"  notes     : {h.description}")
+        console.print(f"  updated   : {h.updated_at.isoformat(timespec='seconds')}")
+
+
+@hosts_app.command("set-hostname")
+def hosts_set_hostname(
+    name: str = typer.Argument(..., help="Host name."),
+    hostname: str = typer.Argument(..., help="New address: hostname, IP, or FQDN."),
+) -> None:
+    """Update a host's address (e.g. after a DHCP/IP change). Audit-logged."""
+    _load()
+    new = hostname.strip()
+    if not new:
+        console.print("[red]Hostname cannot be empty.[/red]")
+        raise typer.Exit(1)
+    with session_scope() as s:
+        h = _get_host_by_name(s, name)
+        old = h.hostname
+        if old == new:
+            console.print(f"[yellow]No change[/yellow] — {name} already points at {new}.")
+            return
+        h.hostname = new
+        s.add(
+            AuditLog(
+                actor_id=None,
+                action="host.update",
+                target=f"host:{h.id}",
+                details=f"cli set-hostname {old} -> {new}",
+            )
+        )
+    console.print(f"[green]Updated[/green] {name}: {old} → {new}")
+
+
+@hosts_app.command("set-port")
+def hosts_set_port(
+    name: str = typer.Argument(..., help="Host name."),
+    port: int = typer.Argument(..., help="New connection port (1-65535)."),
+) -> None:
+    """Update a host's connection port. Audit-logged."""
+    _load()
+    if not 1 <= port <= 65535:
+        console.print("[red]Port must be between 1 and 65535.[/red]")
+        raise typer.Exit(1)
+    with session_scope() as s:
+        h = _get_host_by_name(s, name)
+        old = h.port
+        if old == port:
+            console.print(f"[yellow]No change[/yellow] — {name} already uses port {port}.")
+            return
+        h.port = port
+        s.add(
+            AuditLog(
+                actor_id=None,
+                action="host.update",
+                target=f"host:{h.id}",
+                details=f"cli set-port {old} -> {port}",
+            )
+        )
+    console.print(f"[green]Updated[/green] {name}: port {old} → {port}")
 
 
 # ---- docs -----------------------------------------------------------------
