@@ -154,6 +154,43 @@ def coerce_run_inputs(schema: list[dict], form: dict) -> dict[str, Any]:
     return out
 
 
+def validate_payload_values(schema: list[dict], values: dict[str, Any]) -> list[str]:
+    """Check already-typed payload ``values`` against the current ``schema``.
+
+    Unlike :func:`coerce_run_inputs` (which reads string form fields), this
+    validates a stored dict directly — used to detect *drift* when a pipeline's
+    schema changed after a payload was saved. Returns a list of human-readable
+    problems (empty list = the payload still matches the schema)."""
+    schema = normalize_schema(schema)
+    errors: list[str] = []
+    known = {row["name"] for row in schema}
+
+    for row in schema:
+        name, t = row["name"], row["type"]
+        present = name in values and values[name] not in (None, "")
+        if not present:
+            if row.get("required"):
+                errors.append(f"missing required input {name!r}")
+            continue
+        v = values[name]
+        if t == "choice":
+            opts = row.get("options") or []
+            if opts and str(v) not in opts:
+                errors.append(f"{name!r}={v!r} is not one of {opts!r}")
+        elif t == "number":
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                try:
+                    float(str(v))
+                except (TypeError, ValueError):
+                    errors.append(f"{name!r}={v!r} is not a number")
+
+    # Inputs the payload carries that the schema no longer declares.
+    for key in values:
+        if key != "__raw__" and key not in known:
+            errors.append(f"input {key!r} is no longer in the pipeline schema")
+    return errors
+
+
 def _stringify_for_wire(inputs: dict[str, Any]) -> dict[str, str]:
     """Generic string-coercion: bool"true"/"false", None dropped, everything
     else to str(v). Lowercase booleans are the common-denominator convention

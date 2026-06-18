@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -28,6 +29,7 @@ hosts_app = typer.Typer(help="Manage host inventory entries.", no_args_is_help=T
 docs_app = typer.Typer(help="Documentation index commands.", no_args_is_help=True)
 guac_app = typer.Typer(help="Guacamole integration helpers.", no_args_is_help=True)
 pipelines_app = typer.Typer(help="Pipeline runner commands.", no_args_is_help=True)
+payload_app = typer.Typer(help="Saved pipeline input payloads.", no_args_is_help=True)
 folder_app = typer.Typer(help="Manage doc vault folders (taxonomy).", no_args_is_help=True)
 org_app = typer.Typer(help="Organisation directory (AD-backed) commands.", no_args_is_help=True)
 ftp_app = typer.Typer(help="File transfer (FTP / FTPS / SFTP), jump-aware.", no_args_is_help=True)
@@ -41,6 +43,7 @@ app.add_typer(hosts_app, name="hosts")
 app.add_typer(docs_app, name="docs")
 app.add_typer(guac_app, name="guacamole")
 app.add_typer(pipelines_app, name="pipelines")
+pipelines_app.add_typer(payload_app, name="payload")
 app.add_typer(folder_app, name="folder")
 app.add_typer(org_app, name="org")
 app.add_typer(ftp_app, name="ftp")
@@ -703,6 +706,153 @@ def pipelines_poll() -> None:
         f"polled={stats.polled} transitioned={stats.transitioned} "
         f"abandoned={stats.abandoned} errors={stats.errors}"
     )
+
+
+def _resolve_pipeline_or_exit(s, pipeline: str):
+    from dosm.pipelines import repo as prepo
+
+    p = prepo.get_pipeline_by_name(s, pipeline)
+    if p is None:
+        console.print(f"[red]No pipeline named {pipeline!r}[/red]")
+        raise typer.Exit(1)
+    return p
+
+
+def _resolve_payload_or_exit(s, pipeline_id: int, name: str):
+    from sqlalchemy import select
+
+    from dosm.models import PipelinePayload
+
+    pl = s.execute(
+        select(PipelinePayload).where(
+            PipelinePayload.pipeline_id == pipeline_id, PipelinePayload.name == name
+        )
+    ).scalar_one_or_none()
+    if pl is None:
+        console.print(f"[red]No payload named {name!r} on that pipeline[/red]")
+        raise typer.Exit(1)
+    return pl
+
+
+@payload_app.command("list")
+def payload_list(pipeline: str = typer.Argument(..., help="Pipeline name.")) -> None:
+    """List saved payloads for a pipeline."""
+    _load()
+    from dosm.pipelines import repo as prepo
+
+    with session_scope() as s:
+        p = _resolve_pipeline_or_exit(s, pipeline)
+        rows = [(pl.name, pl.visibility, pl.description or "") for pl in prepo.list_payloads(s, p.id)]
+    table = Table("Name", "Visibility", "Description")
+    for name, vis, desc in rows:
+        table.add_row(name, vis, desc)
+    console.print(table)
+
+
+@payload_app.command("show")
+def payload_show(
+    pipeline: str = typer.Argument(...), name: str = typer.Argument(...)
+) -> None:
+    """Print a payload's stored input values as JSON."""
+    _load()
+    with session_scope() as s:
+        p = _resolve_pipeline_or_exit(s, pipeline)
+        pl = _resolve_payload_or_exit(s, p.id, name)
+        console.print_json(pl.values_json or "{}")
+
+
+@payload_app.command("add")
+def payload_add(
+    pipeline: str = typer.Argument(...),
+    name: str = typer.Argument(...),
+    values_json: str = typer.Option("{}", "--json", help='Input values as a JSON object, e.g. \'{"env":"prod"}\''),
+    description: str | None = typer.Option(None, "--description"),
+    private: bool = typer.Option(False, "--private", help="Keep this payload to yourself."),
+) -> None:
+    """Create a saved payload from a JSON object of input values."""
+    _load()
+    from dosm.pipelines import repo as prepo
+    from dosm.pipelines.inputs import normalize_schema, validate_payload_values
+
+    try:
+        values = json.loads(values_json)
+        if not isinstance(values, dict):
+            raise ValueError("--json must be a JSON object")
+    except (json.JSONDecodeError, ValueError) as e:
+        console.print(f"[red]Invalid --json:[/red] {e}")
+        raise typer.Exit(1)
+
+    with session_scope() as s:
+        p = _resolve_pipeline_or_exit(s, pipeline)
+        schema = normalize_schema(json.loads(p.inputs_schema)) if p.inputs_schema else []
+        problems = validate_payload_values(schema, values) if schema else []
+        if problems:
+            console.print("[red]Payload does not match the pipeline schema:[/red]")
+            for prob in problems:
+                console.print(f"  - {prob}")
+            raise typer.Exit(1)
+        try:
+            pl = prepo.create_payload(
+                s, pipeline_id=p.id, name=name, values=values,
+                description=description, visibility="private" if private else "shared",
+            )
+        except (prepo.PayloadNameConflict, ValueError) as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        s.add(AuditLog(action="payload.create", target=f"pipeline:{p.id}",
+                       details=f"payload={pl.id} name={pl.name!r} (via CLI)"))
+    console.print(f"[green]Created payload[/green] {name!r} on {pipeline!r}")
+
+
+@payload_app.command("rename")
+def payload_rename(
+    pipeline: str = typer.Argument(...),
+    name: str = typer.Argument(..., help="Current name."),
+    new_name: str = typer.Argument(..., help="New name."),
+) -> None:
+    """Rename a payload."""
+    _load()
+    from dosm.pipelines import repo as prepo
+
+    with session_scope() as s:
+        p = _resolve_pipeline_or_exit(s, pipeline)
+        pl = _resolve_payload_or_exit(s, p.id, name)
+        try:
+            prepo.update_payload(s, pl, name=new_name)
+        except (prepo.PayloadNameConflict, ValueError) as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    console.print(f"[green]Renamed[/green] {name!r} -> {new_name!r}")
+
+
+@payload_app.command("copy")
+def payload_copy(
+    pipeline: str = typer.Argument(...), name: str = typer.Argument(...)
+) -> None:
+    """Duplicate a payload under a derived name."""
+    _load()
+    from dosm.pipelines import repo as prepo
+
+    with session_scope() as s:
+        p = _resolve_pipeline_or_exit(s, pipeline)
+        pl = _resolve_payload_or_exit(s, p.id, name)
+        new = prepo.copy_payload(s, pl)
+        console.print(f"[green]Copied[/green] to {new.name!r}")
+
+
+@payload_app.command("rm")
+def payload_rm(
+    pipeline: str = typer.Argument(...), name: str = typer.Argument(...)
+) -> None:
+    """Delete a payload."""
+    _load()
+    from dosm.pipelines import repo as prepo
+
+    with session_scope() as s:
+        p = _resolve_pipeline_or_exit(s, pipeline)
+        pl = _resolve_payload_or_exit(s, p.id, name)
+        prepo.delete_payload(s, pl)
+    console.print(f"[green]Deleted payload[/green] {name!r}")
 
 
 # ---- org -----------------------------------------------------------------

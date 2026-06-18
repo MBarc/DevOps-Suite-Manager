@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit payload' if payload else 'New payload' }} | {{ p.name }} | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>{{ 'Edit payload' if payload else 'New payload' }}</h1>
+    <div class="subtitle">for pipeline <a href="/pipelines/{{ p.id }}">{{ p.name }}</a></div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/pipelines/{{ p.id }}">Cancel</a>
+  </div>
+</header>
+
+<section class="card card-narrow">
+  {% if error %}
+    <div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ error }}</div>
+  {% endif %}
+  <form method="post"
+        action="/pipelines/{{ p.id }}/payloads/{{ (payload.id|string + '/edit') if payload else 'new' }}"
+        class="stack">
+
+    <label>Display name
+      <input type="text" name="name" required
+             value="{{ payload.name if payload else (name or '') }}"
+             placeholder="e.g. Prod deploy – us-east" />
+    </label>
+
+    <label>Description <span class="muted">(optional)</span>
+      <input type="text" name="description"
+             value="{{ payload.description or '' if payload else (description or '') }}"
+             placeholder="When to use this payload" />
+    </label>
+
+    <label>Visibility
+      <select name="visibility">
+        {% set vis = payload.visibility if payload else (visibility or 'shared') %}
+        <option value="shared" {% if vis == 'shared' %}selected{% endif %}>Share with everyone</option>
+        <option value="private" {% if vis == 'private' %}selected{% endif %}>Keep to myself</option>
+      </select>
+      <span class="field-hint">Private payloads are visible only to you and admins.</span>
+    </label>
+
+    <hr class="divider" />
+    <h2 style="font-size:15px; margin:0 0 var(--sp-2)">Input values</h2>
+
+    {% if schema %}
+      {% for s in schema %}
+        {% set value = values.get(s.name) %}
+        {% if s.type == 'boolean' %}
+          <label class="row" style="gap: var(--sp-2); align-items:center">
+            <input type="checkbox" name="input__{{ s.name }}" value="1"
+                   {% if value in (true, 'true', '1', 1) %}checked{% endif %} />
+            <span>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}</span>
+          </label>
+          {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+        {% elif s.type == 'choice' %}
+          <label>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}
+            <select name="input__{{ s.name }}" {% if s.required %}required{% endif %}>
+              {% if not s.required %}<option value="">(unset)</option>{% endif %}
+              {% for opt in (s.options or []) %}
+                <option value="{{ opt }}" {% if value == opt %}selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+            {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+          </label>
+        {% elif s.type == 'number' %}
+          <label>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}
+            <input type="number" step="any" name="input__{{ s.name }}"
+                   value="{{ value if value is not none else (s.default if s.default is defined else '') }}"
+                   {% if s.required %}required{% endif %} />
+            {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+          </label>
+        {% else %}
+          <label>{{ s.name }}{% if s.required %} <em class="muted">(required)</em>{% endif %}
+            <input type="text" name="input__{{ s.name }}"
+                   value="{{ value if value is not none else (s.default if s.default is defined else '') }}"
+                   {% if s.required %}required{% endif %}
+                   placeholder="{{ s.description or '' }}" />
+            {% if s.description %}<span class="field-hint">{{ s.description }}</span>{% endif %}
+          </label>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <label>Inputs
+        <textarea name="inputs_text" rows="6"
+                  placeholder="# one key=value per line, or paste a JSON object">{{ values.get('__raw__', '') }}</textarea>
+        <span class="field-hint">No schema declared — use <code>key=value</code> per line or a JSON object.</span>
+      </label>
+    {% endif %}
+
+    <div class="row" style="margin-top:var(--sp-2)">
+      <button type="submit">{{ 'Save payload' if payload else 'Create payload' }}</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -41,7 +41,19 @@
     </div>
   {% endif %}
   {% set submitted = submitted_inputs or {} %}
+  {% if payloads %}
+  <label>Payload
+    <select id="payload-picker">
+      <option value="">— none (fill manually) —</option>
+      {% for pv in payloads %}
+        <option value="{{ pv.payload.id }}">{{ pv.payload.name }}{% if pv.payload.visibility == 'private' %} (private){% endif %}{% if pv.stale %} — needs update{% endif %}</option>
+      {% endfor %}
+    </select>
+    <span class="field-hint">Pre-fills the form below with a saved set of values. You can still edit before running.</span>
+  </label>
+  {% endif %}
   <form method="post" action="/pipelines/{{ p.id }}/run" class="stack">
+    <input type="hidden" name="payload_id" id="run-payload-id" value="" />
     {% if schema %}
       {% for s in schema %}
         {% set prev = submitted.get(s.name) %}
@@ -93,6 +105,51 @@
 </section>
 
 <section class="card">
+  <div class="row" style="justify-content:space-between; align-items:center">
+    <h2 style="margin:0">Payloads</h2>
+    {% if can_manage_payloads %}
+    <a class="btn btn-sm" href="/pipelines/{{ p.id }}/payloads/new">+ New payload</a>
+    {% endif %}
+  </div>
+  <p class="field-hint" style="margin-top:var(--sp-1)">Saved input sets. Select one above to pre-fill the run form.</p>
+  {% if payloads %}
+  <table class="data">
+    <thead><tr><th>Name</th><th>Description</th><th>Visibility</th><th></th></tr></thead>
+    <tbody>
+    {% for pv in payloads %}
+      {% set pl = pv.payload %}
+      <tr>
+        <td style="font-weight:500; color:var(--fg-strong)">
+          {{ pl.name }}
+          {% if pv.stale %}<span class="badge badge-amber" title="{{ pv.stale | join('; ') }}">needs update</span>{% endif %}
+        </td>
+        <td class="muted" style="font-size:12.5px">{{ pl.description or '—' }}</td>
+        <td class="muted" style="font-size:12.5px">{{ 'Private' if pl.visibility == 'private' else 'Shared' }}</td>
+        <td style="text-align:right; white-space:nowrap">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="usePayload('{{ pl.id }}')">Use</button>
+          {% if can_manage_payloads %}
+          <a class="btn btn-ghost btn-sm" href="/pipelines/{{ p.id }}/payloads/{{ pl.id }}/edit">Edit</a>
+          <button type="button" class="btn btn-ghost btn-sm"
+                  onclick="renamePayload('{{ pl.id }}', {{ pl.name | tojson }})">Rename</button>
+          <form method="post" action="/pipelines/{{ p.id }}/payloads/{{ pl.id }}/copy" class="inline">
+            <button type="submit" class="btn btn-ghost btn-sm">Copy</button>
+          </form>
+          <form method="post" action="/pipelines/{{ p.id }}/payloads/{{ pl.id }}/delete" class="inline"
+                onsubmit="return confirm('Delete payload \'{{ pl.name }}\'?');">
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state">No payloads yet.{% if can_manage_payloads %} <a href="/pipelines/{{ p.id }}/payloads/new">Create one</a>.{% endif %}</div>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Recent runs</h2>
   {% if runs %}
   <table class="data">
@@ -118,4 +175,67 @@
     <div class="empty-state">No runs yet.</div>
   {% endif %}
 </section>
+
+<script>
+(function () {
+  const payloadValues = {{ payload_values_json | safe }};
+  const picker = document.getElementById('payload-picker');
+  const hiddenId = document.getElementById('run-payload-id');
+  const form = document.querySelector('form[action$="/run"]');
+
+  function clearInputs() {
+    if (!form) return;
+    form.querySelectorAll('[name^="input__"]').forEach(function (el) {
+      if (el.type === 'checkbox') el.checked = false;
+      else el.value = '';
+    });
+    const raw = form.querySelector('[name="inputs_text"]');
+    if (raw) raw.value = '';
+  }
+
+  function applyPayload(id) {
+    if (hiddenId) hiddenId.value = id || '';
+    clearInputs();
+    const v = payloadValues[id];
+    if (!form || !v) return;
+    Object.keys(v).forEach(function (key) {
+      if (key === '__raw__') {
+        const raw = form.querySelector('[name="inputs_text"]');
+        if (raw) raw.value = v[key];
+        return;
+      }
+      const el = form.querySelector('[name="input__' + key + '"]');
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = (v[key] === true || v[key] === 'true' || v[key] === 1 || v[key] === '1');
+      else el.value = v[key];
+    });
+  }
+
+  if (picker) picker.addEventListener('change', function () { applyPayload(picker.value); });
+
+  // "Use" button in the payloads table: select in the picker, pre-fill, scroll up.
+  window.usePayload = function (id) {
+    if (picker) { picker.value = id; }
+    applyPayload(id);
+    const card = form ? form.closest('.card') : null;
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  // Rename via a prompt that posts to the rename endpoint.
+  window.renamePayload = function (id, current) {
+    const name = window.prompt('New payload name:', current);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === current) return;
+    const f = document.createElement('form');
+    f.method = 'post';
+    f.action = '/pipelines/{{ p.id }}/payloads/' + id + '/rename';
+    const input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'name'; input.value = trimmed;
+    f.appendChild(input);
+    document.body.appendChild(f);
+    f.submit();
+  };
+})();
+</script>
 {% endblock %}

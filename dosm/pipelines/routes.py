@@ -18,6 +18,11 @@ from dosm.pipelines.inputs import (
     coerce_run_inputs,
     normalize_schema,
     parse_schema_form,
+    validate_payload_values,
+)
+from dosm.pipelines.payload_access import (
+    can_see_payload,
+    visible_payloads_filter,
 )
 from dosm.recording import events as rec_events
 
@@ -203,12 +208,31 @@ async def pipelines_detail(
     except Exception:
         target_summary = ""
         provider_name = p.provider
+
+    payloads_view, payload_values = _build_payloads_view(db, p, schema, user)
     return _templates(request).TemplateResponse(
         request,
         "pipelines/detail.html",
         {"p": p, "cfg": cfg, "schema": schema, "runs": runs_view, "user": user,
-         "target_summary": target_summary, "provider_name": provider_name},
+         "target_summary": target_summary, "provider_name": provider_name,
+         "payloads": payloads_view, "payload_values_json": json.dumps(payload_values),
+         "can_manage_payloads": user.role in ("operator", "admin")},
     )
+
+
+def _build_payloads_view(db: Session, pipeline, schema: list[dict], user: User):
+    """Return (list-of-view-dicts, {payload_id: values}) for the payloads the
+    user may see. Each view dict carries the payload, its values, and any
+    schema-drift errors so the template can flag stale ones."""
+    payloads = repo.list_payloads(db, pipeline.id, clause=visible_payloads_filter(user))
+    view = []
+    values_map: dict[str, dict] = {}
+    for pl in payloads:
+        values = json.loads(pl.values_json or "{}")
+        values_map[str(pl.id)] = values
+        stale = validate_payload_values(schema, values) if schema else []
+        view.append({"payload": pl, "values": values, "stale": stale})
+    return view, values_map
 
 
 @router.get("/{pid}/edit", response_class=HTMLResponse, include_in_schema=False)
@@ -320,6 +344,15 @@ async def pipelines_trigger(
             )
     else:
         inputs = _decode_inputs_text(form.get("inputs_text") or "")
+    # Note which payload (if any) the run was launched from, for traceability.
+    # Pre-fill is editable, so this records the starting point, not an exact match.
+    payload_note = ""
+    payload_id = form.get("payload_id")
+    if payload_id:
+        pl = repo.get_payload(db, int(payload_id)) if str(payload_id).isdigit() else None
+        if pl is not None and pl.pipeline_id == p.id and can_see_payload(user, pl):
+            payload_note = f" payload={pl.name!r}"
+
     run = await repo.trigger_pipeline(cfg, db, p, inputs=inputs, user_id=user.id)
     rec_events.record_pipeline_triggered(user.id, p.name, run.id, p.provider)
     db.add(
@@ -329,6 +362,7 @@ async def pipelines_trigger(
             target=f"pipeline:{p.id}",
             details=(
                 f"run={run.id} status={run.status}"
+                + payload_note
                 + (f" external={run.external_id}" if run.external_id else "")
                 + (f" error={(run.error or '')[:120]}" if run.error else "")
             ),
@@ -381,3 +415,192 @@ async def pipelines_run_refresh(
         )
     )
     return RedirectResponse(f"/pipelines/runs/{run.id}", status_code=303)
+
+
+# ---- Payloads (saved input sets) -----------------------------------------
+
+
+def _schema_for(p) -> list[dict]:
+    return normalize_schema(json.loads(p.inputs_schema)) if p.inputs_schema else []
+
+
+def _payload_values_from_form(schema: list[dict], form) -> dict:
+    """Build a payload's stored values from a submitted form. Typed pipelines go
+    through the same coercion/validation as a real run; schemaless ones keep the
+    raw ``inputs_text`` so the textarea can be pre-filled verbatim."""
+    if schema:
+        return coerce_run_inputs(schema, form)
+    raw = (form.get("inputs_text") or "").strip()
+    return {"__raw__": raw} if raw else {}
+
+
+def _payload_or_404(db, pid: int, payload_id: int, user):
+    """Load a payload, enforcing it belongs to the pipeline and the user may see
+    it (404 — not 403 — so private payloads don't leak)."""
+    p = repo.get_pipeline(db, pid)
+    if p is None:
+        raise HTTPException(404)
+    pl = repo.get_payload(db, payload_id)
+    if pl is None or pl.pipeline_id != pid or not can_see_payload(user, pl):
+        raise HTTPException(404)
+    return p, pl
+
+
+@router.get("/{pid}/payloads/new", response_class=HTMLResponse, include_in_schema=False)
+async def payload_new_form(
+    pid: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+):
+    p = repo.get_pipeline(db, pid)
+    if p is None:
+        raise HTTPException(404)
+    return _templates(request).TemplateResponse(
+        request,
+        "pipelines/payload_form.html",
+        {"p": p, "schema": _schema_for(p), "payload": None, "values": {}, "user": user},
+    )
+
+
+@router.post("/{pid}/payloads/new", include_in_schema=False)
+async def payload_create(
+    pid: int,
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    visibility: str = Form("shared"),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+):
+    p = repo.get_pipeline(db, pid)
+    if p is None:
+        raise HTTPException(404)
+    schema = _schema_for(p)
+    form = await request.form()
+    try:
+        values = _payload_values_from_form(schema, form)
+        pl = repo.create_payload(
+            db,
+            pipeline_id=pid,
+            name=name,
+            values=values,
+            description=description,
+            visibility=visibility,
+            created_by_id=user.id,
+        )
+    except (InputValidationError, repo.PayloadNameConflict, ValueError) as e:
+        return _templates(request).TemplateResponse(
+            request,
+            "pipelines/payload_form.html",
+            {"p": p, "schema": schema, "payload": None,
+             "values": {k.removeprefix("input__"): v for k, v in form.items() if k.startswith("input__")},
+             "user": user, "error": str(e), "name": name, "description": description,
+             "visibility": visibility},
+            status_code=400,
+        )
+    db.add(AuditLog(actor_id=user.id, action="payload.create",
+                    target=f"pipeline:{pid}", details=f"payload={pl.id} name={pl.name!r} visibility={pl.visibility}"))
+    db.commit()
+    return RedirectResponse(f"/pipelines/{pid}", status_code=303)
+
+
+@router.get("/{pid}/payloads/{payload_id}/edit", response_class=HTMLResponse, include_in_schema=False)
+async def payload_edit_form(
+    pid: int,
+    payload_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+):
+    p, pl = _payload_or_404(db, pid, payload_id, user)
+    return _templates(request).TemplateResponse(
+        request,
+        "pipelines/payload_form.html",
+        {"p": p, "schema": _schema_for(p), "payload": pl,
+         "values": json.loads(pl.values_json or "{}"), "user": user},
+    )
+
+
+@router.post("/{pid}/payloads/{payload_id}/edit", include_in_schema=False)
+async def payload_update(
+    pid: int,
+    payload_id: int,
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    visibility: str = Form("shared"),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+):
+    p, pl = _payload_or_404(db, pid, payload_id, user)
+    schema = _schema_for(p)
+    form = await request.form()
+    try:
+        values = _payload_values_from_form(schema, form)
+        repo.update_payload(db, pl, name=name, values=values,
+                            description=description, visibility=visibility)
+    except (InputValidationError, repo.PayloadNameConflict, ValueError) as e:
+        return _templates(request).TemplateResponse(
+            request,
+            "pipelines/payload_form.html",
+            {"p": p, "schema": schema, "payload": pl,
+             "values": {k.removeprefix("input__"): v for k, v in form.items() if k.startswith("input__")},
+             "user": user, "error": str(e)},
+            status_code=400,
+        )
+    db.add(AuditLog(actor_id=user.id, action="payload.update",
+                    target=f"pipeline:{pid}", details=f"payload={pl.id} name={pl.name!r}"))
+    db.commit()
+    return RedirectResponse(f"/pipelines/{pid}", status_code=303)
+
+
+@router.post("/{pid}/payloads/{payload_id}/rename", include_in_schema=False)
+async def payload_rename(
+    pid: int,
+    payload_id: int,
+    name: str = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+):
+    p, pl = _payload_or_404(db, pid, payload_id, user)
+    old = pl.name
+    try:
+        repo.update_payload(db, pl, name=name)
+    except (repo.PayloadNameConflict, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+    db.add(AuditLog(actor_id=user.id, action="payload.rename",
+                    target=f"pipeline:{pid}", details=f"payload={pl.id} {old!r} -> {pl.name!r}"))
+    db.commit()
+    return RedirectResponse(f"/pipelines/{pid}", status_code=303)
+
+
+@router.post("/{pid}/payloads/{payload_id}/copy", include_in_schema=False)
+async def payload_copy(
+    pid: int,
+    payload_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+):
+    p, pl = _payload_or_404(db, pid, payload_id, user)
+    new = repo.copy_payload(db, pl, created_by_id=user.id)
+    db.add(AuditLog(actor_id=user.id, action="payload.copy",
+                    target=f"pipeline:{pid}", details=f"from={pl.id} to={new.id} name={new.name!r}"))
+    db.commit()
+    return RedirectResponse(f"/pipelines/{pid}", status_code=303)
+
+
+@router.post("/{pid}/payloads/{payload_id}/delete", include_in_schema=False)
+async def payload_delete(
+    pid: int,
+    payload_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+):
+    p, pl = _payload_or_404(db, pid, payload_id, user)
+    name = pl.name
+    repo.delete_payload(db, pl)
+    db.add(AuditLog(actor_id=user.id, action="payload.delete",
+                    target=f"pipeline:{pid}", details=f"payload={payload_id} name={name!r}"))
+    db.commit()
+    return RedirectResponse(f"/pipelines/{pid}", status_code=303)

@@ -449,6 +449,38 @@ class PipelineRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class PipelinePayload(Base):
+    """A named, reusable set of input values for one pipeline.
+
+    Lets an executor pick a predefined "payload" (e.g. "Prod deploy – us-east")
+    instead of re-typing the input form. ``values_json`` holds the same shape as
+    ``PipelineRun.inputs`` (a dict of input name -> typed value); for schemaless
+    pipelines it holds ``{"__raw__": "<key=value text>"}``. Visibility mirrors
+    credentials: ``shared`` (anyone who can run the pipeline) or ``private``
+    (creator + admins only)."""
+
+    __tablename__ = "pipeline_payloads"
+    __table_args__ = (
+        UniqueConstraint("pipeline_id", "name", name="uq_payload_pipeline_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pipeline_id: Mapped[int] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    values_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="shared")
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 # ---- Monitoring sources ---------------------------------------------------
 
 
@@ -640,6 +672,7 @@ __all__ = [
     "PlanCard",
     "Pipeline",
     "PipelineRun",
+    "PipelinePayload",
     "RecordingSession",
     "NetworkPort",
     "NetworkScan",

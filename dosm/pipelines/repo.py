@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.config import Config
-from dosm.models import Pipeline, PipelineRun
+from dosm.models import Pipeline, PipelinePayload, PipelineRun
 from dosm.pipelines.adapters import (
     PipelineProviderError,
     PipelineUnreachable,
@@ -98,6 +98,122 @@ def update_pipeline(
 
 def delete_pipeline(db: Session, pipeline: Pipeline) -> None:
     db.delete(pipeline)
+    db.flush()
+
+
+# ---- Payloads (saved input-value sets) -----------------------------------
+
+
+class PayloadNameConflict(ValueError):
+    """A payload with this display name already exists on the pipeline."""
+
+
+def list_payloads(db: Session, pipeline_id: int, clause=None) -> list[PipelinePayload]:
+    """Payloads for a pipeline, ordered by name. ``clause`` is an optional
+    SQLAlchemy filter (from payload_access.visible_payloads_filter) limiting to
+    what the requesting user may see; ``True`` / ``None`` means no restriction."""
+    stmt = select(PipelinePayload).where(PipelinePayload.pipeline_id == pipeline_id)
+    if clause is not None and clause is not True:
+        stmt = stmt.where(clause)
+    return list(db.execute(stmt.order_by(PipelinePayload.name)).scalars())
+
+
+def get_payload(db: Session, payload_id: int) -> PipelinePayload | None:
+    return db.get(PipelinePayload, payload_id)
+
+
+def _assert_name_free(db: Session, pipeline_id: int, name: str, exclude_id: int | None = None) -> None:
+    existing = db.execute(
+        select(PipelinePayload).where(
+            PipelinePayload.pipeline_id == pipeline_id,
+            PipelinePayload.name == name,
+        )
+    ).scalar_one_or_none()
+    if existing is not None and existing.id != exclude_id:
+        raise PayloadNameConflict(f"a payload named {name!r} already exists")
+
+
+def create_payload(
+    db: Session,
+    *,
+    pipeline_id: int,
+    name: str,
+    values: dict,
+    description: str | None = None,
+    visibility: str = "shared",
+    created_by_id: int | None = None,
+) -> PipelinePayload:
+    name = name.strip()
+    if not name:
+        raise ValueError("payload name is required")
+    _assert_name_free(db, pipeline_id, name)
+    payload = PipelinePayload(
+        pipeline_id=pipeline_id,
+        name=name,
+        description=(description or None),
+        values_json=json.dumps(values or {}),
+        visibility=visibility if visibility in ("shared", "private") else "shared",
+        created_by_id=created_by_id,
+    )
+    db.add(payload)
+    db.flush()
+    return payload
+
+
+def update_payload(
+    db: Session,
+    payload: PipelinePayload,
+    *,
+    name: str | None = None,
+    values: dict | None = None,
+    description: str | None = None,
+    visibility: str | None = None,
+) -> PipelinePayload:
+    """Redefine a payload. Any subset of fields may be passed; ``name`` covers
+    the rename case (uniqueness enforced per pipeline)."""
+    if name is not None:
+        name = name.strip()
+        if not name:
+            raise ValueError("payload name is required")
+        _assert_name_free(db, payload.pipeline_id, name, exclude_id=payload.id)
+        payload.name = name
+    if values is not None:
+        payload.values_json = json.dumps(values)
+    if description is not None:
+        payload.description = description or None
+    if visibility is not None and visibility in ("shared", "private"):
+        payload.visibility = visibility
+    db.flush()
+    return payload
+
+
+def copy_payload(
+    db: Session, payload: PipelinePayload, *, created_by_id: int | None = None
+) -> PipelinePayload:
+    """Duplicate a payload under a derived, unique name ("X (copy)", "X (copy 2)")."""
+    base = f"{payload.name} (copy)"
+    name = base
+    n = 2
+    while True:
+        try:
+            _assert_name_free(db, payload.pipeline_id, name)
+            break
+        except PayloadNameConflict:
+            name = f"{base[:-1]} {n})" if base.endswith(")") else f"{base} {n}"
+            n += 1
+    return create_payload(
+        db,
+        pipeline_id=payload.pipeline_id,
+        name=name,
+        values=json.loads(payload.values_json or "{}"),
+        description=payload.description,
+        visibility=payload.visibility,
+        created_by_id=created_by_id,
+    )
+
+
+def delete_payload(db: Session, payload: PipelinePayload) -> None:
+    db.delete(payload)
     db.flush()
 
 
