@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Settings | Access control | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Settings</h1>
+  </div>
+</header>
+
+<div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider)">
+  <a href="/settings" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-muted); border-bottom:2px solid transparent; margin-bottom:-1px">Terminal launchers</a>
+  <a href="/settings/integrations" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-muted); border-bottom:2px solid transparent; margin-bottom:-1px">Integrations</a>
+  <a href="/settings/rbac" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-strong); border-bottom:2px solid var(--accent,#6366f1); margin-bottom:-1px">Access control</a>
+</div>
+
+{% if request.query_params.get('saved') %}
+<section class="card" style="border-left:3px solid var(--success); padding-top:var(--sp-3); padding-bottom:var(--sp-3)">
+  <span class="badge badge-green"><span class="dot ok"></span> Saved</span>
+  <span class="muted" style="margin-left:var(--sp-2)">Applies to the next sign-in for affected users.</span>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>AD / Okta group → DOSM role</h2>
+  <p class="muted" style="font-size:13px; margin-bottom:4px">
+    Each group name (exactly as it appears in the Okta <code>groups</code> claim) maps to a
+    DOSM role. When a user belongs to several mapped groups, the <strong>highest</strong> role wins.
+    A user in no mapped group gets the default role below. Role is recomputed at each sign-in.
+  </p>
+  {% if not okta_enabled %}
+    <div class="badge badge-amber" style="margin:8px 0">
+      Okta SSO is currently disabled — these mappings take effect once SSO is enabled in Integrations.
+    </div>
+  {% endif %}
+
+  <div class="row" style="gap:8px; margin:12px 0">
+    <a class="btn btn-subtle btn-sm" href="/settings/rbac/export.json">Export JSON</a>
+    <a class="btn btn-subtle btn-sm" href="/settings/rbac/export.csv">Export CSV</a>
+  </div>
+
+  <table class="data" style="margin-bottom:16px">
+    <thead><tr><th>Group</th><th style="width:160px">Role</th><th style="width:90px"></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td style="font-weight:500; color:var(--fg-strong)">{{ r.group }}</td>
+        <td>
+          <form method="post" action="/settings/rbac/mapping" class="row" style="gap:6px; align-items:center">
+            <input type="hidden" name="group" value="{{ r.group }}" />
+            <select name="role" onchange="this.form.submit()">
+              {% for role in roles %}
+                <option value="{{ role }}" {% if role == r.role %}selected{% endif %}>{{ role }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </td>
+        <td style="text-align:right">
+          <form method="post" action="/settings/rbac/mapping/delete" class="inline"
+                onsubmit="return confirm('Remove mapping for {{ r.group }}?');">
+            <input type="hidden" name="group" value="{{ r.group }}" />
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Remove</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted" style="padding:14px">No group mappings yet — add one below.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3 style="font-size:14px; margin:0 0 8px">Add / update a group</h3>
+  <form method="post" action="/settings/rbac/mapping" class="row" style="gap:8px; align-items:flex-end; flex-wrap:wrap">
+    <label style="flex:1; min-width:240px">
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">AD / Okta group name</span>
+      <input type="text" name="group" required placeholder="e.g. DOSM-Operators" style="width:100%; box-sizing:border-box" />
+    </label>
+    <label>
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Role</span>
+      <select name="role">
+        {% for role in roles %}<option value="{{ role }}">{{ role }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn">Add</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Default role</h2>
+  <p class="muted" style="font-size:13px; margin-bottom:12px">
+    Assigned to an authenticated user who belongs to none of the mapped groups above.
+  </p>
+  <form method="post" action="/settings/rbac/default" class="row" style="gap:8px; align-items:flex-end">
+    <label>
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Default role</span>
+      <select name="default_role">
+        {% for role in roles %}
+          <option value="{{ role }}" {% if role == default_role %}selected{% endif %}>{{ role }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn">Save</button>
+  </form>
+</section>
+{% endblock %}
