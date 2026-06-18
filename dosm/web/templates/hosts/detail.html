@@ -55,12 +55,23 @@
 
 <section class="card">
   <h2>Reachability</h2>
+  {% set rd_gateway = host.protocol == 'rdp' and jump_chain and jump_chain[-1].protocol == 'rdp' %}
   <div class="row">
     <button id="ping-btn" class="btn" type="button">Ping</button>
     <span id="ping-result" class="muted" style="font-size:13px; align-self:center">
-      TCP probe to <code>{{ host.hostname }}:{{ host.port }}</code>{% if jump_chain %} via {{ jump_chain|length }} jump host{{ '' if jump_chain|length == 1 else 's' }}{% endif %}.
+      {% if rd_gateway %}
+        Pings the RD Gateway <code>{{ jump_chain[-1].name }}</code> only — this RDP host connects via RD Gateway, not an SSH tunnel.
+      {% else %}
+        TCP probe to <code>{{ host.hostname }}:{{ host.port }}</code>{% if jump_chain %} via {{ jump_chain|length }} jump host{{ '' if jump_chain|length == 1 else 's' }}{% endif %}.
+      {% endif %}
     </span>
   </div>
+  {% if rd_gateway %}
+  <p class="field-hint" style="margin-top:8px">
+    Ping checks SSH-jump reachability only. For RDP-jumpbox (RD Gateway) chains it verifies the
+    gateway is reachable, not the target — use <strong>Connect</strong> below to test the full RDP session.
+  </p>
+  {% endif %}
 </section>
 <script>
 (function () {
@@ -76,8 +87,15 @@
       const res = await fetch('/hosts/{{ host.id }}/ping', {method: 'POST'});
       const d = await res.json();
       const latency = d.latency_ms === null ? '' : ` (${d.latency_ms} ms)`;
-      out.textContent = `${d.ok ? '✓' : '✗'} ${d.message}${latency}`;
-      if (d.ok) {
+      // RD Gateway success only validates the gateway, not the target — show it
+      // as informational (ℹ, neutral) rather than a green "target reachable".
+      const rdgwInfo = d.via === 'rdgateway' && d.ok;
+      const icon = rdgwInfo ? 'ℹ' : (d.ok ? '✓' : '✗');
+      out.textContent = `${icon} ${d.message}${latency}`;
+      if (rdgwInfo) {
+        out.className = 'muted';
+        out.style.color = 'var(--accent, #6366f1)';
+      } else if (d.ok) {
         out.className = '';
         out.style.color = 'var(--success)';
       } else {

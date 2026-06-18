@@ -305,13 +305,57 @@ async def hosts_ping(
         })
 
     chain = resolve_jump_chain(db, host)
+
+    # RD Gateway topology (RDP target behind an RDP jumpbox): this is NOT an
+    # SSH-tunnelled path — guacd connects to the gateway, which relays RDP to the
+    # target (same detection as the Guacamole connect builder). Ping uses
+    # SSH-tunnel semantics and so *cannot* reach the target directly; that's by
+    # design, not a connectivity failure. The meaningful reachability signal here
+    # is whether the RD Gateway itself answers, so probe the gateway and tell the
+    # operator to use Connect for the full session test.
+    if host.protocol == "rdp" and chain and chain[-1].protocol == "rdp":
+        gateway = chain[-1]
+        gw_port = gateway.port or 443
+        gw_target = f"{gateway.hostname}:{gw_port}"
+        started = time.monotonic()
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(gateway.hostname, gw_port),
+                timeout=PING_TIMEOUT_SECONDS,
+            )
+        except (TimeoutError, OSError) as e:
+            reason = (
+                f"timed out after {PING_TIMEOUT_SECONDS:.0f}s"
+                if isinstance(e, TimeoutError) else str(e)
+            )
+            return JSONResponse({
+                "ok": False, "via": "rdgateway", "target": gw_target, "latency_ms": None,
+                "message": f"RD Gateway {gateway.name!r} unreachable on port {gw_port} "
+                           f"({reason}). The RDP session routes through this gateway, so it "
+                           f"must be reachable. The target itself isn't pinged directly — "
+                           f"use Connect to test the full RDP session.",
+            })
+        latency_ms = round((time.monotonic() - started) * 1000.0, 1)
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return JSONResponse({
+            "ok": True, "via": "rdgateway", "target": gw_target, "latency_ms": latency_ms,
+            "message": f"RD Gateway {gateway.name!r} reachable on port {gw_port}. This host "
+                       f"connects via RD Gateway, not an SSH tunnel, so ping validates the "
+                       f"gateway only — use Connect to test the full RDP session.",
+        })
+
     non_ssh = [h for h in chain if h.protocol != "ssh"]
     if non_ssh:
         names = ", ".join(f"{h.name!r} ({h.protocol})" for h in non_ssh)
         return JSONResponse({
             "ok": False, "via": "jump", "target": target, "latency_ms": None,
-            "message": f"jump chain has non-SSH hops ({names}); ping requires "
-                       f"an SSH-tunnelable chain",
+            "message": f"Ping only checks reachability through SSH-tunnelable jump chains. "
+                       f"This chain has non-SSH hop(s): {names}. For RDP-over-RDP-jumpbox "
+                       f"(RD Gateway) hosts use Connect to test the session instead.",
         })
 
     lease = None
