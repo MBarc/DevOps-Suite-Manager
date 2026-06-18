@@ -20,7 +20,7 @@ dosm pipelines poll
 
 ## Gotchas
 
-- `dosm pipelines poll` does **not** trigger pipelines — it only updates
+- `dosm pipelines poll` does **not** trigger pipelines - it only updates
   the recorded status of runs that are already in flight by hitting the
   provider API (e.g. GitHub Actions). To launch a run, use the web UI
   or the upcoming `dosm pipelines run` command.

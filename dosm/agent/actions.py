@@ -201,7 +201,7 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
         if _asyncssh is not None and isinstance(e, _asyncssh.PermissionDenied):
             summary = (
                 f"{host_label}: SSH authentication rejected for user "
-                f"{target.username!r} — check the credential profile"
+                f"{target.username!r} - check the credential profile"
             )
         else:
             summary = f"{host_label}: {type(e).__name__}: {e}"
@@ -229,13 +229,13 @@ def _ssh_exec_classify(args: dict) -> str:
 SSH_EXEC = ActionSpec(
     name="ssh_exec",
     description=(
-        "Run a shell command ON a specific registered Linux/SSH host — the host is the executor. "
+        "Run a shell command ON a specific registered Linux/SSH host - the host is the executor. "
         "Use whenever a named host should run the command: "
         "'check disk on herupa', 'restart the agent on app-server', "
         "'from herupa, can it reach the DB?', 'what processes are running on host X?'. "
-        "Jump-host chains are resolved automatically from the inventory — "
+        "Jump-host chains are resolved automatically from the inventory - "
         "always name the FINAL target host, never a jump box. "
-        "Do NOT use this for connectivity checks FROM DOSM to a host — use local_exec for that. "
+        "Do NOT use this for connectivity checks FROM DOSM to a host - use local_exec for that. "
         "Always use ping -c 4, not plain ping."
     ),
     args_schema=[
@@ -327,15 +327,15 @@ async def _local_exec_runner(cfg: Config, args: dict) -> ActionResult:
 LOCAL_EXEC = ActionSpec(
     name="local_exec",
     description=(
-        "Run a shell command on the DOSM server/container itself — DOSM is always the executor. "
+        "Run a shell command on the DOSM server/container itself - DOSM is always the executor. "
         "Use for diagnostics FROM DOSM's network perspective: "
         "'can DOSM reach herupa?', 'ping herupa', 'is port 5432 open on db-server?'. "
         "When a host name appears in your command (e.g. 'ping herupa'), "
-        "that host is the TARGET of the diagnostic — DOSM is still the one running the command. "
+        "that host is the TARGET of the diagnostic - DOSM is still the one running the command. "
         "IMPORTANT: inventory host names are labels, not DNS names. "
         "Always call list_hosts first to get the real hostname or IP, then use that in your command. "
         "Use ssh_exec or winrm_exec when a registered host should be the executor. "
-        "This tool has NO 'host' parameter — never pass host= here. "
+        "This tool has NO 'host' parameter - never pass host= here. "
         "Always use ping -c 4, not plain ping."
     ),
     args_schema=[
@@ -376,7 +376,7 @@ async def _winrm_exec_runner(cfg: Config, args: dict) -> ActionResult:
     use_https = mcfg.winrm_use_https
     transport = mcfg.winrm_transport
 
-    # Step 1: resolve host + creds — close session before async tunnel work.
+    # Step 1: resolve host + creds - close session before async tunnel work.
     with session_scope() as s:
         host = s.execute(select(Host).where(Host.name == host_name)).scalar_one_or_none()
         if host is None:
@@ -489,7 +489,7 @@ WINRM_EXEC = ActionSpec(
     name="winrm_exec",
     description=(
         "Run a PowerShell command on a Windows host in the inventory over WinRM. "
-        "Use for Windows servers — service queries, network checks, file ops, WMI. "
+        "Use for Windows servers - service queries, network checks, file ops, WMI. "
         "Examples: 'Get-Service spooler', 'Test-NetConnection target -Port 443', "
         "'query session', 'Get-WmiObject Win32_Process'. Jump-host chains are "
         "handled automatically. For Linux hosts use ssh_exec; for commands from "
@@ -570,7 +570,7 @@ async def _run_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
 
 
 def _run_pipeline_classify(args: dict) -> str:
-    # Pipeline runs always state-changing — keep them at safe tier so the
+    # Pipeline runs always state-changing - keep them at safe tier so the
     # plan card uses the standard Approve flow (no typed confirmation), but
     # the user still has to approve. Elevated triggers can come later (e.g.
     # for pipelines tagged `prod`).
@@ -815,7 +815,7 @@ async def _upsert_doc_runner(cfg: Config, args: dict) -> ActionResult:
     started = time.monotonic()
     try:
         if path:
-            # Update existing doc — derive folder_slug + doc_slug from path
+            # Update existing doc - derive folder_slug + doc_slug from path
             parts = path.replace("\\", "/").strip("/")
             if "/" in parts:
                 save_folder_slug = parts.rsplit("/", 1)[0]
@@ -1126,7 +1126,7 @@ async def _create_credential_runner(cfg: Config, args: dict) -> ActionResult:
     if kind not in ("login", "ssh_key", "pat"):
         return ActionResult(ok=False, summary=f"invalid kind {kind!r}; use login, ssh_key, or pat")
     if not secret_value:
-        return ActionResult(ok=False, summary="secret_value is required — enter it in the plan card form")
+        return ActionResult(ok=False, summary="secret_value is required - enter it in the plan card form")
 
     secret_ref = _auto_secret_ref(name)
     cred_id: int
@@ -1152,13 +1152,13 @@ async def _create_credential_runner(cfg: Config, args: dict) -> ActionResult:
 
 CREATE_CREDENTIAL = ActionSpec(
     name="create_credential",
-    description="Create a new credential profile. The secret value is entered by the operator in the plan card — never proposed by the agent.",
+    description="Create a new credential profile. The secret value is entered by the operator in the plan card - never proposed by the agent.",
     args_schema=[
         {"name": "name", "type": "string", "required": True, "description": "Unique profile name."},
         {"name": "kind", "type": "string", "required": True, "description": "Credential kind: 'login' (username+password for SSH, RDP, WinRM, or any Windows/Linux server), 'ssh_key' (private key), or 'pat' (personal access token). Use 'login' for all username/password credentials regardless of OS or protocol."},
         {"name": "username", "type": "string", "required": False, "description": "Username (for login/ssh_key kinds)."},
         {"name": "domain", "type": "string", "required": False, "description": "Windows domain (optional)."},
-        {"name": "secret_value", "type": "secret", "required": True, "description": "Password / SSH key / PAT — entered by operator, never from LLM."},
+        {"name": "secret_value", "type": "secret", "required": True, "description": "Password / SSH key / PAT - entered by operator, never from LLM."},
     ],
     runner=_create_credential_runner,
     classify=lambda args: "elevated",
@@ -1213,7 +1213,7 @@ UPDATE_CREDENTIAL = ActionSpec(
         {"name": "name", "type": "string", "required": True, "description": "Existing credential name."},
         {"name": "username", "type": "string", "required": False, "description": "New username (omit to keep current)."},
         {"name": "domain", "type": "string", "required": False, "description": "New domain (omit to keep current)."},
-        {"name": "secret_value", "type": "secret", "required": False, "description": "New secret — leave blank to keep existing."},
+        {"name": "secret_value", "type": "secret", "required": False, "description": "New secret - leave blank to keep existing."},
     ],
     runner=_update_credential_runner,
     classify=lambda args: "elevated",
@@ -1396,8 +1396,8 @@ CREATE_MONITORING_SOURCE = ActionSpec(
         {"name": "tool", "type": "string", "required": True, "description": "Tool type: dynatrace, datadog, servicenow, or prometheus."},
         {"name": "url", "type": "string", "required": True, "description": "Base URL (Dynatrace env URL, Datadog site like datadoghq.com, ServiceNow instance URL, or Prometheus base URL)."},
         {"name": "username", "type": "string", "required": False, "description": "Username (ServiceNow only)."},
-        {"name": "token", "type": "secret", "required": False, "description": "Primary API token — entered by operator in plan card."},
-        {"name": "token2", "type": "secret", "required": False, "description": "Secondary token (Datadog app key) — entered by operator in plan card."},
+        {"name": "token", "type": "secret", "required": False, "description": "Primary API token - entered by operator in plan card."},
+        {"name": "token2", "type": "secret", "required": False, "description": "Secondary token (Datadog app key) - entered by operator in plan card."},
         {"name": "enabled", "type": "boolean", "required": False, "description": "Start enabled (default true)."},
     ],
     runner=_create_monitoring_source_runner,
@@ -1474,8 +1474,8 @@ UPDATE_MONITORING_SOURCE = ActionSpec(
         {"name": "tool", "type": "string", "required": False, "description": "New tool type (dynatrace, datadog, servicenow, prometheus)."},
         {"name": "url", "type": "string", "required": False, "description": "New base URL."},
         {"name": "username", "type": "string", "required": False, "description": "New username (ServiceNow only)."},
-        {"name": "token", "type": "secret", "required": False, "description": "New primary token — leave blank to keep existing."},
-        {"name": "token2", "type": "secret", "required": False, "description": "New secondary token — leave blank to keep existing."},
+        {"name": "token", "type": "secret", "required": False, "description": "New primary token - leave blank to keep existing."},
+        {"name": "token2", "type": "secret", "required": False, "description": "New secondary token - leave blank to keep existing."},
         {"name": "enabled", "type": "boolean", "required": False, "description": "Enable or disable the source."},
     ],
     runner=_update_monitoring_source_runner,

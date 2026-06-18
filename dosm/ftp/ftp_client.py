@@ -11,7 +11,7 @@ Why hand-rolled and blocking rather than ``ftplib`` or an async client:
 * **Pluggable socket factory.** Every control/data socket is opened through
   an injected ``SockFactory`` so the same code path serves a direct host
   (plain ``socket.create_connection``) and a jumped host (SOCKS5 through an
-  ``asyncssh`` listener) — see ``dosm/ftp/socks.py``.
+  ``asyncssh`` listener) - see ``dosm/ftp/socks.py``.
 * **Passive only.** Active mode requires the server to connect back to the
   client, which is unroutable through a jump. We always use EPSV/PASV and,
   for PASV, ignore the server-advertised IP (often a wrong NAT/internal
@@ -175,7 +175,7 @@ class FtpClient:
             pass
         finally:
             _shutdown_data(data)
-        # MLSD unsupported — fall back to a fresh LIST data connection.
+        # MLSD unsupported - fall back to a fresh LIST data connection.
         data = self._open_data()
         try:
             self._send(f"LIST{suffix}")
@@ -237,7 +237,7 @@ class FtpClient:
 
     def _passive(self) -> tuple[str, int]:
         # EPSV first: returns a port only, so the data connection always uses
-        # the control host — no chance of a bogus PASV IP.
+        # the control host - no chance of a bogus PASV IP.
         self._send("EPSV")
         code, text = self._read_reply()
         if code == 229:
@@ -265,7 +265,7 @@ class FtpClient:
         tls = self._ssl_context.wrap_socket(raw, **kwargs)
         if save_session:
             # Capture the negotiated session so PROT P data connections can
-            # resume it — the thing ftplib cannot do.
+            # resume it - the thing ftplib cannot do.
             self._tls_session = tls.session
         return tls
 
@@ -369,7 +369,7 @@ def _parse_mlsd(raw: bytes) -> list[RemoteEntry]:
                 k, v = fact.split("=", 1)
                 facts[k.lower()] = v
         typ = facts.get("type", "").lower()
-        if typ in ("cdir", "pdir"):  # "." and ".." — skip
+        if typ in ("cdir", "pdir"):  # "." and ".." - skip
             continue
         is_dir = typ == "dir"
         size = None

@@ -1,5 +1,5 @@
 """Test doubles for the file-transfer suite: a strict FTPS server, an SFTP
-server, and an in-process SSH jump — all in-process so the tests need no
+server, and an in-process SSH jump - all in-process so the tests need no
 Docker and no external hosts.
 """
 from __future__ import annotations
@@ -87,7 +87,7 @@ class FtpsServer:
 
 class _JumpServer(asyncssh.SSHServer):
     def begin_auth(self, username: str) -> bool:
-        return False  # no auth — a throwaway jump box
+        return False  # no auth - a throwaway jump box
 
     def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
         return True  # permit direct-tcpip forwarding (what the SOCKS proxy uses)
@@ -124,7 +124,7 @@ class ThreadedSftpServer:
     """An SFTP server running in its own thread + event loop.
 
     Lets a synchronous TestClient drive a route whose handler (in the app's
-    loop) connects to this server over TCP — without sharing an event loop
+    loop) connects to this server over TCP - without sharing an event loop
     (which would deadlock) or a second in-process TLS stack.
     """
 

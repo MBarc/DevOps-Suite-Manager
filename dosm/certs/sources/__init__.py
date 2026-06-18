@@ -1,4 +1,4 @@
-"""Cloud certificate sources — Azure Key Vault, AWS ACM, GCP Certificate
+"""Cloud certificate sources - Azure Key Vault, AWS ACM, GCP Certificate
 Manager (and a Mock for dev/tests). Factory dispatches by ``CertSource.provider``.
 
 ``SUPPORTED_PROVIDERS`` drives the source-config dropdown. Cloud SDKs are
@@ -18,7 +18,7 @@ from dosm.config import Config
 from dosm.models import CertSource
 
 # provider key -> human label (drives the source-config dropdown + route
-# validation). "mock" is intentionally excluded — it stays available to the
+# validation). "mock" is intentionally excluded - it stays available to the
 # factory/tests but is not a user-selectable provider.
 SUPPORTED_PROVIDERS: dict[str, str] = {
     "azure_kv": "Azure Key Vault",

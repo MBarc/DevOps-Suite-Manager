@@ -38,7 +38,7 @@ class AuthConfig(BaseModel):
 class OktaConfig(BaseModel):
     """Okta OIDC single sign-on.
 
-    Authentication only — group membership for authorization rides in on the
+    Authentication only - group membership for authorization rides in on the
     ID token's ``groups`` claim (Okta federates AD), mapped to a DOSM role by
     ``RbacConfig.group_role_map``. The client secret is NOT stored here; it
     lives in the secrets backend under ``okta/client_secret``.
@@ -67,7 +67,7 @@ class RbacConfig(BaseModel):
 
     group_role_map: dict[str, str] = Field(default_factory=dict)
     # Role for an authenticated user who is in NONE of the mapped groups.
-    # ``"none"`` (the secure default) denies access entirely — only members of a
+    # ``"none"`` (the secure default) denies access entirely - only members of a
     # mapped group can sign in. Set to a real role (viewer/operator/admin) to
     # instead grant everyone who authenticates that baseline.
     default_role: str = "none"
@@ -86,7 +86,7 @@ class GuacamoleConfig(BaseModel):
     # public_url: browser-facing URL used for the iframe src. Defaults to
     # base_url. Set this when DOSM runs in Docker and base_url uses a service
     # name (e.g. http://guacamole:8080/guacamole) that the user's browser
-    # cannot resolve — point public_url at the host-reachable address instead.
+    # cannot resolve - point public_url at the host-reachable address instead.
     public_url: str | None = None
     secret_key_file: str = "config/guacamole.key"
     session_ttl_seconds: int = 1800
@@ -185,7 +185,7 @@ class DirectoryConfig(BaseModel):
     profile is attached to the chosen host.
     """
 
-    # Host id of the AD jumpbox. None means "not configured" — the Org page
+    # Host id of the AD jumpbox. None means "not configured" - the Org page
     # shows an empty state pointing the user at the configure flow.
     ad_jumpbox_host_id: int | None = None
     # Optional driver override. "winrm_jumpbox" is the production adapter.
@@ -248,7 +248,7 @@ class Config(BaseModel):
     pipelines: PipelinesConfig = PipelinesConfig()
     directory: DirectoryConfig = DirectoryConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
-    # cli_tools is a flat {tool_id: bool} map — Settings page toggles for
+    # cli_tools is a flat {tool_id: bool} map - Settings page toggles for
     # the CLI catalog. Enabled tools surface on the Terminals page.
     cli_tools: dict[str, bool] = Field(default_factory=dict)
 

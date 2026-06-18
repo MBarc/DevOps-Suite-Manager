@@ -1,14 +1,14 @@
-# DOSM — DevOps Operations Suite Manager
+# DOSM - DevOps Operations Suite Manager
 
 A self-hosted, modular operations console for managing on-prem
-infrastructure — Service Fabric clusters, Dynatrace ActiveGates, SAS
+infrastructure - Service Fabric clusters, Dynatrace ActiveGates, SAS
 Linux servers, generic SSH/RDP/VNC hosts, and whatever else you bolt on
 via modules. Browser SSH/RDP through an embedded Guacamole stack, an
 LLM grounded in your local documentation, and an agent mode where every
 action is a plan card you Approve / Edit / Reject before it runs.
 
 Local-first by design. SQLite for state, Ollama for the LLM, fastembed
-for embeddings, Guacamole for browser sessions — nothing here requires
+for embeddings, Guacamole for browser sessions - nothing here requires
 outbound traffic.
 
 > Status: actively developed. See [`docs/ROADMAP.md`](docs/ROADMAP.md)
@@ -32,7 +32,7 @@ outbound traffic.
 | **Modules** | First-party `system_info` ships in the box. Drop additional modules into `$DOSM_HOME/modules/` with a `module.yaml` manifest; each can mount routes, register agent actions, and constrain itself by OS. |
 | **Settings & CLI catalog** | Toggle which DevOps CLIs (Azure / AWS / gcloud / git / gh / Terraform / kubectl / Helm / Docker / Ansible / sfctl / pwsh / cmd / bash) appear as quick-launch terminals. |
 | **Pluggable secrets** | `LocalEncryptedBackend` (Fernet, blobs in the app DB) or `VaultBackend` (HashiCorp KV v2). Same interface; selected in `config.yaml`. |
-| **Audit log** | Every state-changing operation lands a row — auth, host CRUD, credential changes, agent plan card lifecycle, pipeline runs, terminal sessions, Guacamole connects. |
+| **Audit log** | Every state-changing operation lands a row - auth, host CRUD, credential changes, agent plan card lifecycle, pipeline runs, terminal sessions, Guacamole connects. |
 
 ---
 
@@ -140,7 +140,7 @@ dosm guacamole keygen               # generates the auth-json shared secret
 
 Chat and agent modes call out to an Ollama HTTP endpoint. Without one,
 both pages still render and the SSE stream surfaces a clean
-"Ollama unreachable" error — the rest of the app keeps working.
+"Ollama unreachable" error - the rest of the app keeps working.
 
 ```bash
 # Run Ollama locally
@@ -168,7 +168,7 @@ mode emits real `<plan>` blocks that become plan cards.
 ## Optional: Guacamole stack for browser SSH / RDP / VNC
 
 DOSM signs short-lived JSON connection envelopes that Guacamole's
-`guacamole-auth-json` extension consumes — your hosts and credentials
+`guacamole-auth-json` extension consumes - your hosts and credentials
 stay in DOSM, Guacamole is a dumb HTML5 renderer.
 
 ```bash
@@ -202,7 +202,7 @@ sessions to many targets behind one jump don't fight over auth.
 
 ## Configuration overview
 
-`config.yaml` has the following top-level sections (all optional —
+`config.yaml` has the following top-level sections (all optional -
 defaults shown via `dosm init` are sensible):
 
 | Section | What it controls |
@@ -241,7 +241,7 @@ defaults shown via `dosm init` are sensible):
 
 For a deeper tour and the design choices behind these picks, see
 [`docs/ROADMAP.md`](docs/ROADMAP.md). For the complete CLI reference,
-see [`docs/cli/`](docs/cli/) — every administrative action is
+see [`docs/cli/`](docs/cli/) - every administrative action is
 scriptable from the CLI, and the same reference is auto-installed
 into the docs vault on `dosm init` so the agent can retrieve it. For
 an AI assistant working in this repo, [`CLAUDE.md`](CLAUDE.md) is the

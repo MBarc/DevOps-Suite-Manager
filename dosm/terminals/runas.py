@@ -64,7 +64,7 @@ def build_runas_argv(target_user: str, base_argv: list[str]) -> list[str]:
 
     Both rely on the platform's native credential handling (sudoers /
     runas dialog). Password pass-through via the secrets backend is a
-    follow-up — see roadmap.
+    follow-up - see roadmap.
     """
     if platform.system() == "Windows":
         joined = " ".join(base_argv)

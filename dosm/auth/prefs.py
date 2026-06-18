@@ -1,7 +1,7 @@
 """Per-user UI preferences.
 
 Each ``User`` carries a private JSON blob (``User.prefs_json``) of lightweight UI
-preferences — last-used filters, default landing, etc. These are *personal*:
+preferences - last-used filters, default landing, etc. These are *personal*:
 they're scoped to the one user and never shared, which is the distinction from
 the admin-only global Settings page.
 

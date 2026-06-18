@@ -3,7 +3,7 @@
 ## When to use
 
 After `dosm init` creates `$DOSM_HOME`, run `dosm db init` once to create
-the SQLite schema. It's idempotent — safe to re-run after upgrading DOSM
+the SQLite schema. It's idempotent - safe to re-run after upgrading DOSM
 to pick up new tables added by `dosm/migrations.py`.
 
 ## Examples
@@ -20,9 +20,9 @@ dosm db init   # idempotent: adds new columns/tables only
 
 - `dosm db init` runs the lightweight idempotent migrator in
   `dosm/migrations.py`, which only handles **column adds**. Renames or
-  foreign-key changes need a full Alembic migration — those are not yet
+  foreign-key changes need a full Alembic migration - those are not yet
   wired up; flag a schema diff that goes beyond column-add rather than
   trying to work around it.
 - The DB file lives at `$DOSM_HOME/data/dosm.sqlite`. Back it up before
-  running upgrades; it contains hosts, credentials (refs only — secrets
+  running upgrades; it contains hosts, credentials (refs only - secrets
   are in the secrets backend), audit logs, plan cards, and pipeline runs.

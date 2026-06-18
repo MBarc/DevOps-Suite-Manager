@@ -189,7 +189,7 @@
     }
   }
 
-  // Light-touch tick — update only the elapsed timer text without rebuilding
+  // Light-touch tick - update only the elapsed timer text without rebuilding
   // the whole widget. Replacing innerHTML on a 1 s cadence can disrupt focus
   // in adjacent iframes (Guac SSH/RDP) in some browsers.
   function tickElapsed() {
@@ -292,7 +292,7 @@
       }
     };
 
-    // Live option toggles — debounce to one PUT per 600ms.
+    // Live option toggles - debounce to one PUT per 600ms.
     let debounce = null;
     const popover = widget.querySelector('.rec-popover');
     if (popover) {

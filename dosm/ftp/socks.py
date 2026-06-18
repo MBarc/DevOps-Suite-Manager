@@ -8,7 +8,7 @@ the FTP server (and to each ephemeral passive-mode data port), so the
 "PASV hands back a port that was never forwarded" problem disappears: the
 SOCKS proxy forwards *whatever* host:port the connection asks for, on demand.
 
-Hand-rolled (no PySocks dep) and no-auth only — the listener is bound to
+Hand-rolled (no PySocks dep) and no-auth only - the listener is bound to
 loopback inside the DOSM process, so there is nothing to authenticate.
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ def socks5_connect(
     """Open a TCP connection to ``dest_host:dest_port`` via a SOCKS5 proxy.
 
     The destination is sent as a DOMAINNAME address so the *jump* resolves it
-    — DOSM may not be able to resolve the target's internal name itself.
+    - DOSM may not be able to resolve the target's internal name itself.
     """
     sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
     try:
@@ -87,7 +87,7 @@ def socks5_connect(
         reply = _recv_exactly(sock, 4)
         if reply[1] != 0x00:
             msg = _REPLY_MESSAGES.get(reply[1], f"SOCKS error 0x{reply[1]:02x}")
-            raise SocksError(f"jump could not reach {dest_host}:{dest_port} — {msg}")
+            raise SocksError(f"jump could not reach {dest_host}:{dest_port} - {msg}")
 
         # Drain the bound-address field so the socket is positioned at the
         # start of the tunnelled stream.

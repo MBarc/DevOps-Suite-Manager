@@ -28,7 +28,7 @@ class GcpCertManagerSource(CloudCertSource):
             from google.cloud import certificate_manager_v1
         except ImportError as e:
             raise MissingDependencyError(
-                "GCP SDK not installed — run: pip install 'dosm[gcp]'"
+                "GCP SDK not installed - run: pip install 'dosm[gcp]'"
             ) from e
         if not self.project:
             raise CertSourceError("GCP Certificate Manager source needs a project")

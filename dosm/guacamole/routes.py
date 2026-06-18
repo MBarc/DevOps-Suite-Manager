@@ -97,7 +97,7 @@ async def host_connect(
         if host.jump_host_id is not None:
             jump_host = chain[-1]  # direct/innermost hop
             if host.protocol == "rdp" and jump_host.protocol == "rdp":
-                # RD Gateway path — guacd speaks RDP to the gateway, which
+                # RD Gateway path - guacd speaks RDP to the gateway, which
                 # relays to the target. No DOSM tunnel needed.
                 connection = build_connection(cfg, host, gateway_host=jump_host)
                 rdgw_host_name = jump_host.name
@@ -242,7 +242,7 @@ async def host_disconnect(
     """Release a tunnel lease registered for a Guacamole session.
 
     Called by the browser via ``navigator.sendBeacon`` on tab close /
-    navigation. Idempotent — releasing an unknown sid is a no-op (returns
+    navigation. Idempotent - releasing an unknown sid is a no-op (returns
     204) so a TTL-backstop release that already fired doesn't surface as
     an error if the beacon also arrives.
     """

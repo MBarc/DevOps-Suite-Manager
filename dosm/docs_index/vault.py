@@ -1,4 +1,4 @@
-"""Documentation vault — authoring, import, and file management.
+"""Documentation vault - authoring, import, and file management.
 
 Vault files live at $DOSM_HOME/docs/<app-slug>/<doc-slug>.md.
 Every file has a YAML frontmatter block so metadata survives round-trips
@@ -143,7 +143,7 @@ def delete_doc(cfg: Config, rel: str) -> None:
 
 
 def file_mtime_ms(path: Path) -> int:
-    """Return modification time as integer milliseconds — used for stale-edit detection."""
+    """Return modification time as integer milliseconds - used for stale-edit detection."""
     return int(path.stat().st_mtime * 1000)
 
 
@@ -153,7 +153,7 @@ def file_mtime_ms(path: Path) -> int:
 def import_docx(file_bytes: bytes) -> tuple[str, str]:
     """Convert a .docx file to markdown. Returns (markdown_text, warnings_str).
 
-    Images are not extracted in v1 — they are silently dropped by mammoth.
+    Images are not extracted in v1 - they are silently dropped by mammoth.
     """
     try:
         import mammoth  # type: ignore
@@ -168,7 +168,7 @@ def import_pdf(file_bytes: bytes) -> str:
     """Extract text from a PDF and return as lightly-structured markdown.
 
     Quality depends entirely on the PDF's text layer. Scanned/image PDFs
-    produce garbage — the import UI shows a preview before committing.
+    produce garbage - the import UI shows a preview before committing.
     """
     try:
         from pypdf import PdfReader  # type: ignore

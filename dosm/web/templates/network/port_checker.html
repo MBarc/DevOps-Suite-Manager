@@ -16,7 +16,7 @@
       <div class="form-group">
         <label>Source host <span class="muted">(checks originate here)</span></label>
         <select name="source_host_id" required>
-          <option value="">— select source —</option>
+          <option value="">- select source -</option>
           {% for h in hosts %}
           <option value="{{ h.id }}">{{ h.name }} ({{ h.hostname }})</option>
           {% endfor %}
@@ -106,7 +106,7 @@ function showResult(data, srcLabel) {
   const cls = ok ? 'result-ok' : 'result-fail';
   const icon = ok ? '✓' : '✗';
   const label = ok ? 'Reachable' : 'Unreachable';
-  const latency = data.latency_ms != null ? `${data.latency_ms} ms` : '—';
+  const latency = data.latency_ms != null ? `${data.latency_ms} ms` : '-';
   const errLine = data.error_msg ? `<div class="result-detail">Error: ${esc(data.error_msg)}</div>` : '';
 
   body.innerHTML = `

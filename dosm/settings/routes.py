@@ -145,7 +145,7 @@ async def integrations_save(
     return RedirectResponse("/settings/integrations?saved=1", status_code=303)
 
 
-# ── Access control (RBAC) — AD/Okta group → DOSM role mapping ──────────────
+# ── Access control (RBAC) - AD/Okta group → DOSM role mapping ──────────────
 
 
 @router.get("/rbac", response_class=HTMLResponse, include_in_schema=False)
@@ -172,7 +172,7 @@ async def rbac_mapping_save(
     user: User = Depends(require_admin),
 ):
     """Upsert one group → role assignment (add a new group or change an
-    existing group's role — keyed on the exact group name)."""
+    existing group's role - keyed on the exact group name)."""
     cfg = request.app.state.config
     group = group.strip()
     if not group:
@@ -257,7 +257,7 @@ async def rbac_export_csv(request: Request, user: User = Depends(require_admin))
     for row in _rbac_rows(cfg):
         writer.writerow([row["group"], row["role"]])
     # Trailing row documents the fallback role for groups not listed above.
-    writer.writerow(["(default — unmapped groups)", cfg.rbac.default_role])
+    writer.writerow(["(default - unmapped groups)", cfg.rbac.default_role])
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",

@@ -110,7 +110,7 @@ async def transfer_between_hosts(
 
     Brokered entirely by DOSM: the bytes are staged in a temp file, never
     routed through the operator's browser. Each side goes through its own
-    backend via ``get_file_backend`` — so a jumped source and/or a jumped
+    backend via ``get_file_backend`` - so a jumped source and/or a jumped
     destination each traverse their own jump chain transparently; this
     function must never open a connection itself. With ``move=True`` the
     source file is deleted after a successful store. Returns bytes transferred.

@@ -2,7 +2,7 @@
 
 Triggers workflows via POST /repos/{owner}/{repo}/actions/workflows/{file}/dispatches
 and resolves the resulting run by diffing the workflow's run list before/after
-dispatch — the dispatch endpoint returns 204 with no body so we have no other
+dispatch - the dispatch endpoint returns 204 with no body so we have no other
 way to learn the run id.
 
 Auth: a Personal Access Token (or fine-grained PAT) with `repo` + `workflow`
@@ -174,7 +174,7 @@ class GitHubActionsAdapter(PipelineAdapter):
             external_id=None,
             status="queued",
             html_url=None,
-            raw={"note": "dispatch accepted; run id not yet visible — refresh later"},
+            raw={"note": "dispatch accepted; run id not yet visible - refresh later"},
         )
 
     async def poll(

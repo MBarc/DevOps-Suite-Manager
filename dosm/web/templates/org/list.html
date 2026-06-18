@@ -58,7 +58,7 @@
         {{ members|length }} {% if members|length == 1 %}person{% else %}people{% endif %} ·
         Source: <code>{% if jumpbox %}{{ jumpbox.name }}{% else %}mock (testing){% endif %}</code>
       {% else %}
-        Active Directory directory — not yet configured
+        Active Directory directory - not yet configured
       {% endif %}
     </div>
   </div>
@@ -75,7 +75,7 @@
   <h2>You haven't configured a Windows jumpbox yet.</h2>
   <p>
     DOSM uses a Windows host (with RSAT-AD-PowerShell installed) to read your
-    Active Directory. Pick one of your existing jumpbox hosts — its credential
+    Active Directory. Pick one of your existing jumpbox hosts - its credential
     profile becomes the bind identity for AD queries.
   </p>
   <a href="/org/configure" class="btn">Configure jumpbox</a>
@@ -154,9 +154,9 @@
           <a href="/org/{{ d.slug }}" class="row-name">{{ d.name }}</a>
           <span class="kind-badge dept">DEPT</span>
         </td>
-        <td class="muted">{{ d.manager_name or "—" }}</td>
-        <td>{% if d.manager_email %}<a href="mailto:{{ d.manager_email }}">{{ d.manager_email }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td>{% if d.parent %}<a href="/org/{{ d.parent.slug }}">{{ d.parent.name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="muted">{{ d.manager_name or "-" }}</td>
+        <td>{% if d.manager_email %}<a href="mailto:{{ d.manager_email }}">{{ d.manager_email }}</a>{% else %}<span class="muted">-</span>{% endif %}</td>
+        <td>{% if d.parent %}<a href="/org/{{ d.parent.slug }}">{{ d.parent.name }}</a>{% else %}<span class="muted">-</span>{% endif %}</td>
       </tr>
       {% endfor %}
       {% for m, d in members %}
@@ -171,8 +171,8 @@
           <span class="row-name">{{ m.display_name }}</span>
           <span class="kind-badge person">USER</span>
         </td>
-        <td class="muted">{{ m.manager_name or "—" }}</td>
-        <td>{% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="muted">{{ m.manager_name or "-" }}</td>
+        <td>{% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% else %}<span class="muted">-</span>{% endif %}</td>
         <td><a href="/org/{{ d.slug }}">{{ d.name }}</a></td>
       </tr>
       {% endfor %}
@@ -320,7 +320,7 @@
 
   function renderD3Tree(container, data) {
     const root = d3.hierarchy(data);
-    // Per-node spacing — drives the tree's natural size. The viewport stays
+    // Per-node spacing - drives the tree's natural size. The viewport stays
     // fixed at the container's dimensions; the tree grows with the org and
     // pan/zoom lets the user navigate it.
     const NODE_W = 180, NODE_H = 90;

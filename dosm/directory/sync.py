@@ -5,7 +5,7 @@ group sync against the configured AD source, applies the diff to the DB,
 infers the parent department from the returned manager chain, and writes an
 audit entry.
 
-Kept synchronous because the FastAPI route dispatches it to a threadpool —
+Kept synchronous because the FastAPI route dispatches it to a threadpool -
 SQLAlchemy and pywinrm are both blocking, so a sync function avoids the
 ``run_in_executor`` boilerplate at every call site.
 """
@@ -100,7 +100,7 @@ def sync_department(
     db.flush()
 
     if not dept.ad_group_dn or not dept.manager_dn:
-        # Should not happen — form validation populates both — but guard
+        # Should not happen - form validation populates both - but guard
         # against a stale row from before this feature.
         raise AdDirectoryError(
             f"department {dept.slug!r} is missing ad_group_dn or manager_dn"

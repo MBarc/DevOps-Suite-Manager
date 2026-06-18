@@ -224,7 +224,7 @@ async def docs_save(
     folders = folder_repo.list_folders(db)
 
     if path:
-        # Editing existing doc — save to same path, don't move across folder dirs.
+        # Editing existing doc - save to same path, don't move across folder dirs.
         try:
             target = vault.resolve_path(cfg, path)
         except ValueError:
@@ -272,7 +272,7 @@ async def docs_convert(
     file: UploadFile = File(...),
     user: User = Depends(require_user),
 ):
-    """Convert an uploaded file to markdown and return JSON — used by the editor's import button."""
+    """Convert an uploaded file to markdown and return JSON - used by the editor's import button."""
     raw = await file.read()
     if len(raw) > _MAX_UPLOAD_BYTES:
         return JSONResponse({"error": "File too large"}, status_code=413)
@@ -394,7 +394,7 @@ async def docs_import(
         )
 
     title = title_override.strip() or Path(fname).stem
-    # Pre-fill the editor for review — no file is committed yet.
+    # Pre-fill the editor for review - no file is committed yet.
     return _templates(request).TemplateResponse(
         request,
         "docs/editor.html",

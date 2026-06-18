@@ -51,7 +51,7 @@ def _bundled_root() -> Path:
 def install_cli_reference(target_docs_dir: Path) -> tuple[int, Path]:
     """Copy bundled CLI docs into ``target_docs_dir / _dosm-cli/``.
 
-    Overwrites any existing contents — this folder is owned by DOSM and
+    Overwrites any existing contents - this folder is owned by DOSM and
     must not be hand-edited. ``_generated/<group>.md`` files are flattened
     into the target directory so the indexer treats them as siblings of
     the README and exit-codes pages.

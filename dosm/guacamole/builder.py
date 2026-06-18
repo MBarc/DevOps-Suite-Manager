@@ -101,7 +101,7 @@ def build_connection(
 ) -> BuiltConnection:
     """Build a Guacamole connection blob for ``host``.
 
-    ``endpoint_override`` (host, port) replaces the target address — used by
+    ``endpoint_override`` (host, port) replaces the target address - used by
     the SSH-tunnel path so Guacamole connects to DOSM's local port forward.
 
     ``gateway_host`` is an RDP jumpbox reached via RD Gateway. When supplied

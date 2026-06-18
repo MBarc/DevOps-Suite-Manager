@@ -116,7 +116,7 @@ async def certs_page(
     for c in certs:
         counts[c.status] = counts.get(c.status, 0) + 1
 
-    # Vault certificates (cloud sources) — separate sub-section + cache.
+    # Vault certificates (cloud sources) - separate sub-section + cache.
     global _vault_cache
     if _vault_cache is None or (now - _vault_cache[1]) >= _CACHE_TTL:
         vault_certs = await _fetch_vault_certs(db, cfg, cc.expires_warn_days, cc.expires_critical_days)

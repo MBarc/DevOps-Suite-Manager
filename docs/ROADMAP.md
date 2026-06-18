@@ -1,4 +1,4 @@
-# DOSM — Roadmap, design notes, and known limits
+# DOSM - Roadmap, design notes, and known limits
 
 This is the running record of where we've been, where we're going, and the
 design choices that shape how to extend the project. It's the context that
@@ -16,10 +16,10 @@ changelog; this is the one-line summary.
 |-------|--------------|---------|
 | 1     | `ea177d8`    | Scaffold: FastAPI + Typer CLI + `$DOSM_HOME` bootstrap. |
 | 2     | `a78ddd3`    | SQLite + bcrypt auth + secrets backend (Local Fernet, Vault) + Hosts inventory. |
-| 3     | `8d663a3`    | ~~Module loader contract + bundled `system_info` module.~~ Retired — modules system was only ever consumed by the example `system_info` plug-in; integrations live in core under `dosm/monitoring/adapters/`, `dosm/pipelines/`, `dosm/metrics/`. |
+| 3     | `8d663a3`    | ~~Module loader contract + bundled `system_info` module.~~ Retired - modules system was only ever consumed by the example `system_info` plug-in; integrations live in core under `dosm/monitoring/adapters/`, `dosm/pipelines/`, `dosm/metrics/`. |
 | 4     | `89e7626`    | In-app terminals (admin-only), xterm.js + PTY bridge, asciinema recording, resource panel. |
 | 5     | `b5b2a41`    | Local docs index (md/txt/pdf), fastembed embeddings, RAG search with citations + LIKE fallback. |
-| —     | `9b3416a`    | UI polish: sidebar shell + design tokens. |
+| -     | `9b3416a`    | UI polish: sidebar shell + design tokens. |
 | 6     | `982593a`    | LLM chat (Ollama + RAG + citations) + terminal Run-as. |
 | 7     | `75cd742`    | Agent mode: plan cards (Approve/Edit/Reject) + `ssh_exec` action with tiered allow-list. |
 | 8     | `9c918e5`    | Apache Guacamole integration: signed JSON envelope, docker-compose stack, iframe wrapper. |
@@ -31,49 +31,49 @@ changelog; this is the one-line summary.
 | 11b   | (pending)    | Pipeline background poller: age-based cadence (5s→300s), asyncio.gather with bounded concurrency, run abandonment after configurable hours, auto-refresh meta tag on run detail page, `dosm pipelines poll` CLI debug command. |
 | 12+13 | `2b1d1f9`    | Monitoring integrations (Dynatrace / Datadog / ServiceNow adapters, host-check page, fleet coverage matrix, 60s cache) + Certificate inventory (Windows cert stores + Linux PEM/DER walk, expiry coloring, 5-min cache). |
 | 12d   | (shipped)    | Prometheus adapter: host-presence check via `up{instance=~"^hostname(:.+)?$"}`, bearer/basic/no-auth, plugs into coverage matrix. |
-| 9b    | (shipped)    | RD Gateway support: RDP→RDP jump chains via Microsoft Remote Desktop Gateway. Auto-derived from protocol pairing (RDP target + RDP jumpbox = RD Gateway path). `Credential.domain` added for Windows domain auth. guacd handles the hop natively via `gateway-*` Guacamole params — no DOSM tunnel needed. |
+| 9b    | (shipped)    | RD Gateway support: RDP→RDP jump chains via Microsoft Remote Desktop Gateway. Auto-derived from protocol pairing (RDP target + RDP jumpbox = RD Gateway path). `Credential.domain` added for Windows domain auth. guacd handles the hop natively via `gateway-*` Guacamole params - no DOSM tunnel needed. |
 | 12e   | (shipped)    | ServiceNow extended monitoring detail: discovery source/timestamp, monitoring relationships (cmdb_rel_ci), metric collection (metric_instance with ITOM Visibility fallback), thresholds note, multiple CMDB match surfacing. |
 | 14    | (shipped)    | Organisation directory: AD-backed via WinRM jumpbox + PowerShell `ActiveDirectory` cmdlets (no direct LDAP). Empty-state configure flow, mock adapter for dev/test, manager-chain hierarchy inference, per-member manager capture. Unified directory list (departments + people) with hosts-style search bar (field selector + clear), pan/zoom D3 tree, disabled accounts shown with strikethrough + tooltip. Each dept's roster is written to `docs/org/{slug}.md` so the agent can answer "who do I talk to about X". |
 | 17    | (shipped)    | Typed pipeline inputs: schema rows gain `type` (string/boolean/number/choice) + options/default/required/description. Row-based schema editor (add/remove rows, options field auto-disables for non-choice). Run form renders text / number / checkbox / `<select>` per type, server-side validates required + choice membership. Per-adapter wire coercion: GitHub stringifies all (booleans → `"true"/"false"`); Octopus stringifies `FormValues` the same way; ADO splits `var.`-prefixed inputs into `variables` (string-coerced) vs `templateParameters` (native types preserved); AWX passes through native (Ansible vars are typed); TFC adapter unchanged but run form shows an amber banner explaining inputs aren't sent (variables live on the workspace). Legacy `key=value` textarea kept as fallback for pipelines without a declared schema. 21 new tests (15 unit + 6 integration). |
 | 22    | (this commit)| **Pipeline payloads** (branch `feature/pipeline-payloads`, off the RBAC branch). Named, reusable input-value sets per pipeline, so an executor picks a predefined payload instead of re-typing the run form. New `PipelinePayload` table (`pipeline_id` CASCADE, `name` unique-per-pipeline, `description`, `values_json` = same shape as `PipelineRun.inputs`, `created_by_id`, `visibility`). **Visibility mirrors credentials**: shared (any executor) or private (creator + admins), enforced by `dosm/pipelines/payload_access.py` (list, run-page picker, edit/delete routes 404-not-403). **Permissions**: select/run and manage (create/redefine/rename/copy/delete) are all **operator+** (matches the pipeline run gate); since others can't see a private payload, in practice only its owner+admins manage it. **Run UX**: a payload `<select>` on the pipeline page pre-fills the typed input form (editable before Run); a Payloads section offers Use / Edit / Copy / Rename / Delete. **Drift**: `validate_payload_values()` checks stored values against the *current* `inputs_schema`; mismatches are flagged "needs update" and block the run. Schemaless pipelines store `{"__raw__": text}` and pre-fill the textarea. `dosm pipelines payload list/show/add/rename/copy/rm`. `AuditLog` on every mutation + the selected payload recorded in the run audit. 8 new tests (drift validation, name-conflict, copy-name derivation, web CRUD, invalid-choice rejection, viewer-forbidden, private-hidden-from-others). |
 | 21d   | `161a0a8`    | **Require group membership (deny unmapped Okta logins)** (branch `feature/rbac-okta-ad`). Security default: an Okta user who is in **none** of the mapped groups is now **denied** rather than granted a baseline role. `RbacConfig.default_role` defaults to `"none"` (deny); `map_groups_to_role` returns `None` when no mapped group matches and the default isn't a real role; the callback then refuses to provision/sign in, renders the login page with "not a member of any group granted DOSM access", and audit-logs `auth.login.okta.denied` (no user row created). The Settings → Access control "Unmapped users" selector gains a **No access (require group membership)** option (the default). Local break-glass accounts are unaffected (explicitly provisioned). `dosm rbac show-mapping` shows "no access" when deny. 4 new tests (deny mapping + model default, end-to-end callback denial with no provisioning, settings accepts `none`). |
-| 21c   | `640ae2c`    | **RBAC admin UI — group→role editor + export** (branch `feature/rbac-okta-ad`). A new **Access control** tab on the Settings page (admin-only, so the break-glass admin + any admin manage it) to edit `rbac.group_role_map` and `default_role` without hand-editing `config.yaml`. Add/update a group→role (upsert; inline role `<select>` auto-submits), remove a mapping, set the default role. Persisted via `update_config_yaml` + live `cfg.rbac` mutation (no restart), each change `AuditLog`'d (`settings.rbac.*`). **Export** the full mapping as JSON (`{default_role, groups:[{group,role}]}`) or CSV (`group,role` rows + a trailing default-role row) via download buttons → `/settings/rbac/export.json` / `.csv`. 7 new tests (add/update/delete, invalid-role 400, default-role save, page render, JSON+CSV export shape, admin-only gating). |
-| 21b   | `d0fdb25`    | **Okta SSO + AD-group→role mapping** (branch `feature/rbac-okta-ad`). Authentication via Okta OIDC; authorization from the ID token's `groups` claim (Okta federates AD — no live AD round-trip). `OktaConfig` + `RbacConfig` in `config.py` (`group_role_map`, highest-role-wins, `default_role`); client secret in the secrets backend (`okta/client_secret`), never YAML. `dosm/auth/okta.py` splits **pure** logic (group→role mapping, claim extraction, JIT provisioning, ID-token validation against a supplied JWKS) from **network** helpers (discovery, token exchange, JWKS fetch) so the security-critical paths are unit-testable offline with a self-signed token. `GET /auth/okta/login` (state+nonce+PKCE S256) → `GET /auth/okta/callback` (validate state, exchange code, verify ID-token signature/iss/aud/exp/nonce, map groups→role, JIT-upsert keyed on `okta_sub`, set `session["user_id"]`). Role is recomputed from the claim on **every** login, so AD group changes apply at next sign-in. SSO users get an unverifiable sentinel password hash (`!okta`) so `User.password_hash` stays NOT NULL without a SQLite ALTER. New `User` cols: `okta_sub`/`email`/`display_name`/`auth_provider`/`last_login`. Break-glass local login preserved; login page shows a "Sign in with Okta" button when enabled. `dosm okta test` (discovery+JWKS+secret check) + `dosm rbac show-mapping`. `authlib` dep added. 9 new tests (group mapping, ID-token validation incl. bad nonce/audience, end-to-end callback provisioning, role-recompute-on-login, local login unaffected, routes 404 when disabled). |
+| 21c   | `640ae2c`    | **RBAC admin UI - group→role editor + export** (branch `feature/rbac-okta-ad`). A new **Access control** tab on the Settings page (admin-only, so the break-glass admin + any admin manage it) to edit `rbac.group_role_map` and `default_role` without hand-editing `config.yaml`. Add/update a group→role (upsert; inline role `<select>` auto-submits), remove a mapping, set the default role. Persisted via `update_config_yaml` + live `cfg.rbac` mutation (no restart), each change `AuditLog`'d (`settings.rbac.*`). **Export** the full mapping as JSON (`{default_role, groups:[{group,role}]}`) or CSV (`group,role` rows + a trailing default-role row) via download buttons → `/settings/rbac/export.json` / `.csv`. 7 new tests (add/update/delete, invalid-role 400, default-role save, page render, JSON+CSV export shape, admin-only gating). |
+| 21b   | `d0fdb25`    | **Okta SSO + AD-group→role mapping** (branch `feature/rbac-okta-ad`). Authentication via Okta OIDC; authorization from the ID token's `groups` claim (Okta federates AD - no live AD round-trip). `OktaConfig` + `RbacConfig` in `config.py` (`group_role_map`, highest-role-wins, `default_role`); client secret in the secrets backend (`okta/client_secret`), never YAML. `dosm/auth/okta.py` splits **pure** logic (group→role mapping, claim extraction, JIT provisioning, ID-token validation against a supplied JWKS) from **network** helpers (discovery, token exchange, JWKS fetch) so the security-critical paths are unit-testable offline with a self-signed token. `GET /auth/okta/login` (state+nonce+PKCE S256) → `GET /auth/okta/callback` (validate state, exchange code, verify ID-token signature/iss/aud/exp/nonce, map groups→role, JIT-upsert keyed on `okta_sub`, set `session["user_id"]`). Role is recomputed from the claim on **every** login, so AD group changes apply at next sign-in. SSO users get an unverifiable sentinel password hash (`!okta`) so `User.password_hash` stays NOT NULL without a SQLite ALTER. New `User` cols: `okta_sub`/`email`/`display_name`/`auth_provider`/`last_login`. Break-glass local login preserved; login page shows a "Sign in with Okta" button when enabled. `dosm okta test` (discovery+JWKS+secret check) + `dosm rbac show-mapping`. `authlib` dep added. 9 new tests (group mapping, ID-token validation incl. bad nonce/audience, end-to-end callback provisioning, role-recompute-on-login, local login unaffected, routes 404 when disabled). |
 | 21    | `27c790f`    | **RBAC core** (branch `feature/rbac-okta-ad`). Single ranked role ladder `viewer<operator<admin` in `dosm/auth/deps.py` (`require_role` factory + `user_has_role` predicate for WS) replacing the `_require_admin` body copy-pasted into 5 modules + 2 WS handlers. Capability matrix preserves today's policy (terminals/files/settings/cert-sources/org stay admin) and closes the gaps where hosts + credentials + pipelines + agent + guacamole mutations were login-only (now operator). **Private vs shared credentials**: `Credential.owner_id` + `visibility` (idempotent column-adds); `dosm/credentials/access.py` is the single visibility predicate, applied to the list, the host-form picker, the detail/edit/delete routes (404 not 403 to avoid leaking existence), and a use-time guard at guacamole connect (blocks connecting through someone else's private credential, incl. jump hops). **Per-user private data**: chats/agent history already scoped by `Conversation.user_id`; recordings are admin-only via terminals; new `User.prefs_json` + `dosm/auth/prefs.py`, wired to remember the hosts-list kind filter. `dosm user set-role` (the missing role-mutation path) + role validation on create. Nav/buttons hide write actions from viewers. 8 new tests (role matrix, private-cred visibility, conversation ownership, break-glass login); 152 pass. **Okta SSO + AD-group→role mapping is the next commit (Phase 21b).** |
-| 18    | (pending)    | File transfer (FTP / explicit FTPS / SFTP), jump-aware. `dosm/ftp/` with a `FileTransferBackend` ABC + `FtpBackend` (hand-rolled blocking FTP/FTPS client) and `SftpBackend` (asyncssh-native). Jumped FTP routes every socket through an `asyncssh` SOCKS5 listener leased from `JumpTunnelManager` (`acquire_socks`) — control + every passive data port tunnel through one proxy, so dynamic PASV ports need no per-transfer forwards. FTPS is explicit AUTH TLS with control-session reuse on the PROT P data channel (the thing `ftplib` can't do). File transfer is a **host capability**, not a host protocol: hosts gain `ft_method` (sftp/ftp/ftps) + `ft_port` + optional `ft_credential` override (idempotent column-add migration), set in a "File transfer" section on the host form — so an SSH box exposes SFTP without a duplicate inventory entry. Admin-only web file browser (breadcrumbs, list/upload/download/mkdir/rename/delete, drag-drop), reachable via a **Files** sidebar page (host picker), a Files button on the hosts list, and the host detail card; `dosm ftp ls/get/put/rm` CLI; `AuditLog` on every mutation + download. **Host-to-host copy/move**: `transfer_between_hosts` stages a file server-side (retrieve from source backend → store to dest backend, optional source delete = move) — each side traverses its own jump chain via `get_file_backend`; "Copy / move to another host" file action + picker modal, `/copy` + `/targets` routes, `dosm ftp cp [--move]`. Also fixed a latent `dosm.jumps` ↔ `dosm.hosts` import cycle (cold `import dosm.jumps` was broken) by lazy-importing `resolve_jump_chain` in `connections.build_jump_chain`. 12 new tests (in-process pyftpdlib FTPS + asyncssh SFTP/jump, no Docker). |
+| 18    | (pending)    | File transfer (FTP / explicit FTPS / SFTP), jump-aware. `dosm/ftp/` with a `FileTransferBackend` ABC + `FtpBackend` (hand-rolled blocking FTP/FTPS client) and `SftpBackend` (asyncssh-native). Jumped FTP routes every socket through an `asyncssh` SOCKS5 listener leased from `JumpTunnelManager` (`acquire_socks`) - control + every passive data port tunnel through one proxy, so dynamic PASV ports need no per-transfer forwards. FTPS is explicit AUTH TLS with control-session reuse on the PROT P data channel (the thing `ftplib` can't do). File transfer is a **host capability**, not a host protocol: hosts gain `ft_method` (sftp/ftp/ftps) + `ft_port` + optional `ft_credential` override (idempotent column-add migration), set in a "File transfer" section on the host form - so an SSH box exposes SFTP without a duplicate inventory entry. Admin-only web file browser (breadcrumbs, list/upload/download/mkdir/rename/delete, drag-drop), reachable via a **Files** sidebar page (host picker), a Files button on the hosts list, and the host detail card; `dosm ftp ls/get/put/rm` CLI; `AuditLog` on every mutation + download. **Host-to-host copy/move**: `transfer_between_hosts` stages a file server-side (retrieve from source backend → store to dest backend, optional source delete = move) - each side traverses its own jump chain via `get_file_backend`; "Copy / move to another host" file action + picker modal, `/copy` + `/targets` routes, `dosm ftp cp [--move]`. Also fixed a latent `dosm.jumps` ↔ `dosm.hosts` import cycle (cold `import dosm.jumps` was broken) by lazy-importing `resolve_jump_chain` in `connections.build_jump_chain`. 12 new tests (in-process pyftpdlib FTPS + asyncssh SFTP/jump, no Docker). |
 
 ## Open backlog (recommended order)
 
 | Phase | Title | Why this order |
 |-------|-------|----------------|
-| ~~9b~~ | ~~RD Gateway~~ | Shipped — see phase log above. |
+| ~~9b~~ | ~~RD Gateway~~ | Shipped - see phase log above. |
 | ~~10.5~~ | ~~Tests + CI~~ | Shipped. 89 pytest tests across auth, hosts, docs, agent, secrets, and unit utils. GitHub Actions CI on every push. Also caught and fixed two pre-existing bugs: `vault.py` used undefined `app_dir` (every doc save would crash), and `markdown.py` passed conflicting `link_rel`+`rel` to nh3 (preview/view 500s). |
-| ~~11b~~ | ~~Pipeline background poller~~ | Shipped — see phase log above. |
+| ~~11b~~ | ~~Pipeline background poller~~ | Shipped - see phase log above. |
 | ~~11c~~ | ~~Azure DevOps adapter~~ | Shipped. |
 | ~~11d~~ | ~~Octopus Deploy adapter~~ | Shipped. |
 | ~~11e~~ | ~~Ansible/AWX adapter~~ | Shipped. |
 | ~~11f~~ | ~~Terraform Cloud adapter~~ | Shipped. |
-| ~~12~~ | ~~Monitoring integrations~~ | Shipped — see phase log above. |
-| ~~12b~~ | ~~Dynatrace adapter~~ | Shipped — see phase log above. |
-| ~~12c~~ | ~~Datadog adapter~~ | Shipped — see phase log above. |
-| ~~12d~~ | ~~ServiceNow adapter~~ | Shipped — see phase log above. |
-| ~~13~~ | ~~Certificate inventory~~ | Shipped — see phase log above. |
+| ~~12~~ | ~~Monitoring integrations~~ | Shipped - see phase log above. |
+| ~~12b~~ | ~~Dynatrace adapter~~ | Shipped - see phase log above. |
+| ~~12c~~ | ~~Datadog adapter~~ | Shipped - see phase log above. |
+| ~~12d~~ | ~~ServiceNow adapter~~ | Shipped - see phase log above. |
+| ~~13~~ | ~~Certificate inventory~~ | Shipped - see phase log above. |
 | ~~8d~~ | ~~Session recordings browser~~ | Shipped. |
-| ~~14~~ | ~~Organisation directory~~ | Shipped — see phase log above. Pivoted from direct `ldap3` to WinRM-via-jumpbox so DOSM-in-Docker doesn't need to be domain-joined. |
+| ~~14~~ | ~~Organisation directory~~ | Shipped - see phase log above. Pivoted from direct `ldap3` to WinRM-via-jumpbox so DOSM-in-Docker doesn't need to be domain-joined. |
 | 16 | AI Agent enhancements | Expand the agent beyond `ssh_exec` + `run_pipeline`. Planned actions: `query_monitoring` (read live alerts), `search_docs` (RAG lookup without full chat), `cert_check` (on-demand cert status for a host), `host_metrics` (pull current CPU/mem/disk). Improve plan card UX once validated against a real Ollama model: streaming rationale, multi-step plan previews, conversation-level approval history. |
 | ~~15~~ | ~~Documentation vault & importer~~ | Shipped. Application taxonomy model, YAML frontmatter, in-UI markdown editor with live preview, .docx/.pdf/.md/.txt importer (mammoth + pypdf), rendered markdown view, stale-edit conflict detection, `dosm docs new/import` + `dosm application` CLI commands. |
 | 17.5 | Auto-introspect pipeline definitions | Eliminate the duplication between provider-side workflow definitions and DOSM's `inputs_schema`. Per-adapter introspectors that fetch the upstream definition and pre-populate the schema editor on pipeline create/edit, with overrides preserved on re-introspection. **GitHub:** `GET /repos/.../contents/.github/workflows/{file}` → base64-decode → parse YAML → map `on.workflow_dispatch.inputs` (type/options/default/required/description) onto schema rows. **AWX:** `GET /api/v2/job_templates/{id}/survey_spec/` → map survey questions (text/textarea → string, password → string secret, integer/float → number, multiplechoice → choice). **ADO:** `GET /{org}/{project}/_apis/pipelines/{id}` (definition YAML) → parse `parameters:` block. **Octopus:** `GET /api/{space}/projects/{id}/deploymentprocess` + `/variables` to surface prompted variables. **TFC:** out (no introspectable run-time inputs). UI: an "Introspect from provider" button next to each schema editor that fetches and replaces, with a confirm if rows already exist. |
 
 ## Design notes
 
-### Phase 12 — Monitoring integrations
+### Phase 12 - Monitoring integrations
 
 A new **Monitoring** section in the sidebar (between Pipelines and Settings).
 The core idea is a read-only health dashboard: pull current alert/incident
 state from whichever tools the operator has configured, surface it in one
 place, and let the agent answer questions about it.
 
-**Adapter contract** — same plug-in shape as pipeline adapters:
+**Adapter contract** - same plug-in shape as pipeline adapters:
 - `MonitoringAdapter` ABC in `dosm/monitoring/adapters/base.py`
 - Required method: `fetch_alerts() -> list[Alert]`
 - `Alert` is a dataclass: `id, title, severity, status, source, url, ts`
@@ -81,9 +81,9 @@ place, and let the agent answer questions about it.
   so credentials are never stored in plain text
 
 **Adapters planned:**
-- `DynatraceAdapter` — Problems API v2 (`/api/v2/problems`). Auth: `Api-Token` header.
-- `DatadogAdapter` — Monitors API (`/api/v1/monitor`). Auth: `DD-API-KEY` + `DD-APPLICATION-KEY` headers.
-- `ServiceNowAdapter` — Incidents table API (`/api/now/table/incident`). Auth: basic or OAuth bearer.
+- `DynatraceAdapter` - Problems API v2 (`/api/v2/problems`). Auth: `Api-Token` header.
+- `DatadogAdapter` - Monitors API (`/api/v1/monitor`). Auth: `DD-API-KEY` + `DD-APPLICATION-KEY` headers.
+- `ServiceNowAdapter` - Incidents table API (`/api/now/table/incident`). Auth: basic or OAuth bearer.
 
 **UI:**
 - Dashboard tab: severity-banded alert list across all enabled sources, auto-refresh every 60 s
@@ -99,30 +99,30 @@ place, and let the agent answer questions about it.
 Dynatrace or Datadog. ServiceNow OAuth may need `authlib` if basic auth
 isn't sufficient in the target environment.
 
-### Phase 14 — Organisation directory: AD via jumpbox
+### Phase 14 - Organisation directory: AD via jumpbox
 
 The original plan was to bind LDAP directly from DOSM. The blocker: DOSM
 runs in Docker, containers aren't domain-joined, and we didn't want to
 require a stored bind password. We pivoted to a Windows jumpbox sidecar
 pattern:
 
-- **Adapter contract** — `AdDirectorySource` ABC in
+- **Adapter contract** - `AdDirectorySource` ABC in
   `dosm/directory/adapters/__init__.py` with `test_connection`,
   `resolve_group`, `resolve_user`, `sync_group`. Implementations:
-  - `WinRMJumpboxSource` — opens a `winrm.Session` to a configured host,
+  - `WinRMJumpboxSource` - opens a `winrm.Session` to a configured host,
     runs PowerShell `ActiveDirectory` cmdlets, returns parsed JSON. One
     round trip per group sync; per-member manager DNs resolved in the same
     script via a hashtable lookup pass.
-  - `MockSource` — fixture-backed Acme org chart for dev/tests so the UI
+  - `MockSource` - fixture-backed Acme org chart for dev/tests so the UI
     can be exercised without a real domain.
-- **Config** — single global `directory.ad_jumpbox_host_id` in
+- **Config** - single global `directory.ad_jumpbox_host_id` in
   `config.yaml`; the bind identity is whatever credential profile is
   attached to that host. `directory.adapter = "mock"` toggles the mock for
   testing.
-- **Hierarchy inference** — at sync time, the manager chain (capped at 20
+- **Hierarchy inference** - at sync time, the manager chain (capped at 20
   hops) is walked against `Department.manager_dn`; the first match wins
-  and becomes `parent_id`. Auto-derived only — no manual override.
-- **Members** — a separate `department_members` table with
+  and becomes `parent_id`. Auto-derived only - no manual override.
+- **Members** - a separate `department_members` table with
   `(department_id, user_dn)` unique. Disabled AD accounts cached with
   `enabled=false` and rendered with strikethrough + "Account disabled"
   tooltip rather than hidden, so historical association is preserved.
@@ -132,14 +132,14 @@ into `dosm/directory/adapters/`, register it in the factory at
 `dosm/directory/adapters/__init__.py:get_directory_source`. Match the
 pattern of monitoring/pipeline adapters elsewhere.
 
-### Phase 18 — File transfer through a jump box
+### Phase 18 - File transfer through a jump box
 
 The hard part of FTP-through-a-jump isn't the jump; it's that FTP opens a
 **second, dynamically-negotiated data connection** per transfer. Tunnelling
 only port 21 makes the control channel work but every `LIST`/`RETR` hangs,
 because passive mode hands back a fresh port that was never forwarded.
 
-The solution — **route every FTP socket through an `asyncssh` SOCKS5 proxy**
+The solution - **route every FTP socket through an `asyncssh` SOCKS5 proxy**
 opened over the jump (`JumpTunnelManager.acquire_socks`). A SOCKS proxy
 forwards whatever host:port a connection asks for, on demand, so the control
 connection *and* each ephemeral passive data port tunnel through one listener,
@@ -160,7 +160,7 @@ FTPS forced two more decisions:
 **Backends sit behind a `FileTransferBackend` ABC** so the web browser, CLI,
 and audit logging are backend-agnostic. `SftpBackend` is asyncssh-native and
 tunnels through the chain for free via `connect_through_chain`. **Active mode
-is unsupported** (server-connect-back is unroutable through a jump) — passive
+is unsupported** (server-connect-back is unroutable through a jump) - passive
 only, documented, not built.
 
 **File transfer is a host capability, not a host protocol.** A host keeps its
@@ -194,7 +194,7 @@ elevated-tier path that requires typing the host name to confirm.
 When you add new agent actions:
 1. Register via `dosm.agent.actions.register_action(ActionSpec(...))`
 2. Provide a `classify(args)` that returns `"safe"` or `"elevated"`
-3. Make the runner side-effect-free if it raises — wrap in try/except in
+3. Make the runner side-effect-free if it raises - wrap in try/except in
    `actions.py`, return an `ActionResult(ok=False, summary=...)`
 4. Result message gets appended to the conversation as an assistant turn so
    the LLM can react in the next turn.
@@ -204,7 +204,7 @@ When you add new agent actions:
 `SecretsBackend` ABC with `LocalEncryptedBackend` (Fernet, blobs in app.db)
 and `VaultBackend` (hvac, KV v2). When you reach for the secrets backend
 inside a request, **commit the request session before** opening the
-backend's session — SQLite is single-writer and the request would otherwise
+backend's session - SQLite is single-writer and the request would otherwise
 deadlock with itself (we hit this in Phase 9).
 
 ### Jump tunnel pooling
@@ -216,13 +216,13 @@ targets behind the same jump multiplex over one auth. Solves the
 
 When you add a feature that needs a remote SSH session through a jumped
 host, prefer `connect_through_chain(jump_hops, target)` from
-`dosm.jumps.connections` — it does the right thing for a one-shot, and the
+`dosm.jumps.connections` - it does the right thing for a one-shot, and the
 manager handles long-lived multi-target cases.
 
 ### Idempotent column migrations
 
 `dosm/migrations.py::run_migrations(engine)` adds new columns at startup
-without disturbing existing data. Lightweight by design — anything more
+without disturbing existing data. Lightweight by design - anything more
 complex (renames, type changes, FK changes) needs Alembic. **Don't
 work around the limit; introduce Alembic when you need it.** The right
 trigger is your second column-rename or first FK change.
@@ -232,7 +232,7 @@ trigger is your second column-rename or first FK change.
 `dosm/db.py` enables WAL + `synchronous=NORMAL` + 30s timeout +
 `foreign_keys=ON`. Keeps things responsive when the secrets backend writes
 inside a request. If you ever need multi-writer concurrency, that's the
-moment to switch to Postgres — don't try to engineer SQLite around it.
+moment to switch to Postgres - don't try to engineer SQLite around it.
 
 ### One commit per phase
 
@@ -253,13 +253,13 @@ limitations). Preserve this.
   ladder, sourced from Okta's `groups` claim mapped via `rbac.group_role_map`.
   Still no MFA on the *local* path (rely on Okta for that). The Okta OIDC flow
   is exercised offline with a self-signed token but **not yet validated against
-  a real Okta tenant** — confirm discovery, the groups claim, and redirect-URI
+  a real Okta tenant** - confirm discovery, the groups claim, and redirect-URI
   registration against a live org before relying on it.
 - **Process-local state** (`JumpTunnelManager`, `_embedder`,
   ephemeral run-as registry). Don't deploy more than one DOSM instance
   expecting them to share state.
 - **Schema migrations** are column-add only. Renames / FK changes need
-  Alembic — not yet added.
+  Alembic - not yet added.
 - **WinRMSource** is unverified against a real Windows host. Code paths
   are exercised in error/timeout cases but the success path is theoretical
   until someone points it at a working WinRM endpoint.
@@ -289,7 +289,7 @@ limitations). Preserve this.
    `dosm user create admin`, `dosm serve`
 5. Browse the running app at <http://127.0.0.1:8765> to ground yourself
 6. Pick the next item from the backlog. **Recommendation: Phase 10.5
-   (tests + CI) first** — it makes everything after safer.
+   (tests + CI) first** - it makes everything after safer.
 
 ## What I (the AI assistant) would not do without asking
 
@@ -299,7 +299,7 @@ limitations). Preserve this.
 - Add a SaaS dependency without an offline fallback
 - Skip the smoke-test step at the end of a phase
 - Add tests at the end of a phase that don't actually run in CI (since
-  there is no CI yet — they'd just be theater)
+  there is no CI yet - they'd just be theater)
 - Bypass the plan-card approval flow for any agent action
 - Delete `$DOSM_HOME` (or any directory with user state) in a user
   environment

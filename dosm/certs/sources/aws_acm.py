@@ -25,7 +25,7 @@ class AwsAcmSource(CloudCertSource):
             import boto3
         except ImportError as e:
             raise MissingDependencyError(
-                "AWS SDK not installed — run: pip install 'dosm[aws]'"
+                "AWS SDK not installed - run: pip install 'dosm[aws]'"
             ) from e
         if not self.region:
             raise CertSourceError("AWS ACM source needs a region")

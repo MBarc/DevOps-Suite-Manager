@@ -28,7 +28,7 @@
       <div class="value">{{ cert_total }}{% if cert_attention %} <span class="badge badge-amber" style="margin-left:6px; vertical-align:middle">{{ cert_attention }} need attention</span>{% endif %}</div>
       <div class="note">in cached scan</div>
     {% else %}
-      <div class="value muted" style="font-size:15px; font-weight:500">— not yet scanned</div>
+      <div class="value muted" style="font-size:15px; font-weight:500">- not yet scanned</div>
       <div class="note">Run scan</div>
     {% endif %}
   </a>
@@ -50,7 +50,7 @@
       {% endfor %}
       </ul>
     {% else %}
-      <div class="empty-state">No activity yet — connect to a host or run a pipeline to populate the audit log.</div>
+      <div class="empty-state">No activity yet - connect to a host or run a pipeline to populate the audit log.</div>
     {% endif %}
   </section>
 

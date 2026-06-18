@@ -81,7 +81,7 @@ class Credential(Base):
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(128), nullable=True)
     secret_ref: Mapped[str] = mapped_column(String(255), nullable=False)
-    # RBAC — ownership + visibility. ``shared`` (default) is visible to everyone;
+    # RBAC - ownership + visibility. ``shared`` (default) is visible to everyone;
     # ``private`` is visible only to ``owner_id`` and admins. ``owner_id`` is the
     # user who created it (NULL for pre-RBAC rows / system-seeded credentials).
     owner_id: Mapped[int | None] = mapped_column(
@@ -95,11 +95,11 @@ class Credential(Base):
 
 
 class CertSource(Base):
-    """A cloud certificate source — Azure Key Vault / AWS ACM / GCP Certificate
+    """A cloud certificate source - Azure Key Vault / AWS ACM / GCP Certificate
     Manager (or a mock). Certificates are fetched live + cached, not persisted;
     this row holds the source's config. Auth is either a credential profile
     (``auth_mode='profile'`` + ``credential``) or the cloud SDK's ambient
-    identity (``auth_mode='ambient'`` — managed identity / instance role)."""
+    identity (``auth_mode='ambient'`` - managed identity / instance role)."""
 
     __tablename__ = "cert_sources"
 
@@ -192,11 +192,11 @@ class Department(Base):
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # AD group — what binds this dept to a real-world group of people.
+    # AD group - what binds this dept to a real-world group of people.
     ad_group_name: Mapped[str] = mapped_column(String(255), nullable=False)
     ad_group_dn: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
-    # Manager — set by user (input string), DN + cached attrs filled by sync.
+    # Manager - set by user (input string), DN + cached attrs filled by sync.
     manager_input: Mapped[str] = mapped_column(String(255), nullable=False)
     manager_dn: Mapped[str | None] = mapped_column(String(512), nullable=True)
     manager_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -243,7 +243,7 @@ class DepartmentMember(Base):
     """A person who belongs to a department's AD group.
 
     Synced from AD on demand. ``enabled=False`` indicates the AD account is
-    disabled — the UI renders these with a strikethrough and tooltip rather
+    disabled - the UI renders these with a strikethrough and tooltip rather
     than hiding them, so an operator looking at "who do I talk to" can still
     see the historical association.
     """
@@ -508,10 +508,10 @@ class MonitoringSource(Base):
 
 
 class MonitoringMatch(Base):
-    """Persisted result of a host-check against a monitoring source — a local
+    """Persisted result of a host-check against a monitoring source - a local
     cache so repeat lookups don't re-hit the API. Served while ``checked_at`` is
     within the TTL; stale/missing entries trigger a fresh query (and a manual
-    Refresh forces it). Identity/presence only — live alert state isn't cached."""
+    Refresh forces it). Identity/presence only - live alert state isn't cached."""
 
     __tablename__ = "monitoring_matches"
     __table_args__ = (UniqueConstraint("hostname", "source_id", name="uq_monmatch_host_src"),)
@@ -591,7 +591,7 @@ class RecordingSession(Base):
 
 
 class NetworkPort(Base):
-    """Master port library — reusable definitions for network scans."""
+    """Master port library - reusable definitions for network scans."""
 
     __tablename__ = "network_ports"
 

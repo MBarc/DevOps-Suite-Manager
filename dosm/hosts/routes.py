@@ -40,9 +40,9 @@ def _templates(request: Request):
 
 
 # Standard labels so the suggestions are useful even on a sparsely-seeded
-# Port Library — merged with, and overridden by, the library's own entries.
+# Port Library - merged with, and overridden by, the library's own entries.
 # Fallback labels merged with the Port Library (library descriptions win).
-# Implicit FTPS (990) is intentionally omitted — our FTPS is explicit on 21.
+# Implicit FTPS (990) is intentionally omitted - our FTPS is explicit on 21.
 _STANDARD_PORT_LABELS = {
     22: "SSH / SFTP", 21: "FTP / explicit FTPS", 3389: "RDP", 5900: "VNC",
 }
@@ -265,7 +265,7 @@ async def hosts_ping(
 ) -> JSONResponse:
     """TCP-probe ``host.hostname:host.port``, traversing the configured jump
     chain when present. This is a network reachability check on the protocol
-    port — not ICMP — because ICMP doesn't traverse SSH tunnels and what the
+    port - not ICMP - because ICMP doesn't traverse SSH tunnels and what the
     operator actually cares about is "can I reach the service through the
     jumps I configured."
     """
@@ -285,7 +285,7 @@ async def hosts_ping(
         except TimeoutError:
             return JSONResponse({
                 "ok": False, "via": "direct", "target": target, "latency_ms": None,
-                "message": f"timed out after {PING_TIMEOUT_SECONDS:.0f}s — "
+                "message": f"timed out after {PING_TIMEOUT_SECONDS:.0f}s - "
                            f"host unreachable or port {host.port} filtered",
             })
         except OSError as e:
@@ -307,7 +307,7 @@ async def hosts_ping(
     chain = resolve_jump_chain(db, host)
 
     # RD Gateway topology (RDP target behind an RDP jumpbox): this is NOT an
-    # SSH-tunnelled path — guacd connects to the gateway, which relays RDP to the
+    # SSH-tunnelled path - guacd connects to the gateway, which relays RDP to the
     # target (same detection as the Guacamole connect builder). Ping uses
     # SSH-tunnel semantics and so *cannot* reach the target directly; that's by
     # design, not a connectivity failure. The meaningful reachability signal here
@@ -332,7 +332,7 @@ async def hosts_ping(
                 "ok": False, "via": "rdgateway", "target": gw_target, "latency_ms": None,
                 "message": f"RD Gateway {gateway.name!r} unreachable on port {gw_port} "
                            f"({reason}). The RDP session routes through this gateway, so it "
-                           f"must be reachable. The target itself isn't pinged directly — "
+                           f"must be reachable. The target itself isn't pinged directly - "
                            f"use Connect to test the full RDP session.",
             })
         latency_ms = round((time.monotonic() - started) * 1000.0, 1)
@@ -345,7 +345,7 @@ async def hosts_ping(
             "ok": True, "via": "rdgateway", "target": gw_target, "latency_ms": latency_ms,
             "message": f"RD Gateway {gateway.name!r} reachable on port {gw_port}. This host "
                        f"connects via RD Gateway, not an SSH tunnel, so ping validates the "
-                       f"gateway only — use Connect to test the full RDP session.",
+                       f"gateway only - use Connect to test the full RDP session.",
         })
 
     non_ssh = [h for h in chain if h.protocol != "ssh"]

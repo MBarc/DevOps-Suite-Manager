@@ -23,14 +23,14 @@
 <section class="card card-narrow">
   <h2>Trigger run</h2>
   {% if not p.credential %}
-    <div class="badge badge-amber" style="margin-bottom: var(--sp-3)">no credential bound — provider may reject</div>
+    <div class="badge badge-amber" style="margin-bottom: var(--sp-3)">no credential bound - provider may reject</div>
   {% endif %}
   {% if input_error %}
     <div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ input_error }}</div>
   {% endif %}
   {% if p.provider == 'terraform_cloud' %}
     <div class="badge badge-amber" style="margin-bottom: var(--sp-3)">
-      Terraform Cloud doesn't accept run-time inputs — set workspace variables in TFC.
+      Terraform Cloud doesn't accept run-time inputs - set workspace variables in TFC.
       Inputs entered here are recorded in run history but not sent.
     </div>
   {% endif %}
@@ -44,9 +44,9 @@
   {% if payloads %}
   <label>Payload
     <select id="payload-picker">
-      <option value="">— none (fill manually) —</option>
+      <option value="">- none (fill manually) -</option>
       {% for pv in payloads %}
-        <option value="{{ pv.payload.id }}">{{ pv.payload.name }}{% if pv.payload.visibility == 'private' %} (private){% endif %}{% if pv.stale %} — needs update{% endif %}</option>
+        <option value="{{ pv.payload.id }}">{{ pv.payload.name }}{% if pv.payload.visibility == 'private' %} (private){% endif %}{% if pv.stale %} - needs update{% endif %}</option>
       {% endfor %}
     </select>
     <span class="field-hint">Pre-fills the form below with a saved set of values. You can still edit before running.</span>
@@ -94,7 +94,7 @@
       <label>Inputs
         <textarea name="inputs_text" rows="6"
                   placeholder="# one key=value per line, or paste a JSON object&#10;environment=staging&#10;version=1.2.3"></textarea>
-        <span class="field-hint">No schema declared — use <code>key=value</code> per line or a JSON object.
+        <span class="field-hint">No schema declared - use <code>key=value</code> per line or a JSON object.
           <a href="/pipelines/{{ p.id }}/edit">Add a schema</a> for a typed form.</span>
       </label>
     {% endif %}
@@ -123,7 +123,7 @@
           {{ pl.name }}
           {% if pv.stale %}<span class="badge badge-amber" title="{{ pv.stale | join('; ') }}">needs update</span>{% endif %}
         </td>
-        <td class="muted" style="font-size:12.5px">{{ pl.description or '—' }}</td>
+        <td class="muted" style="font-size:12.5px">{{ pl.description or '-' }}</td>
         <td class="muted" style="font-size:12.5px">{{ 'Private' if pl.visibility == 'private' else 'Shared' }}</td>
         <td style="text-align:right; white-space:nowrap">
           <button type="button" class="btn btn-ghost btn-sm" onclick="usePayload('{{ pl.id }}')">Use</button>

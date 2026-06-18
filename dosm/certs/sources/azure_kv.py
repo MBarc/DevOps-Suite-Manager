@@ -36,7 +36,7 @@ class AzureKeyVaultSource(CloudCertSource):
             from azure.keyvault.certificates import CertificateClient
         except ImportError as e:
             raise MissingDependencyError(
-                "Azure SDK not installed — run: pip install 'dosm[azure]'"
+                "Azure SDK not installed - run: pip install 'dosm[azure]'"
             ) from e
         if not self.vault_url:
             raise CertSourceError("Azure Key Vault source needs a vault URL")

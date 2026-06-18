@@ -38,7 +38,7 @@
           </form>
         </td>
         <td class="muted" style="font-size:12.5px">{{ c.updated_at.isoformat(timespec='seconds') }}</td>
-        <td class="muted"><code>{{ c.model or '—' }}</code></td>
+        <td class="muted"><code>{{ c.model or '-' }}</code></td>
         <td>
           <form method="post" action="/chat/{{ c.id }}/delete" class="inline"
                 onsubmit="return confirm('Delete this conversation?');">

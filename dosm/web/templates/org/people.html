@@ -46,8 +46,8 @@
     <tr class="people-row {% if not m.enabled %}disabled{% endif %}"
         {% if not m.enabled %}title="Account disabled"{% endif %}>
       <td><span class="name">{{ m.display_name }}</span></td>
-      <td class="muted">{{ m.title or "—" }}</td>
-      <td>{% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="muted">{{ m.title or "-" }}</td>
+      <td>{% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% else %}<span class="muted">-</span>{% endif %}</td>
       <td><a href="/org/{{ d.slug }}">{{ d.name }}</a></td>
     </tr>
     {% endfor %}

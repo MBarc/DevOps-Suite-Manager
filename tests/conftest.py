@@ -146,7 +146,7 @@ def db(session_factory):
 
 @pytest.fixture
 def anon_client(app):
-    """TestClient with no session — hits protected routes as an anonymous user."""
+    """TestClient with no session - hits protected routes as an anonymous user."""
     return TestClient(app, raise_server_exceptions=True)
 
 

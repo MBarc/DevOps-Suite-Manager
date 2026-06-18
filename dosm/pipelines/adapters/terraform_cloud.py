@@ -5,7 +5,7 @@ GET /api/v2/runs/{id} for status.
 
 Auth: bearer token (TFC/TFE to User Settings to Tokens, or a team token).
 Config keys: base_url, workspace_id, auto_apply, is_destroy, message.
-Note: TFC variables live on the workspace, not on the run — trigger-time
+Note: TFC variables live on the workspace, not on the run - trigger-time
 inputs are not forwarded. Configure workspace variables in TFC itself.
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ class TerraformCloudAdapter(PipelineAdapter):
     provider = "terraform_cloud"
     display_name = "Terraform Cloud"
     credential_hint = (
-        "API token — TFC/TFE to User Settings to Tokens, or a team/org token."
+        "API token - TFC/TFE to User Settings to Tokens, or a team/org token."
     )
 
     DEFAULT_BASE = "https://app.terraform.io"
@@ -81,7 +81,7 @@ class TerraformCloudAdapter(PipelineAdapter):
                       "https://app.terraform.io"),
             FieldSpec("tfc_workspace_id", "workspace_id", "Workspace ID",
                       "ws-…",
-                      "Found in workspace settings — starts with ws-."),
+                      "Found in workspace settings - starts with ws-."),
             FieldSpec("tfc_auto_apply", "auto_apply", "Auto-apply",
                       "", "Set to 'true' to apply automatically after plan.", "false"),
             FieldSpec("tfc_is_destroy", "is_destroy", "Destroy run",

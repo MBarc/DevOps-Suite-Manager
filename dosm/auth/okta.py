@@ -5,7 +5,7 @@ mapped to a DOSM role. The flow is deliberately split into **pure** functions
 (role mapping, claim extraction, JIT provisioning, ID-token validation against a
 supplied JWKS) and **network** helpers (discovery, token exchange, JWKS fetch),
 so the security-critical parts are unit-testable offline with a self-signed
-token + fixture JWKS — no live Okta needed.
+token + fixture JWKS - no live Okta needed.
 
 The client secret is read from the secrets backend (``okta/client_secret``),
 never from config.yaml.
@@ -43,7 +43,7 @@ class OktaError(Exception):
 def map_groups_to_role(groups, rbac: RbacConfig) -> str | None:
     """Map a user's group memberships to a DOSM role. Highest mapped role wins.
 
-    A user in **no** mapped group falls back to ``rbac.default_role`` — unless
+    A user in **no** mapped group falls back to ``rbac.default_role`` - unless
     that is set to deny (``"none"`` / unset / any non-role value), in which case
     this returns ``None`` meaning *access denied*. That's the secure default:
     only members of a group that's been granted a DOSM role can sign in.
@@ -59,7 +59,7 @@ def map_groups_to_role(groups, rbac: RbacConfig) -> str | None:
             best_role, best_rank = role, rank
     if best_role is not None:
         return best_role
-    # No mapped group matched — grant the default role only if it's a real role.
+    # No mapped group matched - grant the default role only if it's a real role.
     return rbac.default_role if rbac.default_role in ROLE_RANK else None
 
 
@@ -130,7 +130,7 @@ def validate_id_token(
 ) -> dict:
     """Verify an ID token's signature against ``jwks`` and validate its standard
     claims (iss/aud/exp) plus the nonce. Returns the claims on success; raises
-    OktaError otherwise. No network access — ``jwks`` is supplied by the caller."""
+    OktaError otherwise. No network access - ``jwks`` is supplied by the caller."""
     try:
         key_set = JsonWebKey.import_key_set(jwks)
         claims = jwt.decode(

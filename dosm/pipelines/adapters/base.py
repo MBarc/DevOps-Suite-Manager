@@ -38,7 +38,7 @@ RUN_STATUSES = (
     "failed",      # completed with non-OK conclusion
     "cancelled",   # cancelled by user or system
     "skipped",     # provider skipped this run
-    "unknown",     # we couldn't determine — keep polling
+    "unknown",     # we couldn't determine - keep polling
 )
 
 
@@ -60,7 +60,7 @@ class PollResult:
 
 
 class PipelineAdapter(ABC):
-    """Stateless contract — instances are reused across calls."""
+    """Stateless contract - instances are reused across calls."""
 
     provider: str
     display_name: str = ""

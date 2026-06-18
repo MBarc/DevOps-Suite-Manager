@@ -2,7 +2,7 @@
 
 Regression: clicking Ping on such a host used to return the alarming
 "jump chain has non-SSH hops … ping requires an SSH-tunnelable chain", which
-reads like a connectivity failure. It's a feature mismatch — that path isn't
+reads like a connectivity failure. It's a feature mismatch - that path isn't
 SSH-tunnelled. Ping now validates the RD Gateway's reachability instead and
 explains the limitation.
 """

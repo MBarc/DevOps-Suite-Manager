@@ -54,7 +54,7 @@ def compose_system_prompt(user: str | None = None) -> str:
 
 def compose_context_block(citations: list[Citation]) -> str:
     if not citations:
-        return "CONTEXT:\n(no local documentation matched — answer from general knowledge, or ask the user for more detail.)"
+        return "CONTEXT:\n(no local documentation matched - answer from general knowledge, or ask the user for more detail.)"
     parts = ["CONTEXT:"]
     for c in citations:
         parts.append(f"[{c.n}] source: {c.rel_path} (chunk #{c.ord}, score {c.score:.3f})\n{c.snippet}")

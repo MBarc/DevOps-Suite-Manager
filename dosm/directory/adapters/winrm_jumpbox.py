@@ -6,7 +6,7 @@ short PowerShell scripts on the jumpbox. Every call is a single round trip
 that emits one JSON blob; we parse it and translate into the ABC's record
 types.
 
-This adapter is deliberately stateless — each call opens a new ``winrm.Session``
+This adapter is deliberately stateless - each call opens a new ``winrm.Session``
 and discards it. WinRM has no persistent socket to reuse.
 """
 from __future__ import annotations
@@ -102,7 +102,7 @@ $managerDn = $env:MANAGER_DN
 
 $g = Get-ADGroup -Identity $groupDn -Properties description, managedBy
 
-# Direct members only (matches user's spec — no recursion).
+# Direct members only (matches user's spec - no recursion).
 $memberDns = @(Get-ADGroupMember -Identity $g | Where-Object { $_.objectClass -eq 'user' } | Select-Object -ExpandProperty distinguishedName)
 $members = @()
 $memberManagers = @{}
@@ -120,12 +120,12 @@ foreach ($dn in $memberDns) {
     }
     if ($u.manager) { $memberManagers[$u.manager] = $true }
   } catch {
-    # Skip stale references silently — sync should be tolerant.
+    # Skip stale references silently - sync should be tolerant.
   }
 }
 
 # Resolve each unique member-manager DN to a display name, in the same
-# round trip. ~one extra Get-ADUser per distinct manager — bounded by the
+# round trip. ~one extra Get-ADUser per distinct manager - bounded by the
 # number of leads above this group, not member count.
 $managerNames = @{}
 foreach ($mDn in $memberManagers.Keys) {
@@ -167,7 +167,7 @@ if ($managerDn) {
       $depth += 1
     }
   } catch {
-    # Manager DN no longer resolves — leave $manager null; orchestrator handles.
+    # Manager DN no longer resolves - leave $manager null; orchestrator handles.
   }
 }
 
@@ -235,7 +235,7 @@ class WinRMJumpboxSource(AdDirectorySource):
         host_id = cfg.directory.ad_jumpbox_host_id
         if not host_id:
             raise AdDirectoryError("AD jumpbox is not configured. Set one at /org/configure.")
-        # Open a short DB session — adapter has no other DB needs.
+        # Open a short DB session - adapter has no other DB needs.
         with session_scope() as db:
             host = db.get(Host, host_id)
             if host is None:
@@ -323,7 +323,7 @@ class WinRMJumpboxSource(AdDirectorySource):
             payload = self._run_ps(_RESOLVE_GROUP_PS, env={"GROUP_NAME": group_name})
         except AdDirectoryUnreachable as e:
             # _parse_or_raise inside _run_ps maps "not_found" payloads to
-            # AdDirectoryUnreachable by default — re-route to the right type
+            # AdDirectoryUnreachable by default - re-route to the right type
             # only when the upstream message looks like our marker.
             if "not_found" in str(e):
                 raise AdGroupNotFound(group_name) from e

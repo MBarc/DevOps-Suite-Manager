@@ -2,8 +2,8 @@
 
 When the target runs SSH, SFTP is the simplest and most secure file-transfer
 option: asyncssh carries it through the jump chain natively (no SOCKS proxy,
-no passive-port juggling). Reuses ``connect_through_chain`` — the documented
-one-shot connector — opening a fresh chained connection per operation.
+no passive-port juggling). Reuses ``connect_through_chain`` - the documented
+one-shot connector - opening a fresh chained connection per operation.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class SftpBackend(FileTransferBackend):
         )
         try:
             return await connect_through_chain(jump_hops, target)
-        except Exception as e:  # noqa: BLE001 — surface as an operator message
+        except Exception as e:  # noqa: BLE001 - surface as an operator message
             raise FileTransferError(
                 f"could not open SSH/SFTP to {self.host.name!r} "
                 f"({self.host.hostname}:{self.port}): {e}"

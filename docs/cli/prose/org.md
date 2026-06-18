@@ -2,7 +2,7 @@
 
 ## When to use
 
-The `org` commands talk to the Organisation Directory (Phase 14) — an
+The `org` commands talk to the Organisation Directory (Phase 14) - an
 Active Directory–backed view of departments and people, fetched via
 PowerShell run on a configured AD jumpbox over WinRM.
 
@@ -38,12 +38,12 @@ dosm org find "Senior Engineer"
 - `dosm org test-ad` and `dosm org sync` make a live WinRM connection.
   They will hang for several seconds waiting on a network timeout if the
   jumpbox is unreachable; budget for that in scripts.
-- `dosm org members`, `tree`, and `find` are pure cache reads — they
+- `dosm org members`, `tree`, and `find` are pure cache reads - they
   succeed even when the jumpbox is offline, but the data may be stale.
   Look at the `Department.last_synced_at` column (in the DB) or trigger
   a sync before relying on member lists.
 - The slug argument is the URL fragment, not the human name. Find it
   via the web UI under `/org/<slug>` or by listing departments in the
   DB.
-- `dosm org sync` does not yet do a full directory walk — sync each
+- `dosm org sync` does not yet do a full directory walk - sync each
   department individually. A bulk-sync subcommand is planned.

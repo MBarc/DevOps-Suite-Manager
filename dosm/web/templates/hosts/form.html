@@ -65,7 +65,7 @@
       {% if host and host.is_jumpbox %}style="display:none"{% endif %}>
       Jump host
       <select name="jump_host_id">
-        <option value="">(direct — no jump)</option>
+        <option value="">(direct - no jump)</option>
         {% for j in jump_candidates %}
         <option value="{{ j.id }}" {% if host and host.jump_host_id == j.id %}selected{% endif %}>
           {{ j.name }} ({{ j.hostname }}:{{ j.port }})

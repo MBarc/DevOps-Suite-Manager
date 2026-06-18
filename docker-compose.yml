@@ -13,13 +13,13 @@ services:
     environment:
       DOSM_HOME: /dosm-home
       DOSM_ADMIN_PASSWORD: ${DOSM_ADMIN_PASSWORD:-changeme}
-      # Browser-facing Guacamole URL used for the iframe — must be reachable
+      # Browser-facing Guacamole URL used for the iframe - must be reachable
       # from the user's browser, not from inside Docker.
       GUACAMOLE_PUBLIC_URL: ${GUACAMOLE_PUBLIC_URL:-http://localhost:8888/guacamole}
-      # LLM model to use — must match what you want Ollama to serve.
+      # LLM model to use - must match what you want Ollama to serve.
       DOSM_LLM_MODEL: ${DOSM_LLM_MODEL:-qwen2.5:3b-instruct}
     # Let DOSM reach the Docker host (and host-published services) via
-    # host.docker.internal — e.g. to register the host machine as a host entry
+    # host.docker.internal - e.g. to register the host machine as a host entry
     # for SSH/SFTP. Automatic on Docker Desktop; required on native Linux Docker.
     extra_hosts:
       - "host.docker.internal:host-gateway"

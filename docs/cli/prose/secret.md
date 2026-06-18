@@ -7,7 +7,7 @@
 credential values that `dosm credential` records will reference.
 
 The path you pass (`ssh/prod/admin`) is the **logical key** in the
-backend — for the local backend it becomes a row in the encrypted
+backend - for the local backend it becomes a row in the encrypted
 file; for Vault it becomes a path under the configured mount/prefix.
 
 ## Examples
@@ -34,7 +34,7 @@ dosm secret delete ssh/old/admin
 - `dosm secret get` prints the cleartext value to stdout. Don't run it
   in a screen-share or in a terminal whose output is being recorded.
 - Deleting a secret that's still referenced by a `Credential` row leaves
-  the credential pointing at a dead reference — the next operation that
+  the credential pointing at a dead reference - the next operation that
   needs the secret will fail loudly. Run `dosm credential list` first
   to see what's in use.
 - For the local backend, the encryption key file is at

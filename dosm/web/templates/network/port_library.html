@@ -75,7 +75,7 @@
           </td>
           <td>
             <span id="def-view-{{ p.id }}">
-              {% if p.is_default %}<span class="badge badge-green">yes</span>{% else %}<span class="muted">—</span>{% endif %}
+              {% if p.is_default %}<span class="badge badge-green">yes</span>{% else %}<span class="muted">-</span>{% endif %}
             </span>
             <input type="checkbox" id="def-edit-{{ p.id }}" {% if p.is_default %}checked{% endif %} style="display:none">
           </td>

@@ -346,7 +346,7 @@ async def _generate_reply(
 
             final_content = resp.content
 
-            # No tool calls (or round cap reached) — this is the final answer.
+            # No tool calls (or round cap reached) - this is the final answer.
             if not resp.tool_calls or _round == MAX_QUERY_ROUNDS:
                 break
 
@@ -363,12 +363,12 @@ async def _generate_reply(
                     _host_name = (tc.arguments.get("host") or "").strip()
                     _cmd = (tc.arguments.get("command") or "").strip()
                     _correction = (
-                        f"Error: local_exec has no 'host' parameter — drop it. "
+                        f"Error: local_exec has no 'host' parameter - drop it. "
                         f"Re-examine what the user actually asked: "
                         f"(A) If they want DOSM to run a connectivity check TO '{_host_name}' "
                         f"(e.g. 'ping {_host_name}', 'can you reach {_host_name}'), "
                         f"call local_exec with only the command (no host argument). "
-                        f"The command may reference '{_host_name}' by its real address — "
+                        f"The command may reference '{_host_name}' by its real address - "
                         f"call list_hosts first if you need the hostname or IP. "
                         f"(B) If they want '{_host_name}' itself to run the command "
                         f"(e.g. 'run df on {_host_name}', 'from {_host_name} ping X'), "
@@ -380,7 +380,7 @@ async def _generate_reply(
                         "tool": "local_exec",
                         "args": tc.arguments,
                         "ok": False,
-                        "summary": f"local_exec called with host='{_host_name}' — nudging LLM to self-correct",
+                        "summary": f"local_exec called with host='{_host_name}' - nudging LLM to self-correct",
                         "data_preview": _correction,
                         "elapsed_ms": 0,
                     }
@@ -522,7 +522,7 @@ async def _generate_reply(
             future.set_exception(exc)
     finally:
         _reply_futures.pop(conv_id, None)
-        await queue.put(None)  # sentinel — tells drain loops to exit
+        await queue.put(None)  # sentinel - tells drain loops to exit
 
 
 # --- SSE stream -----------------------------------------------------------
@@ -607,9 +607,9 @@ async def chat_stream(
                 f"Use ssh_exec when the request asks what happens ON the host (the host is the executor). "
                 f"Use winrm_exec for protocol=winrm hosts. "
                 f"Use local_exec (no host arg) when DOSM itself performs the operation "
-                f"— e.g. pinging or port-checking a host FROM DOSM. "
+                f"- e.g. pinging or port-checking a host FROM DOSM. "
                 f"A single request can require both: e.g. 'ping herupa' (local_exec) "
-                f"AND 'from herupa ping 8.8.8.8' (ssh_exec) — generate both tool calls."
+                f"AND 'from herupa ping 8.8.8.8' (ssh_exec) - generate both tool calls."
             )
 
         history_for_llm = [{"role": "system", "content": f"{sys_prompt}\n\n{ctx_block}"}]

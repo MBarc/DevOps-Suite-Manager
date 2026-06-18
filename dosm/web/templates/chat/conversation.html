@@ -126,7 +126,7 @@
                 {% if c.card.tier == 'elevated' or elevated_card_id == c.card.id %}
                   {% set ecf = confirm_fields.get(c.card.tool) %}
                   <label class="elevated-confirm">
-                    Elevated — type <code>{{ c.args.get(ecf, '') if ecf else c.card.tool }}</code> to confirm:
+                    Elevated - type <code>{{ c.args.get(ecf, '') if ecf else c.card.tool }}</code> to confirm:
                     <input type="text" name="confirmation" autocomplete="off" autofocus />
                   </label>
                 {% endif %}
@@ -257,11 +257,11 @@
     if (s < 60) return s.toFixed(1) + 's';
     return Math.floor(s / 60) + 'm ' + Math.floor(s % 60) + 's';
   }
-  const statusPrefix = isReconnect ? 'reconnected — still generating… ' : 'thinking… ';
+  const statusPrefix = isReconnect ? 'reconnected - still generating… ' : 'thinking… ';
   elapsedTimer = setInterval(() => {
     pendingStatus.textContent = statusPrefix + fmtElapsed(performance.now() - streamStart);
   }, 500);
-  if (isReconnect) pendingStatus.textContent = 'reconnected — still generating…';
+  if (isReconnect) pendingStatus.textContent = 'reconnected - still generating…';
 
   pending.classList.remove('hidden');
   const es = new EventSource(`/chat/{{ conversation.id }}/stream?reply_to=${encodeURIComponent(replyTo)}`);

@@ -35,7 +35,7 @@
     DOSM doesn't speak LDAP directly. In production, it opens a WinRM session
     to a Windows jumpbox (domain-joined, with RSAT-AD-PowerShell) and runs
     PowerShell <code>ActiveDirectory</code> cmdlets there. For development or
-    when you don't have a jumpbox yet, use the mock source — it returns a
+    when you don't have a jumpbox yet, use the mock source - it returns a
     canned org chart so you can exercise the whole UI.
   </p>
 
@@ -66,7 +66,7 @@
       <label id="lbl-mock">
         <input type="radio" name="use_mock" value="1" {% if use_mock %}checked{% endif %}>
         <span class="mode-title">Mock data (testing)</span>
-        <div class="mode-hint">Returns a fixture org (Engineering, Platform, Helpdesk, etc.) — no domain access needed.</div>
+        <div class="mode-hint">Returns a fixture org (Engineering, Platform, Helpdesk, etc.) - no domain access needed.</div>
       </label>
     </div>
 
@@ -74,7 +74,7 @@
       <label class="field" style="margin-bottom:var(--sp-3)">
         Windows jumpbox host
         <select name="host_id">
-          <option value="">— None —</option>
+          <option value="">- None -</option>
           {% for h in candidates %}
           <option value="{{ h.id }}" {% if selected_id == h.id %}selected{% endif %}>
             {{ h.name }} ({{ h.hostname }}{% if h.credential %} · {{ h.credential.name }}{% else %} · NO CREDENTIAL{% endif %})

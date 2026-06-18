@@ -255,7 +255,7 @@ async def credentials_update(
     cred.username = username.strip() or None
     cred.domain = domain.strip() or None
     cred.visibility = new_visibility
-    # secret_ref is immutable after creation — keeps existing value
+    # secret_ref is immutable after creation - keeps existing value
     cred.updated_at = datetime.now(UTC)
     try:
         db.flush()

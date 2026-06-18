@@ -8,7 +8,7 @@ Exercises both halves of the typed-inputs feature against the running app:
   4. POST /run with a bad choice value is rejected with 400 + error banner.
   5. Pipelines without a schema still accept the legacy free-form textarea.
 
-We don't need a real GitHub endpoint — `trigger_pipeline` traps adapter
+We don't need a real GitHub endpoint - `trigger_pipeline` traps adapter
 failures into a PipelineRun row with status='failed', which is exactly the
 path we want to verify here.
 """
@@ -43,7 +43,7 @@ def _make_pipeline_with_schema(auth_client) -> int:
             "schema_name__2": "version",
             "schema_type__2": "string",
             "schema_default__2": "1.0.0",
-            # Row 3: blank — should be dropped
+            # Row 3: blank - should be dropped
             "schema_name__3": "",
             "schema_type__3": "string",
         },
@@ -170,7 +170,7 @@ def test_ado_detail_shows_var_prefix_hint(auth_client):
     body = auth_client.get(f"/pipelines/{pid}").text
     assert "templateParameters" in body
     assert "var." in body
-    # Both schema rows render — including the dotted name field
+    # Both schema rows render - including the dotted name field
     assert 'name="input__version"' in body
     assert 'name="input__var.deploy_env"' in body
 

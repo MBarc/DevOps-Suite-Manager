@@ -2,7 +2,7 @@
   // Only runs when embedded as an iframe inside DOSM.
   if (window.parent === window) return;
 
-  // Clipboard capture — post copy/paste events to the parent DOSM frame so
+  // Clipboard capture - post copy/paste events to the parent DOSM frame so
   // they can be recorded in the session journal.
   document.addEventListener('copy', function () {
     try {
@@ -28,7 +28,7 @@
     } catch (_) {}
   });
 
-  // Keystroke capture — buffer printable chars, emit on Enter.
+  // Keystroke capture - buffer printable chars, emit on Enter.
   // The user explicitly opted in via the "Guac keystrokes" recording option,
   // which warns that passwords may appear. No automatic redaction is done
   // here; pause/length heuristics produced too many false positives (any
@@ -49,7 +49,7 @@
     } else if (key === 'Backspace') {
       _kBuf = _kBuf.slice(0, -1);
     } else if (e.ctrlKey && (key === 'c' || key === 'C')) {
-      // Ctrl+C interrupt — log whatever was being typed so the context is
+      // Ctrl+C interrupt - log whatever was being typed so the context is
       // preserved, then clear the buffer.
       if (_kBuf.length > 0) {
         window.parent.postMessage(
@@ -59,7 +59,7 @@
         _kBuf = '';
       }
     } else if (e.ctrlKey && (key === 'u' || key === 'U')) {
-      // Ctrl+U — clear line in bash
+      // Ctrl+U - clear line in bash
       _kBuf = '';
     } else if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
       _kBuf += key;

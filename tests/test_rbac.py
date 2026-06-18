@@ -1,4 +1,4 @@
-"""RBAC Phase A — role gates, private credentials, per-user data scoping."""
+"""RBAC Phase A - role gates, private credentials, per-user data scoping."""
 from __future__ import annotations
 
 import pytest
@@ -66,7 +66,7 @@ def test_settings_requires_admin(auth_client, operator_client, viewer_client):
 
 def test_terminals_require_admin(operator_client, viewer_client):
     # terminals are admin-only regardless of enabled flag; non-admins get 403
-    # (or 404 if terminals are disabled in the test config — never a 200).
+    # (or 404 if terminals are disabled in the test config - never a 200).
     for client in (operator_client, viewer_client):
         code = client.get("/terminals", follow_redirects=False).status_code
         assert code in (403, 404)
@@ -141,7 +141,7 @@ def test_shared_credential_visible_to_everyone(app, session_factory, operator_cl
 
 
 # ---------------------------------------------------------------------------
-# Per-user data scoping — conversations
+# Per-user data scoping - conversations
 # ---------------------------------------------------------------------------
 
 def test_conversation_private_to_owner(app, session_factory, operator_client):

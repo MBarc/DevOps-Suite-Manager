@@ -1,4 +1,4 @@
-"""Organisation routes — AD-integrated department directory.
+"""Organisation routes - AD-integrated department directory.
 
 The org page is gated behind a one-time configuration: pick a Windows
 jumpbox (an existing host with a credential profile) that DOSM will use
@@ -64,7 +64,7 @@ def _list_all(db: Session) -> list[Department]:
 
 
 def _is_configured(cfg) -> bool:
-    # Mock adapter is self-contained — no jumpbox needed. Useful for dev,
+    # Mock adapter is self-contained - no jumpbox needed. Useful for dev,
     # tests, and demoing the UI when a real Windows jumpbox isn't available.
     if cfg.directory.adapter == "mock":
         return True
@@ -101,7 +101,7 @@ def _sync_doc(cfg, dept: Department, members: list[DepartmentMember]) -> None:
     if dept.manager_name:
         lines.append(
             f"**Manager:** {dept.manager_name}"
-            + (f" — {dept.manager_email}" if dept.manager_email else "")
+            + (f" - {dept.manager_email}" if dept.manager_email else "")
             + (f" ({dept.manager_title})" if dept.manager_title else "")
         )
         lines.append("")
@@ -111,9 +111,9 @@ def _sync_doc(cfg, dept: Department, members: list[DepartmentMember]) -> None:
         for m in members:
             line = f"- {m.display_name}"
             if m.title:
-                line += f" — {m.title}"
+                line += f" - {m.title}"
             if m.email:
-                line += f" — {m.email}"
+                line += f" - {m.email}"
             if not m.enabled:
                 line += " *(disabled)*"
             lines.append(line)
@@ -323,13 +323,13 @@ async def org_configure_test(
             },
             status_code=400,
         )
-    # Run the sync test off the event loop — pywinrm is blocking.
+    # Run the sync test off the event loop - pywinrm is blocking.
     from dosm.directory import get_directory_source
 
     def _run() -> tuple[bool, str]:
         try:
             domain = get_directory_source(cfg).test_connection()
-            return (True, f"OK — connected to AD domain {domain!r}")
+            return (True, f"OK - connected to AD domain {domain!r}")
         except Exception as e:
             return (False, f"{type(e).__name__}: {e}")
 
@@ -469,7 +469,7 @@ async def org_create(
     db.add(AuditLog(actor_id=user.id, action="org.create", target=f"dept:{slug}"))
     db.commit()
     # Initial member sync immediately after create. If this fails, the dept
-    # row stays — user can retry from the detail page.
+    # row stays - user can retry from the detail page.
     try:
         await asyncio.get_event_loop().run_in_executor(
             None, partial(sync_department, db, cfg, dept, actor_id=user.id)
@@ -604,7 +604,7 @@ async def org_update(
         "description": description,
     }
 
-    # Re-resolve only if the inputs actually changed — avoids a WinRM round
+    # Re-resolve only if the inputs actually changed - avoids a WinRM round
     # trip when the user is just editing the description.
     group_changed = ad_group != dept.ad_group_name
     manager_changed = manager != dept.manager_input
@@ -660,7 +660,7 @@ async def org_update(
 
     if name != dept.name:
         dept.name = name
-        # Slug stays — it's stable across renames, like Folder.
+        # Slug stays - it's stable across renames, like Folder.
     dept.description = description.strip() or None
 
     db.add(AuditLog(actor_id=user.id, action="org.update", target=f"dept:{dept.slug}"))

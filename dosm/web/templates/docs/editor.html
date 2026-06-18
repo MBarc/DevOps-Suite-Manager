@@ -64,11 +64,11 @@
         Folder
         <div class="folder-search">
           <input type="text" id="folder-search-input" autocomplete="off"
-                 placeholder="— Unfiled —"
+                 placeholder="- Unfiled -"
                  value="{% if app_slug != '_unfiled' %}{% for a in folders %}{% if a.slug == app_slug %}{{ a.name }}{% endif %}{% endfor %}{% endif %}">
           <input type="hidden" name="app_slug" id="folder-slug-value" value="{{ app_slug }}">
           <div class="folder-dropdown" id="folder-dropdown">
-            <div class="folder-option" data-slug="_unfiled">— Unfiled —</div>
+            <div class="folder-option" data-slug="_unfiled">- Unfiled -</div>
             {% for a in folders %}
             <div class="folder-option" data-slug="{{ a.slug }}">{{ a.name }}</div>
             {% endfor %}

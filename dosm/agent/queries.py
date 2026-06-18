@@ -3,7 +3,7 @@
 Each QuerySpec has an async runner that returns a QueryResult.  The LLM
 emits <query>{"tool": "...", "args": {...}}</query> blocks; the stream
 handler executes them, injects the results, and lets the LLM continue.
-No human approval is required — these are read-only.
+No human approval is required - these are read-only.
 """
 from __future__ import annotations
 
@@ -129,7 +129,7 @@ LIST_HOSTS = QuerySpec(
     description=(
         "Read the host inventory from the database. "
         "Returns name, address, protocol, and tags. "
-        "No SSH or RDP connections are made — this is a pure database read."
+        "No SSH or RDP connections are made - this is a pure database read."
     ),
     args_schema=[
         {"name": "filter", "type": "string", "required": False, "description": "Substring to filter by name/hostname/protocol/tag."},
@@ -623,7 +623,7 @@ async def _read_doc_runner(cfg, args: dict) -> QueryResult:
         return QueryResult(ok=False, summary=f"read error: {e}", error=str(e))
 
     truncated = text[:20000]
-    suffix = f"\n\n[truncated — {len(text)} chars total, showing first 20000]" if len(text) > 20000 else ""
+    suffix = f"\n\n[truncated - {len(text)} chars total, showing first 20000]" if len(text) > 20000 else ""
     return QueryResult(ok=True, summary=f"read {path} ({len(text)} chars)", data=truncated + suffix)
 
 
@@ -650,7 +650,7 @@ async def _cli_help_runner(cfg, args: dict) -> QueryResult:
     """Return structured help for a `dosm` subcommand.
 
     Use this before proposing any plan card whose action invokes the dosm
-    CLI — verifies the command exists, flags are spelled correctly, and
+    CLI - verifies the command exists, flags are spelled correctly, and
     required arguments are present. Cheaper than searching the docs and
     immune to RAG ranking noise.
     """
@@ -692,14 +692,14 @@ async def _cli_help_runner(cfg, args: dict) -> QueryResult:
     full = " ".join(["dosm", *walked])
 
     if isinstance(node, click.Group):
-        # Listing a group — show its children.
-        lines.append(f"{full} — {(node.help or '').strip() or '(group)'}")
+        # Listing a group - show its children.
+        lines.append(f"{full} - {(node.help or '').strip() or '(group)'}")
         lines.append("")
         lines.append("Subcommands:")
         for name in sorted(node.commands):
             child = node.commands[name]
             short = (child.short_help or child.help or "").strip().splitlines()[0] if (child.short_help or child.help) else ""
-            lines.append(f"  {name} — {short}" if short else f"  {name}")
+            lines.append(f"  {name} - {short}" if short else f"  {name}")
         return QueryResult(ok=True, summary=f"group {full!r}", data="\n".join(lines))
 
     # Concrete command.
@@ -722,7 +722,7 @@ async def _cli_help_runner(cfg, args: dict) -> QueryResult:
             flags = ",".join(getattr(p, "opts", []) or [])
             default = "" if p.default in (None, ()) else f" default={p.default!r}"
             help_text = (getattr(p, "help", None) or "").strip()
-            opts_rows.append(f"  {flags} ({type_name}){default}" + (f" — {help_text}" if help_text else ""))
+            opts_rows.append(f"  {flags} ({type_name}){default}" + (f" - {help_text}" if help_text else ""))
 
     if args_rows:
         lines.append("")

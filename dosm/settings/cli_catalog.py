@@ -1,7 +1,7 @@
 """Known DevOps CLI tools that DOSM can wire as quick-launch shells.
 
 Each entry knows how to:
-- Find an installed binary (a list of candidate executable names — pwsh
+- Find an installed binary (a list of candidate executable names - pwsh
   before powershell.exe, awscli before aws, etc.).
 - Probe a version string (the arg list passed once at detection).
 - Render a stable id used in config.yaml's `cli_tools.<id>: bool`.

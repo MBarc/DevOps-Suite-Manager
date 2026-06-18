@@ -41,4 +41,4 @@ class MockCertSource(CertificateSource):
         return self._certs(warn_days, critical_days)
 
     async def test_connection(self) -> tuple[bool, str]:
-        return True, f"Mock source OK — {len(_FIXTURES)} fixture certificates"
+        return True, f"Mock source OK - {len(_FIXTURES)} fixture certificates"

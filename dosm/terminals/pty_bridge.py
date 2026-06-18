@@ -48,7 +48,7 @@ class PosixPty(PtyBridge):
         self._struct = struct
 
         pid, fd = pty.fork()
-        if pid == 0:  # child — pty.fork() already called setsid() for us.
+        if pid == 0:  # child - pty.fork() already called setsid() for us.
             try:
                 if cwd:
                     try:
@@ -128,7 +128,7 @@ class PosixPty(PtyBridge):
         self._alive = False
 
 
-class WinPty(PtyBridge):  # pragma: no cover — exercised on Windows hosts only
+class WinPty(PtyBridge):  # pragma: no cover - exercised on Windows hosts only
     def __init__(
         self,
         argv: list[str],

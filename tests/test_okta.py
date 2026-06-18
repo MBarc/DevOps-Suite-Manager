@@ -1,4 +1,4 @@
-"""Phase 21b — Okta OIDC SSO, validated offline with a self-signed ID token."""
+"""Phase 21b - Okta OIDC SSO, validated offline with a self-signed ID token."""
 from __future__ import annotations
 
 import time

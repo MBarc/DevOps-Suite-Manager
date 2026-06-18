@@ -3,7 +3,7 @@
 Wraps the blocking ``FtpClient`` (dosm/ftp/ftp_client.py): for a jumped host it
 leases a SOCKS proxy from ``JumpTunnelManager`` and routes every socket through
 it; for a direct host it dials sockets straight. The blocking client runs in a
-thread executor so the event loop stays free to service the SOCKS listener —
+thread executor so the event loop stays free to service the SOCKS listener -
 the concurrency model validated in the Phase A spike.
 
 One FTP control connection is opened per operation (stateless). The *jump*
@@ -63,7 +63,7 @@ def _run_session(
     except FtpError as e:
         raise FileTransferError(str(e)) from e
     except OSError as e:
-        raise FileTransferError(f"{host}:{port} — {e}") from e
+        raise FileTransferError(f"{host}:{port} - {e}") from e
     finally:
         client.quit()
 

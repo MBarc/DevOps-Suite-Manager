@@ -82,7 +82,7 @@ def list_tags(db: Session) -> list[Tag]:
 
 def list_jump_candidates(db: Session, exclude_host_id: int | None = None) -> list[Host]:
     """Hosts eligible to act as a jump box: flagged is_jumpbox, not the host
-    itself. Protocol isn't filtered — DOSM's tunnel mechanism currently only
+    itself. Protocol isn't filtered - DOSM's tunnel mechanism currently only
     works with SSH hops, but the inventory accepts RDP/VNC jumpboxes for
     operators who model their environment that way (the connect route
     surfaces a clear error if the chain can't be tunneled)."""
@@ -157,7 +157,7 @@ def create_host(
         ft_port = None
         ft_credential_id = None
     if is_jumpbox:
-        jump_host_id = None  # jumpboxes connect directly — no chained jumps
+        jump_host_id = None  # jumpboxes connect directly - no chained jumps
     _validate_jump(db, host_id=None, jump_host_id=jump_host_id)
     host = Host(
         name=name,
@@ -211,10 +211,10 @@ def update_host(
         ).scalar_one_or_none()
         if in_use is not None:
             raise HostValidationError(
-                "cannot unflag — this host is currently used as a jump host by another host"
+                "cannot unflag - this host is currently used as a jump host by another host"
             )
     if is_jumpbox:
-        jump_host_id = None  # jumpboxes connect directly — no chained jumps
+        jump_host_id = None  # jumpboxes connect directly - no chained jumps
     _validate_jump(db, host_id=host.id, jump_host_id=jump_host_id)
     host.name = name
     host.hostname = hostname

@@ -4,7 +4,7 @@ from dosm.recording.journal import PWD_PROMPT_RE, redact
 from dosm.recording.state import get_active
 
 # ---------------------------------------------------------------------------
-# High-level event helpers — called from route hook points.
+# High-level event helpers - called from route hook points.
 # Each function is a no-op when no recording is active for that user.
 # ---------------------------------------------------------------------------
 
@@ -122,7 +122,7 @@ def record_monitoring_query(user_id: int, source_name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-terminal-session hook — instantiated inside the WebSocket handler.
+# Per-terminal-session hook - instantiated inside the WebSocket handler.
 # ---------------------------------------------------------------------------
 
 class TerminalJournalHook:
@@ -186,7 +186,7 @@ class TerminalJournalHook:
             self._output_capped = True
             self._flush_pending_output(
                 rec,
-                cap_note=f"*[truncated — {overflow} B beyond {rec.options.output_cap_kb} KB cap]*",
+                cap_note=f"*[truncated - {overflow} B beyond {rec.options.output_cap_kb} KB cap]*",
             )
         else:
             self._output_buf += data

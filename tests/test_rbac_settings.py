@@ -14,7 +14,7 @@ from dosm.models import User
 
 @pytest.fixture(autouse=True)
 def _reset_rbac(test_config):
-    """Keep each test isolated — the app's cfg.rbac is shared (session-scoped)."""
+    """Keep each test isolated - the app's cfg.rbac is shared (session-scoped)."""
     saved = (dict(test_config.rbac.group_role_map), test_config.rbac.default_role)
     test_config.rbac.group_role_map = {}
     test_config.rbac.default_role = "viewer"

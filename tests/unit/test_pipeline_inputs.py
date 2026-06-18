@@ -161,7 +161,7 @@ def test_split_ado_var_prefix_routes_to_variables():
 
 
 def test_split_ado_template_params_keep_native_types():
-    """ADO runtime parameters are typed — booleans/numbers go on the wire as
+    """ADO runtime parameters are typed - booleans/numbers go on the wire as
     native JSON. Only the variables half is string-coerced."""
     tp, vars_ = split_azure_devops_inputs({"force": True, "count": 7, "ratio": 1.5})
     assert tp == {"force": True, "count": 7, "ratio": 1.5}

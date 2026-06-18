@@ -22,7 +22,7 @@ class RecordingOptions:
     output_cap_kb: int = 10  # 0 = no cap
     # Keystroke capture inside Guacamole sessions (covers both SSH and RDP).
     # Off by default because there is no output stream to detect password
-    # prompts against — the time-gap heuristic is used instead, but it is
+    # prompts against - the time-gap heuristic is used instead, but it is
     # imperfect.
     guac_keystrokes: bool = False
 
@@ -82,7 +82,7 @@ def redact(line: str, *, after_password_prompt: bool = False) -> str:
     line = _CLI_SECRET_FLAGS.sub(r'\g<1>******', line)
     line = _BEARER.sub(r'\g<1>******', line)
     if _looks_like_secret(line):
-        return "[redacted — potential secret]"
+        return "[redacted - potential secret]"
     return line
 
 
@@ -125,7 +125,7 @@ class JournalWriter:
                 header = f"**[{ts}] {category}**"
             else:
                 header = f"**{category}**"
-            self._fh.write(f"{header} — {text}\n\n")
+            self._fh.write(f"{header} - {text}\n\n")
             self._fh.flush()
 
     def write_block(self, category: str, label: str, content: str) -> None:
@@ -138,7 +138,7 @@ class JournalWriter:
                 header = f"**[{ts}] {category}**"
             else:
                 header = f"**{category}**"
-            label_part = f" — {label}" if label else ""
+            label_part = f" - {label}" if label else ""
             self._fh.write(f"{header}{label_part}\n\n```\n{content}\n```\n\n")
             self._fh.flush()
 

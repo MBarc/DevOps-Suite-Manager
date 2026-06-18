@@ -3,7 +3,7 @@
 # Usage: bash scripts/update.sh
 #
 # Backs up dosm-home, pulls the latest images, and restarts the stack.
-# DB migrations run automatically on DOSM boot — no manual step needed.
+# DB migrations run automatically on DOSM boot - no manual step needed.
 
 set -euo pipefail
 
@@ -27,9 +27,9 @@ cp -r dosm-home "$BACKUP"
 info "Pulling latest images..."
 docker compose -f "$COMPOSE_FILE" pull
 
-# 3. Restart — compose only restarts containers whose image changed
+# 3. Restart - compose only restarts containers whose image changed
 info "Restarting updated containers..."
 docker compose -f "$COMPOSE_FILE" up -d
 
 info "Done. DOSM is at http://localhost:${DOSM_PORT:-8765}"
-warn "Backup saved at ./$BACKUP — delete once you've verified the update."
+warn "Backup saved at ./$BACKUP - delete once you've verified the update."

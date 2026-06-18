@@ -47,7 +47,7 @@
 
 {% if doc %}
 <section class="card" style="font-size: 12.5px; color: var(--fg-muted);">
-  {{ doc.chunk_count }} chunks · indexed {{ doc.indexed_at.isoformat(timespec='seconds') if doc.indexed_at else '—' }}
+  {{ doc.chunk_count }} chunks · indexed {{ doc.indexed_at.isoformat(timespec='seconds') if doc.indexed_at else '-' }}
   · <a href="/docs/view?path={{ path|urlencode }}&raw=1" style="color:inherit">view raw</a>
 </section>
 {% endif %}

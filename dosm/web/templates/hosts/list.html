@@ -102,7 +102,7 @@
           </span>
         </td>
         <td style="padding:10px 14px; font-size:12px; color:var(--fg-muted)">
-          {{ h.credential.name if h.credential else '—' }}
+          {{ h.credential.name if h.credential else '-' }}
         </td>
         <td style="padding:10px 14px; font-size:12px">
           {% if h.jump_host %}
@@ -222,13 +222,13 @@
               <input type="checkbox" name="is_jumpbox" id="jb-{{ h.id }}" value="1"
                 {% if h.is_jumpbox %}checked{% endif %} />
               <label for="jb-{{ h.id }}" style="font-size:13px; font-weight:500">This host is a jumpbox</label>
-              <span style="font-size:11px; color:var(--fg-muted); margin-left:8px">Jumpboxes connect directly — no jump host needed.</span>
+              <span style="font-size:11px; color:var(--fg-muted); margin-left:8px">Jumpboxes connect directly - no jump host needed.</span>
             </div>
 
             <div id="jh-{{ h.id }}" style="margin-bottom:12px;{% if h.is_jumpbox %} display:none{% endif %}">
               <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Jump host</label>
               <select name="jump_host_id" style="width:100%; box-sizing:border-box">
-                <option value="">(direct — no jump)</option>
+                <option value="">(direct - no jump)</option>
                 {% for j in jump_candidates if j.id != h.id %}
                 <option value="{{ j.id }}" {% if h.jump_host_id == j.id %}selected{% endif %}>
                   {{ j.name }} ({{ j.hostname }})

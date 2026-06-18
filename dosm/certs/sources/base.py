@@ -5,7 +5,7 @@ service (Azure Key Vault, AWS ACM, GCP Certificate Manager) and maps each cert
 onto the shared ``CertInfo`` the certs dashboard already renders. Same adapter
 shape as the monitoring/directory adapters elsewhere.
 
-These sources are **opt-in** and require outbound cloud API calls — unlike the
+These sources are **opt-in** and require outbound cloud API calls - unlike the
 local-first defaults. Cloud SDKs are optional extras, imported lazily by each
 concrete adapter so the lean/air-gapped core stays dependency-free.
 """
@@ -124,7 +124,7 @@ class CloudCertSource(CertificateSource):
         try:
             loop = asyncio.get_running_loop()
             raws = await loop.run_in_executor(None, self._list_raw)
-            return True, f"Connected — {len(raws)} certificate(s) found"
+            return True, f"Connected - {len(raws)} certificate(s) found"
         except MissingDependencyError as e:
             return False, str(e)
         except Exception as e:  # noqa: BLE001

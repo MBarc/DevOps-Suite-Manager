@@ -32,7 +32,7 @@ def _slug(username: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Startup helper — abort any sessions that were active when the process died.
+# Startup helper - abort any sessions that were active when the process died.
 # ---------------------------------------------------------------------------
 
 def abort_stale_recordings(cfg) -> None:
@@ -82,7 +82,7 @@ class EventRequest(BaseModel):
     kind: str           # "copy" | "paste" | "clipboard" | "guac_keystroke"
     direction: str = "" # e.g. "terminal copy", "ssh", "rdp"
     content: str = ""
-    meta: str = ""      # extra context — host name for guac_keystroke events
+    meta: str = ""      # extra context - host name for guac_keystroke events
 
 
 class OptionsRequest(BaseModel):

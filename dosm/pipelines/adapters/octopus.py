@@ -56,7 +56,7 @@ def _map_status(state: str | None) -> str:
 class OctopusDeployAdapter(PipelineAdapter):
     provider = "octopus_deploy"
     display_name = "Octopus Deploy"
-    credential_hint = "Octopus API key — your profile to API Keys to New API Key."
+    credential_hint = "Octopus API key - your profile to API Keys to New API Key."
 
     @classmethod
     def field_schema(cls) -> list[FieldSpec]:

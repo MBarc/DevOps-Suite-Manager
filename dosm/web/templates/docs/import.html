@@ -25,7 +25,7 @@
     <label class="field">
       Folder
       <select name="app_slug">
-        <option value="_unfiled">— Unfiled —</option>
+        <option value="_unfiled">- Unfiled -</option>
         {% for a in folders %}
         <option value="{{ a.slug }}">{{ a.name }}</option>
         {% endfor %}
@@ -45,9 +45,9 @@
 <section class="card" style="font-size:.9rem; color: var(--fg-muted)">
   <h2>Notes</h2>
   <ul>
-    <li><strong>.docx</strong> — converted to markdown via mammoth. Complex layouts (multi-column, text boxes) may not convert cleanly. Images are not imported.</li>
-    <li><strong>.pdf</strong> — text is extracted page by page. Scanned or image-only PDFs produce empty or garbled output. Review the preview before saving.</li>
-    <li><strong>.md / .txt</strong> — used as-is. No conversion performed.</li>
+    <li><strong>.docx</strong> - converted to markdown via mammoth. Complex layouts (multi-column, text boxes) may not convert cleanly. Images are not imported.</li>
+    <li><strong>.pdf</strong> - text is extracted page by page. Scanned or image-only PDFs produce empty or garbled output. Review the preview before saving.</li>
+    <li><strong>.md / .txt</strong> - used as-is. No conversion performed.</li>
     <li>After conversion you will see the result in the editor before anything is saved. Click <strong>Save</strong> there to commit the file to the vault.</li>
   </ul>
 </section>

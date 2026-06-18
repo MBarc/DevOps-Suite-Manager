@@ -1,5 +1,5 @@
 /* =========================================================================
-   DOSM — modern operations console
+   DOSM - modern operations console
    Tokens, layout shell, and component primitives.
    ========================================================================= */
 
@@ -350,7 +350,7 @@ select {
 .field-hint { font-size: 11.5px; color: var(--fg-dim); }
 .inline-check { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--fg-muted); font-size: 13px; }
 
-/* Custom checkbox — used on scan builder and port library */
+/* Custom checkbox - used on scan builder and port library */
 .custom-cb {
   appearance: none;
   -webkit-appearance: none;

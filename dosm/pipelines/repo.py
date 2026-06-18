@@ -306,7 +306,7 @@ async def refresh_run(cfg: Config, db: Session, run: PipelineRun) -> PipelineRun
     if result.html_url:
         run.html_url = result.html_url
     if result.status not in ("queued", "running", "unknown"):
-        # Terminal status — clear stale error so the row reads cleanly if a
+        # Terminal status - clear stale error so the row reads cleanly if a
         # later poll succeeds after a transient failure.
         run.error = None
     db.flush()

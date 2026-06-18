@@ -102,7 +102,7 @@
         {% for child in dept.children %}
         <li>
           <a href="/org/{{ child.slug }}">{{ child.name }}</a>
-          {% if child.manager_name %}<span class="muted" style="font-size:.83rem"> — {{ child.manager_name }}</span>{% endif %}
+          {% if child.manager_name %}<span class="muted" style="font-size:.83rem"> - {{ child.manager_name }}</span>{% endif %}
         </li>
         {% endfor %}
       </ul>
@@ -123,7 +123,7 @@
   {% if not members %}
   <p class="muted" style="margin:0">
     {% if dept.sync_status == "never" %}
-    No members yet — click <strong>Sync now</strong> to fetch them from AD.
+    No members yet - click <strong>Sync now</strong> to fetch them from AD.
     {% else %}
     The AD group has no direct members.
     {% endif %}

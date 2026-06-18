@@ -78,7 +78,7 @@ def parse_schema_form(form: dict) -> list[dict]:
 
 
 def normalize_schema(schema: list[dict] | None) -> list[dict]:
-    """Defensive read of a stored schema — fills in defaults so templates
+    """Defensive read of a stored schema - fills in defaults so templates
     and coerce_run_inputs can rely on `type` being present and valid."""
     out: list[dict] = []
     for row in schema or []:
@@ -158,7 +158,7 @@ def validate_payload_values(schema: list[dict], values: dict[str, Any]) -> list[
     """Check already-typed payload ``values`` against the current ``schema``.
 
     Unlike :func:`coerce_run_inputs` (which reads string form fields), this
-    validates a stored dict directly — used to detect *drift* when a pipeline's
+    validates a stored dict directly - used to detect *drift* when a pipeline's
     schema changed after a payload was saved. Returns a list of human-readable
     problems (empty list = the payload still matches the schema)."""
     schema = normalize_schema(schema)
@@ -207,7 +207,7 @@ def _stringify_for_wire(inputs: dict[str, Any]) -> dict[str, str]:
 
 
 def coerce_for_github(inputs: dict[str, Any]) -> dict[str, str]:
-    """GitHub workflow_dispatch wants string values on the wire — booleans
+    """GitHub workflow_dispatch wants string values on the wire - booleans
     become the literal strings "true"/"false", numbers become str(n)."""
     return _stringify_for_wire(inputs)
 

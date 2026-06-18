@@ -47,7 +47,7 @@ def _map_status(status: str | None) -> str:
 class AWXAdapter(PipelineAdapter):
     provider = "awx"
     display_name = "Ansible AWX"
-    credential_hint = "AWX bearer token — Users to Tokens to Add in the AWX UI."
+    credential_hint = "AWX bearer token - Users to Tokens to Add in the AWX UI."
 
     @classmethod
     def field_schema(cls) -> list[FieldSpec]:

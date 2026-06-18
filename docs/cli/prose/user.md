@@ -2,7 +2,7 @@
 
 ## When to use
 
-DOSM uses local accounts only — there is no SSO. Create an `admin` user
+DOSM uses local accounts only - there is no SSO. Create an `admin` user
 first; only admins can open in-app terminals or approve agent plan cards.
 Use `operator` for day-to-day operators who need pipeline/host access but
 should not get terminal/agent privileges, and `viewer` for read-only.
@@ -28,7 +28,7 @@ dosm user passwd alice
 
 ## Gotchas
 
-- `dosm user create` does **not** disable an existing user — it errors
+- `dosm user create` does **not** disable an existing user - it errors
   out if the username already exists. To recover from a forgotten password,
   use `dosm user passwd <username>`.
 - Passing `--password` on the command line leaks the password into shell

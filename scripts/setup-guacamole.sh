@@ -23,7 +23,7 @@ info()  { echo -e "${GREEN}==>${NC} $*"; }
 warn()  { echo -e "${YELLOW}warn:${NC} $*"; }
 error() { echo -e "${RED}error:${NC} $*" >&2; exit 1; }
 
-command -v docker >/dev/null 2>&1 || error "docker not found — install Docker first."
+command -v docker >/dev/null 2>&1 || error "docker not found - install Docker first."
 
 # ---------------------------------------------------------------------------
 # 1. Generate Guacamole shared secret
@@ -32,7 +32,7 @@ command -v docker >/dev/null 2>&1 || error "docker not found — install Docker 
 mkdir -p dosm-home/config guacamole/initdb
 
 if [ -f "$KEY_FILE" ]; then
-    warn "Key file already exists at $KEY_FILE — using existing key."
+    warn "Key file already exists at $KEY_FILE - using existing key."
 else
     info "Generating Guacamole shared secret..."
     if command -v openssl >/dev/null 2>&1; then
@@ -50,7 +50,7 @@ HEX_KEY=$(tr -d '[:space:]' < "$KEY_FILE")
 # ---------------------------------------------------------------------------
 
 if [ -f "$INITDB_SQL" ]; then
-    warn "$INITDB_SQL already present — skipping generation."
+    warn "$INITDB_SQL already present - skipping generation."
 else
     info "Generating Guacamole Postgres schema..."
     docker run --rm "guacamole/guacamole:${GUAC_VERSION}" \
@@ -63,7 +63,7 @@ fi
 # ---------------------------------------------------------------------------
 
 if [ -f ".env" ]; then
-    warn ".env already exists — not overwriting."
+    warn ".env already exists - not overwriting."
     echo "      Ensure these values are set:"
     echo "        GUACAMOLE_JSON_SECRET_KEY=${HEX_KEY}"
 else

@@ -1,4 +1,4 @@
-"""Pipeline payloads — saved input sets with shared/private visibility."""
+"""Pipeline payloads - saved input sets with shared/private visibility."""
 from __future__ import annotations
 
 import json

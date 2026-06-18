@@ -50,7 +50,7 @@
       </span>
       <span class="ft-main">
         <div class="ft-name">{{ h.name }}</div>
-        <div class="ft-meta">{{ h.hostname }}:{{ h.ft_port or '—' }}{% if h.jump_host %} · via {{ h.jump_host.name }}{% endif %}</div>
+        <div class="ft-meta">{{ h.hostname }}:{{ h.ft_port or '-' }}{% if h.jump_host %} · via {{ h.jump_host.name }}{% endif %}</div>
       </span>
       <span class="ft-proto" data-p="{{ h.ft_method }}">{{ h.ft_method }}</span>
       <svg class="ft-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>

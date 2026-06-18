@@ -41,9 +41,9 @@
       {% endif %}
     </dd>
     <dt>Status</dt><dd>{{ run.status }}</dd>
-    <dt>Started</dt><dd class="muted">{{ run.started_at.isoformat(timespec='seconds') if run.started_at else '—' }}</dd>
-    <dt>Completed</dt><dd class="muted">{{ run.completed_at.isoformat(timespec='seconds') if run.completed_at else '—' }}</dd>
-    <dt>Last polled</dt><dd class="muted">{{ run.last_polled_at.isoformat(timespec='seconds') if run.last_polled_at else '—' }}</dd>
+    <dt>Started</dt><dd class="muted">{{ run.started_at.isoformat(timespec='seconds') if run.started_at else '-' }}</dd>
+    <dt>Completed</dt><dd class="muted">{{ run.completed_at.isoformat(timespec='seconds') if run.completed_at else '-' }}</dd>
+    <dt>Last polled</dt><dd class="muted">{{ run.last_polled_at.isoformat(timespec='seconds') if run.last_polled_at else '-' }}</dd>
   </dl>
   {% if run.error %}
     <div style="margin-top: var(--sp-3)" class="error"><strong>Error:</strong> {{ run.error }}</div>

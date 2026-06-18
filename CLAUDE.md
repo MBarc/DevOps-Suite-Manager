@@ -32,17 +32,17 @@ without outbound traffic.
 - Phase-by-phase status, backlog, design decisions, known limitations →
   **`docs/ROADMAP.md`** (read this every new session)
 - High-level architecture and the working CLI/web flow → `README.md`
-- Each phase has its own commit with a detailed message — `git log --oneline`
+- Each phase has its own commit with a detailed message - `git log --oneline`
   shows the chronology, `git show <hash>` gives the rationale
 
 ## Conventions in this repo
 
 - **Phases ship as one focused commit** with a thorough message that captures
-  the "why" — preserve this rhythm. The commit is also the changelog.
+  the "why" - preserve this rhythm. The commit is also the changelog.
 - **Smoke tests are inline bash blocks**, not pytest. End every meaningful
   change with a smoke that exercises both the happy path and at least one
   error path against the live server. There is no automated test suite yet.
-- **`dosm` CLI** (`dosm/cli.py`) is the canonical admin interface — every
+- **`dosm` CLI** (`dosm/cli.py`) is the canonical admin interface - every
   user-facing action exposed in the UI should also be reachable from the CLI
   where it makes sense.
 - **Audit log everything that mutates state.** Insert an `AuditLog` row in
@@ -52,12 +52,12 @@ without outbound traffic.
   in `dosm/monitoring/adapters/`, pipeline adapters in `dosm/pipelines/`,
   metrics sources in `dosm/metrics/`. Each domain has its own ABC; new
   integrations slot in there. (The pluggable `dosm/modules/` system was
-  retired — it had only ever shipped one example module.)
+  retired - it had only ever shipped one example module.)
 - **Don't push to `main`** without explicit user permission. The working
   branch is `claude/devops-suite-llm-design-ZJ2aU`.
 - **Honor `dosm/migrations.py` for schema changes.** It's an idempotent
   column-add helper. Anything more complex (renames, FK changes) needs
-  Alembic — call that out instead of working around it.
+  Alembic - call that out instead of working around it.
 
 ## Things to be careful about
 
@@ -87,5 +87,5 @@ See `docs/ROADMAP.md` for the authoritative status. As of the last commit:
   (certificate inventory), 14 (organization graph), 15 (documentation
   vault & importer), 8d (session recordings browser).
 - The user's stated preference: do **tests + CI** (Phase 10.5) before
-  loading more features on, then probably 11b. They've not committed yet —
+  loading more features on, then probably 11b. They've not committed yet -
   ask before assuming.

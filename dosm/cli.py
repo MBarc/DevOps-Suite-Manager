@@ -393,9 +393,9 @@ def hosts_show(name: str = typer.Argument(..., help="Host name.")) -> None:
         console.print(f"  hostname  : {h.hostname}")
         console.print(f"  port      : {h.port}")
         console.print(f"  protocol  : {h.protocol}")
-        console.print(f"  credential: {h.credential.name if h.credential else '—'}")
+        console.print(f"  credential: {h.credential.name if h.credential else '-'}")
         console.print(f"  jumpbox   : {'yes' if h.is_jumpbox else 'no'}")
-        console.print(f"  jump via  : {h.jump_host.name if h.jump_host else '—'}")
+        console.print(f"  jump via  : {h.jump_host.name if h.jump_host else '-'}")
         if h.ft_method:
             console.print(f"  file xfer : {h.ft_method} (port {h.ft_port or 'default'})")
         if h.description:
@@ -418,7 +418,7 @@ def hosts_set_hostname(
         h = _get_host_by_name(s, name)
         old = h.hostname
         if old == new:
-            console.print(f"[yellow]No change[/yellow] — {name} already points at {new}.")
+            console.print(f"[yellow]No change[/yellow] - {name} already points at {new}.")
             return
         h.hostname = new
         s.add(
@@ -446,7 +446,7 @@ def hosts_set_port(
         h = _get_host_by_name(s, name)
         old = h.port
         if old == port:
-            console.print(f"[yellow]No change[/yellow] — {name} already uses port {port}.")
+            console.print(f"[yellow]No change[/yellow] - {name} already uses port {port}.")
             return
         h.port = port
         s.add(
@@ -561,7 +561,7 @@ def docs_install_cli_reference(
     Also seeds the DOSM-CLI Folder row so the pages appear in their own
     folder rather than Unfiled. Run after upgrading DOSM to refresh the
     docs the agent retrieves via RAG. Auto-runs on `dosm init`. Files in
-    `_dosm-cli/` are owned by DOSM — do not hand-edit them.
+    `_dosm-cli/` are owned by DOSM - do not hand-edit them.
     """
     from dosm.docs_index.cli_reference import (
         ensure_cli_folder,
@@ -581,7 +581,7 @@ def docs_install_cli_reference(
     console.print(f"[green]Installed[/green] {count} file(s) to {target}")
     console.print("[green]Seeded[/green] DOSM-CLI folder")
     console.print("Run [bold]dosm docs reindex[/bold] to make them searchable now")
-    console.print("(or just start [bold]dosm serve[/bold] — auto-index picks them up).")
+    console.print("(or just start [bold]dosm serve[/bold] - auto-index picks them up).")
 
 
 @docs_app.command("status")
@@ -936,8 +936,8 @@ def org_members(slug: str = typer.Argument(..., help="Department slug.")) -> Non
     for m in members:
         table.add_row(
             m.display_name,
-            m.title or "—",
-            m.email or "—",
+            m.title or "-",
+            m.email or "-",
             "[green]enabled[/green]" if m.enabled else "[red]disabled[/red]",
         )
     console.print(table)
@@ -1011,7 +1011,7 @@ def org_find(query: str = typer.Argument(..., help="Substring to match name/emai
     table.add_column("Department")
     for m, d in rows:
         name = m.display_name if m.enabled else f"[strike]{m.display_name}[/strike]"
-        table.add_row(name, m.title or "—", m.email or "—", d.name)
+        table.add_row(name, m.title or "-", m.email or "-", d.name)
     console.print(table)
 
 

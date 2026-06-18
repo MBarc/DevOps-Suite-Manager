@@ -18,14 +18,14 @@ from dosm.secrets import SecretNotFound, get_backend
 
 @dataclass
 class HopCreds:
-    """Resolved per-hop connection material — pure values so it survives
+    """Resolved per-hop connection material - pure values so it survives
     detachment from the originating SQLAlchemy session."""
 
     host_id: int
     name: str
     hostname: str
     port: int
-    protocol: str   # "ssh" | "rdp" | "vnc" — drives SSH vs WinRM routing
+    protocol: str   # "ssh" | "rdp" | "vnc" - drives SSH vs WinRM routing
     username: str
     password: str | None
     private_key: str | None

@@ -38,7 +38,7 @@ dependencies = [
     "markdown-it-py>=3.0",
     "nh3>=0.2",
     "watchdog>=4.0",
-    # Phase 21b — Okta OIDC SSO: discovery, token exchange, and offline ID-token
+    # Phase 21b - Okta OIDC SSO: discovery, token exchange, and offline ID-token
     # validation against the provider's JWKS.
     "authlib>=1.3,<2",
 ]
@@ -49,11 +49,11 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.7",
     # FTP/FTPS test server for the file-transfer integration tests. pyftpdlib's
-    # TLS handler needs pyOpenSSL. Test-only — not a runtime dependency.
+    # TLS handler needs pyOpenSSL. Test-only - not a runtime dependency.
     "pyftpdlib>=1.5",
     "pyopenssl>=24.0",
 ]
-# Cloud certificate sources (Phase 19) — opt-in, lazily imported. Install only
+# Cloud certificate sources (Phase 19) - opt-in, lazily imported. Install only
 # the cloud(s) you track certs in, e.g. pip install 'dosm[azure]'.
 azure = ["azure-identity>=1.16", "azure-keyvault-certificates>=4.8"]
 aws = ["boto3>=1.34"]
@@ -67,7 +67,7 @@ packages = ["dosm"]
 
 # Bundle the generated CLI reference inside the wheel so the runtime can
 # install it into $DOSM_HOME/docs/_dosm-cli/ on dosm init / dosm docs
-# install-cli-reference. Hand-written prose lives outside the wheel —
+# install-cli-reference. Hand-written prose lives outside the wheel -
 # only the spliced output is shipped.
 [tool.hatch.build.targets.wheel.force-include]
 "docs/cli/_generated" = "dosm/cli_docs/_generated"
@@ -86,11 +86,11 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B"]
 ignore = [
     "B008",  # FastAPI Depends() in function defaults is intentional
-    "B904",  # raise-without-from — too noisy in CLI/route error handlers
-    "B905",  # zip() without strict= — intentional in pairing loops
-    "B027",  # empty abstract method without decorator — ABC pattern
+    "B904",  # raise-without-from - too noisy in CLI/route error handlers
+    "B905",  # zip() without strict= - intentional in pairing loops
+    "B027",  # empty abstract method without decorator - ABC pattern
 ]
-# Test files import fixtures via function args — ruff shouldn't flag unused imports there.
-# LLM tool definition files have long description strings — E501 would require ugly wrapping.
+# Test files import fixtures via function args - ruff shouldn't flag unused imports there.
+# LLM tool definition files have long description strings - E501 would require ugly wrapping.
 # PowerShell adapter embeds full PS commands that cannot be split.
 per-file-ignores = { "tests/**" = ["F401", "F811"], "dosm/agent/actions.py" = ["E501"], "dosm/agent/queries.py" = ["E501"], "dosm/directory/adapters/winrm_jumpbox.py" = ["E501"], "dosm/metrics/sources.py" = ["E501"] }

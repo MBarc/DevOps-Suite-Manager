@@ -68,7 +68,7 @@ class _JumpEntry:
     last_active: float = field(default_factory=time.monotonic)
     # A single SOCKS5 listener multiplexed across all FTP sessions on this
     # jump. Unlike a port forward (one fixed target), a SOCKS proxy reaches
-    # *any* host:port on demand — exactly what FTP passive data ports need.
+    # *any* host:port on demand - exactly what FTP passive data ports need.
     socks_listener: Any = None
     socks_bind_host: str = ""
     socks_bind_port: int = 0
@@ -137,7 +137,7 @@ class JumpTunnelManager:
         The caller uses the lease's bind_host/bind_port as the apparent
         endpoint (e.g. for Guacamole's connection blob).
 
-        ``target_port`` overrides ``host.port`` for the tunnel destination —
+        ``target_port`` overrides ``host.port`` for the tunnel destination -
         used by winrm_exec to forward to WinRM (5985/5986) instead of the
         host's registered RDP port (3389).
         """
@@ -193,7 +193,7 @@ class JumpTunnelManager:
         chain; ``None`` for a directly reachable host.
 
         One SOCKS listener is opened per jump chain and shared by every leaser
-        — an FTP control connection plus all of its ephemeral passive data
+        - an FTP control connection plus all of its ephemeral passive data
         ports tunnel through the same proxy, so dynamic data ports need no
         per-transfer forward bookkeeping. Bound to loopback by default: the
         proxy is no-auth and must never be exposed off-box.
@@ -249,7 +249,7 @@ class JumpTunnelManager:
             except asyncssh.PermissionDenied as e:
                 raise JumpAuthError(
                     f"authentication failed at jump host {hop.name!r} "
-                    f"(user {hop.username!r}) — check the credential profile"
+                    f"(user {hop.username!r}) - check the credential profile"
                 ) from e
             except Exception as e:
                 raise JumpUnreachableError(
@@ -281,7 +281,7 @@ class JumpTunnelManager:
 
         The browser holds the id and pings ``release_session`` on tab close
         (pagehide beacon). The backstop guarantees release if the browser
-        signal never arrives — kill, network drop, mobile Safari quirk.
+        signal never arrives - kill, network drop, mobile Safari quirk.
         """
         sid = secrets.token_urlsafe(16)
         async with self._lock:
@@ -311,7 +311,7 @@ class JumpTunnelManager:
     def stats(self) -> dict:
         """Return a snapshot of pool size for health/diagnostics views.
 
-        Reads private state directly — synchronous and approximate; a
+        Reads private state directly - synchronous and approximate; a
         concurrent acquire/release may shift the numbers by one. That's
         fine for a status display.
         """
@@ -380,12 +380,12 @@ async def probe_forward(
     except TimeoutError:
         raise TargetUnreachableError(
             f"jump box cannot reach {lease.target_host}:{lease.target_port} "
-            f"— connection timed out (host unreachable or port filtered)"
+            f"- connection timed out (host unreachable or port filtered)"
         )
     except OSError as e:
         raise TargetUnreachableError(
             f"jump box cannot reach {lease.target_host}:{lease.target_port} "
-            f"— {e}"
+            f"- {e}"
         )
     finally:
         if writer is not None:
@@ -436,7 +436,7 @@ async def verify_ssh_credentials(
     except asyncssh.PermissionDenied as e:
         raise TargetAuthError(
             f"target {target_host}:{target_port} rejected credentials "
-            f"for user {username!r} — check the credential profile"
+            f"for user {username!r} - check the credential profile"
         ) from e
     except TimeoutError:
         raise TargetUnreachableError(
@@ -466,5 +466,5 @@ async def gc_loop(interval: float = GC_INTERVAL_SECONDS) -> None:
         except asyncio.CancelledError:
             return
         except Exception:
-            # Reaper must never die from a transient error — keep ticking.
+            # Reaper must never die from a transient error - keep ticking.
             continue

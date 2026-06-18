@@ -19,7 +19,7 @@ dosm secret set ssh/prod/admin
 dosm credential add prod-admin --kind ssh_password \
     --username admin --secret-ref ssh/prod/admin
 
-# SSH key auth — secret-ref points at the key material
+# SSH key auth - secret-ref points at the key material
 dosm secret set ssh/keys/ops-bot
 dosm credential add ops-bot --kind ssh_key \
     --username opsbot --secret-ref ssh/keys/ops-bot
@@ -30,7 +30,7 @@ dosm credential list
 
 ## Gotchas
 
-- `dosm credential add` does not validate the kind — pass one of the
+- `dosm credential add` does not validate the kind - pass one of the
   documented values exactly. A typo creates a credential that no host
   can use.
 - The CLI does not yet expose `delete`, `update`, or `rename`. Use the

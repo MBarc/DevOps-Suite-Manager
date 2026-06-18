@@ -1,8 +1,8 @@
 """File transfer (FTP / explicit FTPS / SFTP) for jumped and direct hosts.
 
-* ``FileTransferBackend`` (base) — the uniform contract the UI/CLI use.
-* ``FtpBackend`` / ``SftpBackend`` — concrete backends.
-* ``get_file_backend`` — pick one for a host by protocol.
+* ``FileTransferBackend`` (base) - the uniform contract the UI/CLI use.
+* ``FtpBackend`` / ``SftpBackend`` - concrete backends.
+* ``get_file_backend`` - pick one for a host by protocol.
 
 The hard problem (FTP's separate, dynamically-negotiated data connection
 through a jump box) is solved by routing every FTP socket through an SSH-jump

@@ -29,7 +29,7 @@ class ToolCall:
     """A single tool invocation returned by the model."""
 
     name: str
-    arguments: dict  # already parsed by Ollama — never a raw JSON string
+    arguments: dict  # already parsed by Ollama - never a raw JSON string
 
 
 @dataclass

@@ -50,12 +50,12 @@
               <span class="muted" style="font-size:11px">({{ s.checked }}/{{ s.total }} checked)</span>
             {% endif %}
           {% else %}
-            <span class="muted">—</span>
+            <span class="muted">-</span>
           {% endif %}
         </td>
         <td class="muted" style="font-size:12px">{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
         <td class="muted" style="font-size:12px">
-          {% if scan.completed_at %}{{ scan.completed_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+          {% if scan.completed_at %}{{ scan.completed_at.strftime('%Y-%m-%d %H:%M') }}{% else %}-{% endif %}
         </td>
         <td style="text-align:right;white-space:nowrap">
           <a href="/network/map/{{ scan.id }}" class="btn btn-sm">View</a>

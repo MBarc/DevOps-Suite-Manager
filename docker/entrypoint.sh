@@ -42,7 +42,7 @@ PY
 fi
 
 # ---------------------------------------------------------------------------
-# 2. DB migrations (idempotent — safe to run every boot)
+# 2. DB migrations (idempotent - safe to run every boot)
 # ---------------------------------------------------------------------------
 
 dosm db init
@@ -64,14 +64,14 @@ if [ ! -f "$KEY_FILE" ]; then
     dosm guacamole keygen
     echo ""
     echo "================================================================"
-    echo " GUACAMOLE KEY GENERATED — add to .env before restarting:"
+    echo " GUACAMOLE KEY GENERATED - add to .env before restarting:"
     echo "   GUACAMOLE_JSON_SECRET_KEY=$(cat "$KEY_FILE")"
     echo "================================================================"
     echo ""
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Pull LLM model into Ollama (non-blocking — DOSM starts immediately)
+# 5. Pull LLM model into Ollama (non-blocking - DOSM starts immediately)
 # ---------------------------------------------------------------------------
 
 LLM_MODEL="${DOSM_LLM_MODEL:-qwen2.5:3b-instruct}"

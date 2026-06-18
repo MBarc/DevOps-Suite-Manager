@@ -3,9 +3,9 @@
 A ``FileTransferBackend`` exposes a small, uniform set of operations against a
 single inventory ``Host``. Concrete backends:
 
-* ``FtpBackend``  — plain FTP / explicit FTPS via the hand-rolled blocking
+* ``FtpBackend``  - plain FTP / explicit FTPS via the hand-rolled blocking
   client, routed through an SSH-jump SOCKS proxy when the host is jumped.
-* ``SftpBackend`` — SFTP over ``asyncssh``, which tunnels through the jump
+* ``SftpBackend`` - SFTP over ``asyncssh``, which tunnels through the jump
   chain natively.
 
 The web file browser, the CLI, and audit logging are written once against

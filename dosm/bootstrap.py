@@ -138,7 +138,7 @@ def initialize_home(home: Path, *, force: bool = False) -> list[Path]:
         created.append(readme_path)
 
     # Install the bundled CLI reference into the docs vault so the agent
-    # can RAG it on first run. Best-effort — failure here should not block
+    # can RAG it on first run. Best-effort - failure here should not block
     # `dosm init` (e.g. running from a source checkout where the generator
     # has never been run).
     try:

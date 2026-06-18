@@ -2,7 +2,7 @@
 {% block title %}Files · {{ host.name }} | DOSM{% endblock %}
 {% block content %}
 <style>
-  /* ── File browser — cohesive with DOSM's dark system, elevated with a
+  /* ── File browser - cohesive with DOSM's dark system, elevated with a
      monospace path rail, crisp rows, and a staggered reveal. ─────────────── */
   .fb-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
   .fb-proto {
@@ -14,7 +14,7 @@
   }
   .fb-proto[data-p="ftps"], .fb-proto[data-p="sftp"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
 
-  /* Path rail — the spine of the browser. */
+  /* Path rail - the spine of the browser. */
   .fb-rail {
     display:flex; align-items:center; gap:2px; flex-wrap:wrap;
     font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -390,7 +390,7 @@
       const d = await post("copy", f);
       closeCopy();
       toast(`${isMove ? "Moved" : "Copied"} ${srcName} to ${d.dst_host} (${humanSize(d.bytes)})`);
-      if (isMove) load();  // source removed — refresh listing
+      if (isMove) load();  // source removed - refresh listing
     } catch (err) {
       $("fb-copy-error").textContent = String(err.message);
       go.disabled = false; go.textContent = isMove ? "Move" : "Copy";

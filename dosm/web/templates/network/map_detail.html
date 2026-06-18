@@ -31,11 +31,11 @@
     <div class="subtitle" id="scan-subtitle">
       {% if scan.status == 'completed' %}
         {% if reachable == total %}
-          Completed — all {{ total }} open
+          Completed - all {{ total }} open
         {% elif reachable == 0 %}
-          Completed — all {{ total }} closed
+          Completed - all {{ total }} closed
         {% else %}
-          Completed — {{ reachable }} of {{ total }} open
+          Completed - {{ reachable }} of {{ total }} open
         {% endif %}
       {% elif scan.status == 'running' or running %}
         Running…
@@ -314,7 +314,7 @@ function portAggRow(port, s) {
   const allOpen    = s.open === s.total && s.pending === 0;
   const allClosed  = s.closed === s.total && s.pending === 0;
   const color = allPending ? '#3f3f46' : allOpen ? '#22c55e' : allClosed ? '#ef4444' : '#f59e0b';
-  const label = allPending ? '—' : `${s.open} / ${s.total} open`;
+  const label = allPending ? '-' : `${s.open} / ${s.total} open`;
   return `<div class="port-row">
     <span class="port-dot" style="background:${color}"></span>
     <code style="min-width:36px;font-size:12px">${+port === 0 ? 'ping' : port}</code>
@@ -337,11 +337,11 @@ function showNodeDetail(node, outEdges, inEdges) {
   if (badges.length)  html += `<div style="display:flex;gap:4px;margin-bottom:4px">${badges.join('')}</div>`;
 
   if (outEdges.length) {
-    html += sectionLabel(`Outbound — ${outEdges.length} destination${outEdges.length > 1 ? 's' : ''}`);
+    html += sectionLabel(`Outbound - ${outEdges.length} destination${outEdges.length > 1 ? 's' : ''}`);
     html += aggregatePorts(outEdges).map(([p, s]) => portAggRow(p, s)).join('');
   }
   if (inEdges.length) {
-    html += sectionLabel(`Inbound — ${inEdges.length} source${inEdges.length > 1 ? 's' : ''}`);
+    html += sectionLabel(`Inbound - ${inEdges.length} source${inEdges.length > 1 ? 's' : ''}`);
     html += aggregatePorts(inEdges).map(([p, s]) => portAggRow(p, s)).join('');
   }
   if (!outEdges.length && !inEdges.length) {
@@ -366,7 +366,7 @@ function showEdgeDetail(edge) {
   html += (edge.ports || []).sort((a, b) => a.port - b.port).map(p => {
     const ok = p.reachable;
     const dotColor = ok === null ? '#3f3f46' : ok ? '#22c55e' : '#ef4444';
-    const statusLabel = ok === null ? '—' : ok ? 'open' : 'closed';
+    const statusLabel = ok === null ? '-' : ok ? 'open' : 'closed';
     const latency = p.latency_ms != null ? `<span class="muted" style="font-size:11px">${p.latency_ms}ms</span>` : '';
     const err = p.error_msg
       ? `<span title="${esc(p.error_msg)}" style="font-size:11px;color:#f59e0b;cursor:help">⚠</span>` : '';
@@ -487,13 +487,13 @@ async function poll() {
         } else {
           const open = d.reachable, total = d.total, closed = d.unreachable, pending = d.pending;
           if (pending > 0) {
-            sub.textContent = `Completed — ${open} open, ${closed} closed, ${pending} pending`;
+            sub.textContent = `Completed - ${open} open, ${closed} closed, ${pending} pending`;
           } else if (open === total) {
-            sub.textContent = `Completed — all ${total} open`;
+            sub.textContent = `Completed - all ${total} open`;
           } else if (open === 0) {
-            sub.textContent = `Completed — all ${total} closed`;
+            sub.textContent = `Completed - all ${total} closed`;
           } else {
-            sub.textContent = `Completed — ${open} of ${total} open`;
+            sub.textContent = `Completed - ${open} of ${total} open`;
           }
         }
       }

@@ -1,7 +1,7 @@
 """Filesystem watcher for $DOSM_HOME/docs/.
 
 Triggers reindex_async whenever docs are created, modified, or deleted
-outside of DOSM's own vault UI — e.g. when files are dropped in via
+outside of DOSM's own vault UI - e.g. when files are dropped in via
 Explorer, rsync, or an external editor.
 
 Uses watchdog's OS-native backends (ReadDirectoryChangesW on Windows,
@@ -69,7 +69,7 @@ def start_watcher(cfg: Config) -> None:
             obs.start()
             _observer = obs
         except ImportError:
-            pass  # watchdog not installed — watcher disabled, vault UI reindex still works
+            pass  # watchdog not installed - watcher disabled, vault UI reindex still works
         except Exception:
             pass
 

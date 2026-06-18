@@ -24,7 +24,7 @@ router = APIRouter(prefix="/monitoring")
 # Persistent host-check cache (monitoring_matches table). A found/known entry
 # is served locally until it ages past the TTL; stale/missing entries trigger a
 # fresh API query, and a manual Refresh forces a re-query. Presence/identity
-# only — live alert state (fetch_alerts) is never cached here.
+# only - live alert state (fetch_alerts) is never cached here.
 # ---------------------------------------------------------------------------
 
 _MATCH_TTL = timedelta(hours=24)
@@ -484,7 +484,7 @@ async def _run_checks(
     for (adapter, source), r in zip(adapters, raw):
         if isinstance(r, Exception):
             r = _error_result(adapter, source, r)
-        _match_store(db, hostname, r)   # DB write outside the gather — single session
+        _match_store(db, hostname, r)   # DB write outside the gather - single session
         results.append(r)
     db.commit()
     return results
@@ -518,7 +518,7 @@ async def _run_checks_fleet(
         raw = await asyncio.gather(
             *(_check(a, h.hostname) for h, a, _ in to_check), return_exceptions=True
         )
-        # DB writes happen here, sequentially — never inside the gather above.
+        # DB writes happen here, sequentially - never inside the gather above.
         for (h, adapter, source), r in zip(to_check, raw):
             if isinstance(r, Exception):
                 r = _error_result(adapter, source, r)

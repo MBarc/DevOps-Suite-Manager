@@ -1,8 +1,8 @@
 """AD directory source ABC + factory.
 
 Implementations:
-- ``WinRMJumpboxSource`` (winrm_jumpbox.py) — production
-- ``MockSource`` (mock.py) — fixture-backed for tests/dev
+- ``WinRMJumpboxSource`` (winrm_jumpbox.py) - production
+- ``MockSource`` (mock.py) - fixture-backed for tests/dev
 """
 from __future__ import annotations
 

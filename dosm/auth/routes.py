@@ -179,7 +179,7 @@ async def okta_callback(
     role = okta_oidc.map_groups_to_role(identity["groups"], cfg.rbac)
 
     # Deny anyone who isn't a member of a group granted a DOSM role. We do NOT
-    # provision a user row in this case — group membership is required for access.
+    # provision a user row in this case - group membership is required for access.
     if role is None:
         db.add(
             AuditLog(

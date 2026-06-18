@@ -70,7 +70,7 @@
 
     <label>Credential profile
       <select name="credential_id">
-        <option value="">(none — public/anon)</option>
+        <option value="">(none - public/anon)</option>
         {% for c in credentials %}
         <option value="{{ c.id }}" {% if pipeline and pipeline.credential_id == c.id %}selected{% endif %}>
           {{ c.name }} ({{ c.kind }})

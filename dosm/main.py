@@ -207,7 +207,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             cert_total = None
             cert_attention = None
 
-        # Recent activity — last 12 audit log rows joined to actor username.
+        # Recent activity - last 12 audit log rows joined to actor username.
         activity_rows = db.execute(
             select(AuditLog, User.username)
             .outerjoin(User, AuditLog.actor_id == User.id)
@@ -227,7 +227,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             for entry, username in activity_rows
         ]
 
-        # Recent hosts — distinct host ids most recently opened via Connect.
+        # Recent hosts - distinct host ids most recently opened via Connect.
         recent_target_rows = db.execute(
             select(AuditLog.target, func.max(AuditLog.ts).label("last_ts"))
             .where(AuditLog.action == "host.connect")

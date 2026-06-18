@@ -436,7 +436,7 @@ def _payload_values_from_form(schema: list[dict], form) -> dict:
 
 def _payload_or_404(db, pid: int, payload_id: int, user):
     """Load a payload, enforcing it belongs to the pipeline and the user may see
-    it (404 — not 403 — so private payloads don't leak)."""
+    it (404 - not 403 - so private payloads don't leak)."""
     p = repo.get_pipeline(db, pid)
     if p is None:
         raise HTTPException(404)

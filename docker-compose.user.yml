@@ -1,4 +1,4 @@
-# docker-compose.user.yml — image-based install (no source code needed)
+# docker-compose.user.yml - image-based install (no source code needed)
 #
 # First-time setup:
 #   bash scripts/setup-guacamole.sh   (generates .env with all secrets)
@@ -6,7 +6,7 @@
 #
 # Updates:
 #   bash scripts/update.sh
-#   — or manually:
+#   - or manually:
 #   docker compose -f docker-compose.user.yml pull
 #   docker compose -f docker-compose.user.yml up -d
 
@@ -25,7 +25,7 @@ services:
       GUACAMOLE_PUBLIC_URL: ${GUACAMOLE_PUBLIC_URL:-http://localhost:8888/guacamole}
       DOSM_LLM_MODEL: ${DOSM_LLM_MODEL:-qwen2.5:3b-instruct}
     # Let DOSM reach the Docker host (and host-published services) via
-    # host.docker.internal — e.g. to register the host machine as a host entry
+    # host.docker.internal - e.g. to register the host machine as a host entry
     # for SSH/SFTP. Automatic on Docker Desktop; required on native Linux Docker.
     extra_hosts:
       - "host.docker.internal:host-gateway"

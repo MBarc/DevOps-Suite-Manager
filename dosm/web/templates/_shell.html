@@ -16,7 +16,7 @@
     /* ── Credential searchable combobox ──────────────────────────────────── */
     .cred-combo { position: relative; display: block; }
 
-    /* Input wrapper — holds the text input + chevron icon */
+    /* Input wrapper - holds the text input + chevron icon */
     .cred-input-wrap { position: relative; }
     .cred-combo-input {
       width: 100%; box-sizing: border-box;
@@ -57,7 +57,7 @@
       background: var(--surface-raised, rgba(255,255,255,.06));
       color: var(--fg-strong, #fff);
     }
-    /* Checkmark column — always reserves space so text stays aligned */
+    /* Checkmark column - always reserves space so text stays aligned */
     .cred-combo-option::before {
       content: ''; display: inline-block; width: 14px; flex-shrink: 0;
     }
@@ -195,7 +195,7 @@
         _close() {
           this.list.setAttribute('hidden', '');
           this.input.setAttribute('aria-expanded', 'false');
-          this.input.value = ''; /* always clear — input is a search tool, not a value display */
+          this.input.value = ''; /* always clear - input is a search tool, not a value display */
           this.focusIdx = -1;
         }
 

@@ -3,14 +3,14 @@
 ## When to use
 
 The docs subcommands manage the user's documentation vault at
-`$DOSM_HOME/docs/` — the content the embedded LLM searches and quotes
+`$DOSM_HOME/docs/` - the content the embedded LLM searches and quotes
 in LLM-mode chats. Use `dosm docs new` to scaffold a runbook, `dosm docs
 import` to convert a `.docx` / `.pdf` / `.md` / `.txt` into the vault,
 and `dosm docs reindex` after bulk changes outside the watcher (the
 running server already auto-indexes saved files).
 
 `dosm docs status` reports embedder name, file counts, and the last
-error — handy when reindex appears to hang.
+error - handy when reindex appears to hang.
 
 `dosm docs install-cli-reference` copies this CLI reference into the
 vault under `docs/_dosm-cli/` so the agent can RAG it. It runs
@@ -53,5 +53,5 @@ dosm docs status
   and move it. Use `dosm folder create` to create a folder by name and
   let DOSM derive the slug.
 - `dosm docs install-cli-reference` overwrites any prior contents of
-  `$DOSM_HOME/docs/_dosm-cli/`. Don't hand-edit files there — your
+  `$DOSM_HOME/docs/_dosm-cli/`. Don't hand-edit files there - your
   changes will be wiped on the next install.

@@ -7,7 +7,7 @@
       <a href="/monitoring" style="color:var(--fg-muted); font-size:13px; text-decoration:none">&larr; Monitoring</a>
     </div>
     <h1>Fleet Coverage</h1>
-    <div class="subtitle">Coverage matrix — hosts against all monitoring sources</div>
+    <div class="subtitle">Coverage matrix - hosts against all monitoring sources</div>
   </div>
   <div class="actions">
     <a href="/monitoring/coverage{% if filter_pattern or filter_tags %}&refresh=1{% else %}?refresh=1{% endif %}{% if filter_pattern %}&pattern={{ filter_pattern|urlencode }}{% endif %}{% if filter_tags %}&tags={{ filter_tags|join(',')|urlencode }}{% endif %}" class="btn btn-ghost">Refresh</a>
@@ -117,7 +117,7 @@
           {% for cell in row.cells %}
           <td style="padding:10px 14px; text-align:center; border-left:1px solid var(--divider)">
             {% if cell is none %}
-              <span style="color:var(--fg-muted); font-size:11px">—</span>
+              <span style="color:var(--fg-muted); font-size:11px">-</span>
             {% elif cell.error %}
               <span style="color:#f97316; font-size:11px; font-weight:600; cursor:help" title="{{ cell.error }}">ERROR</span>
             {% elif cell.found %}

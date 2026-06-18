@@ -1,4 +1,4 @@
-"""Connectivity check execution — run port reachability tests from a source host.
+"""Connectivity check execution - run port reachability tests from a source host.
 
 Linux sources: SSH in (jump-chain aware), run bash /dev/tcp or nc.
 Windows sources: WinRM, run Test-NetConnection via PowerShell.
@@ -8,7 +8,7 @@ Jump box routing:
   Linux jump to Windows source: caller forwards WinRM port via JumpTunnelManager,
                                then calls winrm_group_check_sync with the local port
   Windows jump to Windows src : winrm_invoke_group_check_sync (Invoke-Command)
-  Windows jump to Linux source: unsupported — Windows has no native SSH client by
+  Windows jump to Linux source: unsupported - Windows has no native SSH client by
                                default; enable OpenSSH on the jump box and set its
                                protocol to 'ssh' in the inventory
 
@@ -50,14 +50,14 @@ def _classify_ssh_error(exc: BaseException, hostname: str) -> str:
     msg = str(exc).lower()
 
     if "permissiondenied" in name.lower() or "permission denied" in msg:
-        return f"SSH authentication failed on {hostname!r} — check credentials"
+        return f"SSH authentication failed on {hostname!r} - check credentials"
 
     if isinstance(exc, ConnectionRefusedError) or "connection refused" in msg:
-        return f"SSH not enabled on {hostname!r} — port refused the connection"
+        return f"SSH not enabled on {hostname!r} - port refused the connection"
 
     if isinstance(exc, OSError):
         if exc.errno in (_errno.ENETUNREACH, _errno.EHOSTUNREACH, _errno.ENONET):
-            return f"Host {hostname!r} is unreachable — no route to host"
+            return f"Host {hostname!r} is unreachable - no route to host"
         if exc.errno == _errno.ECONNRESET:
             return f"SSH connection reset by {hostname!r}"
 
@@ -66,7 +66,7 @@ def _classify_ssh_error(exc: BaseException, hostname: str) -> str:
 
     if "timeout" in name.lower() or "timed out" in msg or isinstance(exc, asyncio.TimeoutError):
         return (
-            f"SSH connection to {hostname!r} timed out — "
+            f"SSH connection to {hostname!r} timed out - "
             "the host may be unreachable or SSH may not be enabled"
         )
 
@@ -84,13 +84,13 @@ def _classify_winrm_error(exc: BaseException, hostname: str) -> str:
 
     if "connectionerror" in name.lower() or "max retries" in msg or "connection refused" in msg:
         return (
-            f"WinRM not reachable on {hostname!r}:5985 — "
+            f"WinRM not reachable on {hostname!r}:5985 - "
             "WinRM may not be enabled (run: winrm quickconfig)"
         )
 
     if "timeout" in name.lower() or "timed out" in msg:
         return (
-            f"WinRM connection to {hostname!r} timed out — "
+            f"WinRM connection to {hostname!r} timed out - "
             "the host may be unreachable or WinRM may not be enabled"
         )
 
@@ -101,7 +101,7 @@ def _classify_winrm_error(exc: BaseException, hostname: str) -> str:
         or "access denied" in msg
         or "logon failure" in msg
     ):
-        return f"WinRM authentication failed on {hostname!r} — check username/password"
+        return f"WinRM authentication failed on {hostname!r} - check username/password"
 
     if "transport" in name.lower() and "error" in name.lower():
         return f"WinRM transport error on {hostname!r}: {str(exc)[:120]}"
@@ -143,7 +143,7 @@ async def _connect_tracked(jump_hops: list[HopCreds], target: HopCreds) -> objec
     """Connect through the SSH jump chain with per-hop error context.
 
     Raises _HopConnectError with a message that names exactly which hop failed
-    and why — distinguishing DOSM to jumpbox failures from jumpbox to target failures.
+    and why - distinguishing DOSM to jumpbox failures from jumpbox to target failures.
 
     A Windows hop (protocol='rdp') in the SSH chain raises immediately with a
     clear message directing the operator to enable OpenSSH on that host.
@@ -161,7 +161,7 @@ async def _connect_tracked(jump_hops: list[HopCreds], target: HopCreds) -> objec
             )
             raise _HopConnectError(
                 f"Jump box {hop.name!r} ({hop.hostname}) is a Windows host (protocol=rdp). "
-                f"SSH tunnel traversal requires OpenSSH to be enabled on this jump box — "
+                f"SSH tunnel traversal requires OpenSSH to be enabled on this jump box - "
                 f"connect {context} and run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0. "
                 f"Then set this host's protocol to 'ssh' in the inventory.",
                 phase="windows_jump_no_ssh",
@@ -304,7 +304,7 @@ def winrm_group_check_sync(
     try:
         import winrm  # type: ignore
     except ImportError:
-        return [(False, None, "pywinrm not installed — cannot check Windows hosts via WinRM")] * len(checks)
+        return [(False, None, "pywinrm not installed - cannot check Windows hosts via WinRM")] * len(checks)
 
     connect_host = hostname if winrm_port == 5985 else "127.0.0.1"
     try:
@@ -385,7 +385,7 @@ def winrm_invoke_group_check_sync(
     try:
         import winrm  # type: ignore
     except ImportError:
-        return [(False, None, "pywinrm not installed — cannot check Windows hosts via WinRM")] * len(checks)
+        return [(False, None, "pywinrm not installed - cannot check Windows hosts via WinRM")] * len(checks)
 
     try:
         jump_session = winrm.Session(
@@ -458,7 +458,7 @@ def winrm_invoke_group_check_sync(
             elif stdout.startswith("INVOKE_FAILED:"):
                 invoke_result = (False, None, (
                     f"Windows jump box {jump_hostname!r}: Invoke-Command to "
-                    f"{target_hostname!r} failed — {stdout[14:].strip()}"
+                    f"{target_hostname!r} failed - {stdout[14:].strip()}"
                 ))
             else:
                 invoke_result = (False, None, (
@@ -519,7 +519,7 @@ async def local_group_check(
     *,
     on_result=None,
 ) -> list[tuple[bool, int | None, str | None]]:
-    """Run checks directly from the DOSM process — no SSH or WinRM needed.
+    """Run checks directly from the DOSM process - no SSH or WinRM needed.
 
     on_result: optional async callable(idx, reachable, latency_ms, error_msg)
     """
@@ -545,7 +545,7 @@ async def quick_check(
     dst_address: str,
     port: int,
 ) -> tuple[bool | None, int | None, str | None]:
-    """Single ad-hoc port check — used by the Port Checker page."""
+    """Single ad-hoc port check - used by the Port Checker page."""
     try:
         _validate_address(dst_address)
     except ValueError as exc:
@@ -575,7 +575,7 @@ async def _quick_check_windows(
         return False, None, "WinRM requires a password credential (SSH key not supported for Windows)"
 
     if not jump_hops:
-        # Direct — no jump box
+        # Direct - no jump box
         loop = asyncio.get_event_loop()
         results = await loop.run_in_executor(
             None, winrm_group_check_sync,

@@ -111,7 +111,7 @@ async def _execute_scan(scan_id: int, cfg: Config) -> None:
 
 
 async def _check_local_source(scan_id: int, result_ids: list[int]) -> None:
-    """Run checks directly from the DOSM process — no credentials needed."""
+    """Run checks directly from the DOSM process - no credentials needed."""
     source_name = "DOSM Server"
     _active_sources.setdefault(scan_id, set()).add(source_name)
     _last_check[scan_id] = "DOSM Server to checking…"
@@ -319,7 +319,7 @@ async def _check_windows_source(
         )
 
     if any(h.protocol == "rdp" for h in jump_hops):
-        # A Windows hop appears before a Linux one — not supported
+        # A Windows hop appears before a Linux one - not supported
         return [(False, None,
             "Mixed jump chain with a Windows jump box before a Linux one is not supported. "
             "Reorder so Linux jump boxes precede Windows ones, or enable OpenSSH on the "
@@ -342,7 +342,7 @@ async def _check_windows_source(
         )] * len(checks)
 
     if lease is None:
-        # No jump hops according to tunnel manager — fall back to direct
+        # No jump hops according to tunnel manager - fall back to direct
         return await loop.run_in_executor(
             None,
             functools.partial(

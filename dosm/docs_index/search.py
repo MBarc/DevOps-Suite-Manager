@@ -124,7 +124,7 @@ def search(
 ) -> list[SearchHit]:
     """Vector search if we have an embedder + embedded chunks; else LIKE.
 
-    Never blocks a request on first-time embedder initialization — uses
+    Never blocks a request on first-time embedder initialization - uses
     block=False so cold requests get LIKE results immediately while a
     background warmer (or CLI `docs reindex`) primes the embedder.
 

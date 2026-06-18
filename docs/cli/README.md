@@ -12,9 +12,9 @@ canonical interface for scripting and automation.
 The pages under [`_generated/`](_generated/) are produced by
 [`scripts/gen_cli_docs.py`](../../scripts/gen_cli_docs.py) and combine:
 
-- **Synopsis, arguments, options, exit codes** — extracted directly from
+- **Synopsis, arguments, options, exit codes** - extracted directly from
   `dosm/cli.py` via Typer/Click introspection. Cannot drift.
-- **When to use, examples, gotchas** — hand-written prose from
+- **When to use, examples, gotchas** - hand-written prose from
   [`prose/`](prose/) that the generator splices in.
 
 CI fails the build if the generated files are out of sync with `dosm/cli.py`.
@@ -41,7 +41,7 @@ See also: [exit-codes.md](exit-codes.md).
 The same pages are bundled inside the `dosm` package and installed into the
 user's docs vault on `dosm init` (or via `dosm docs install-cli-reference`).
 The agent retrieves them through the standard RAG pipeline. For structured
-lookups (exact flags / exit codes), the agent has a `cli_help` query tool —
+lookups (exact flags / exit codes), the agent has a `cli_help` query tool -
 see [`dosm/agent/queries.py`](../../dosm/agent/queries.py).
 
 ## Regenerating

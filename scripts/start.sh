@@ -12,7 +12,7 @@ PYTHON_BIN="$(command -v python3 2>/dev/null || command -v python)"
 
 # Bootstrap venv if the interpreter is missing
 if [ ! -f "$VENV/bin/python" ]; then
-    echo "No venv found — creating one..."
+    echo "No venv found - creating one..."
     "$PYTHON_BIN" -m venv "$VENV"
     echo "Installing dependencies (this may take a minute)..."
     "$VENV/bin/pip" install --quiet -e "$PROJECT_ROOT"
@@ -41,5 +41,5 @@ echo "  Log       : $LOG_FILE"
 
 nohup "$VENV_PYTHON" -m dosm serve >> "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
-echo "Started — PID $(cat "$PID_FILE")"
+echo "Started - PID $(cat "$PID_FILE")"
 echo "Run './scripts/stop.sh' to stop."

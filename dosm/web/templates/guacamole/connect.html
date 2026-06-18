@@ -36,14 +36,14 @@
       <iframe id="guac-frame" src="{{ iframe_url }}" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
     </div>
     <aside id="panel" class="resource-panel hidden">
-      <h3>Host resources <span id="m-scope" class="badge badge-gray" style="margin-left:6px">—</span></h3>
+      <h3>Host resources <span id="m-scope" class="badge badge-gray" style="margin-left:6px">-</span></h3>
       <div id="m-error" class="error" style="font-size:12px; margin-bottom:8px; display:none"></div>
       <dl class="kv">
-        <dt>Host</dt><dd id="m-host">—</dd>
-        <dt>CPU</dt><dd><span id="m-cpu">—</span>%</dd>
-        <dt>Load 1m</dt><dd id="m-load">—</dd>
-        <dt>Memory</dt><dd><span id="m-mem">—</span></dd>
-        <dt>Uptime</dt><dd id="m-up">—</dd>
+        <dt>Host</dt><dd id="m-host">-</dd>
+        <dt>CPU</dt><dd><span id="m-cpu">-</span>%</dd>
+        <dt>Load 1m</dt><dd id="m-load">-</dd>
+        <dt>Memory</dt><dd><span id="m-mem">-</span></dd>
+        <dt>Uptime</dt><dd id="m-up">-</dd>
       </dl>
       <h4>Disks</h4>
       <table class="data compact"><thead><tr><th>Mount</th><th>Used</th><th>%</th></tr></thead>
@@ -101,7 +101,7 @@
     }
 
     // Keystroke lines from the Guac iframe. The user opted in via the
-    // recording option and was warned that passwords may appear — log the
+    // recording option and was warned that passwords may appear - log the
     // line as typed.
     if (e.data.type === 'guac_keystroke_line') {
       var line = e.data.line || '';
@@ -138,7 +138,7 @@
     if (document.hasFocus()) refocusFrame();
   });
   // Also refocus when the parent regains focus (e.g. user comes back
-  // from another tab) — defer one tick so the parent's own focus event
+  // from another tab) - defer one tick so the parent's own focus event
   // settles first.
   window.addEventListener('focus', () => setTimeout(refocusFrame, 0));
 
@@ -178,7 +178,7 @@
     errEl.style.display = 'none';
     scopeEl.textContent = d._label || (d._scope === 'local' ? 'DOSM host' : 'remote');
     scopeEl.className = 'badge ' + (d._scope === 'remote' ? 'badge-blue' : 'badge-gray');
-    document.getElementById('m-host').textContent = d.hostname || '—';
+    document.getElementById('m-host').textContent = d.hostname || '-';
     document.getElementById('m-cpu').textContent = (d.cpu_percent ?? 0).toFixed(1);
     document.getElementById('m-load').textContent = d.load_avg_1m === null ? 'n/a' : d.load_avg_1m.toFixed(2);
     document.getElementById('m-mem').textContent = `${d.memory_used_gb} / ${d.memory_total_gb} GB (${d.memory_percent}%)`;
