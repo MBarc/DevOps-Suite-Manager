@@ -7,7 +7,7 @@
     <div class="subtitle">Managed servers across your on-prem fleet.</div>
   </div>
   <div class="actions">
-    <a class="btn" href="/hosts/new">+ Add host</a>
+    {% if user and user.role != 'viewer' %}<a class="btn" href="/hosts/new">+ Add host</a>{% endif %}
   </div>
 </header>
 

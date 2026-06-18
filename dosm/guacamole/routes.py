@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_operator
+from dosm.credentials.access import first_unusable_credential
 from dosm.db import get_session
 from dosm.guacamole.auth_json import AuthJsonCodec, build_connection_id, load_secret_key
 from dosm.guacamole.builder import GuacamoleBuildError, _resolve_credential, build_connection
@@ -40,7 +41,7 @@ async def host_connect(
     host_id: int,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ) -> HTMLResponse:
     cfg = request.app.state.config
     gc = cfg.guacamole
@@ -69,6 +70,21 @@ async def host_connect(
         )
 
     chain = resolve_jump_chain(db, host)
+
+    # RBAC use-time guard: block connecting through a private credential the user
+    # doesn't own (e.g. a shared host pinned to someone else's private cred, or a
+    # private credential on one of the jump hops).
+    blocked = first_unusable_credential(
+        user, [host.credential, *(h.credential for h in chain)]
+    )
+    if blocked is not None:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"host uses a private credential ({blocked.name!r}) owned by "
+                f"another user; ask them to share it or use your own"
+            ),
+        )
 
     error: str | None = None
     iframe_url: str | None = None
@@ -221,7 +237,7 @@ async def host_disconnect(
     sid: str,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ) -> Response:
     """Release a tunnel lease registered for a Guacamole session.
 

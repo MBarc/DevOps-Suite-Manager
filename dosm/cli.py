@@ -130,6 +130,9 @@ def user_create(
 ) -> None:
     """Create a local user. First user created should be admin."""
     _load()
+    if role not in ("admin", "operator", "viewer"):
+        console.print(f"[red]Invalid role {role!r}. Use admin | operator | viewer.[/red]")
+        raise typer.Exit(1)
     if password is None:
         password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
     with session_scope() as s:
@@ -153,6 +156,34 @@ def user_list() -> None:
     for uid, uname, role, active, created in rows:
         table.add_row(str(uid), uname, role, "yes" if active else "no", created.isoformat(timespec="seconds"))
     console.print(table)
+
+
+@user_app.command("set-role")
+def user_set_role(
+    username: str = typer.Argument(...),
+    role: str = typer.Argument(..., help="admin | operator | viewer"),
+) -> None:
+    """Change a user's role. The only path to change a role after creation."""
+    _load()
+    if role not in ("admin", "operator", "viewer"):
+        console.print(f"[red]Invalid role {role!r}. Use admin | operator | viewer.[/red]")
+        raise typer.Exit(1)
+    with session_scope() as s:
+        u = s.execute(select(User).where(User.username == username)).scalar_one_or_none()
+        if u is None:
+            console.print(f"[red]No such user: {username}[/red]")
+            raise typer.Exit(1)
+        old = u.role
+        u.role = role
+        s.add(
+            AuditLog(
+                actor_id=u.id,
+                action="user.set_role",
+                target=f"user:{u.id}",
+                details=f"{old} -> {role} (via CLI)",
+            )
+        )
+    console.print(f"[green]Role updated[/green] {username}: {old} -> {role}")
 
 
 @user_app.command("passwd")

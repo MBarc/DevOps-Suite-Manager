@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_admin
 from dosm.db import get_session
 from dosm.ftp.base import FileTransferError
 from dosm.ftp.service import (
@@ -32,12 +32,6 @@ from dosm.models import AuditLog, Host, User
 router = APIRouter(prefix="/files")
 
 _DOWNLOAD_CHUNK = 64 * 1024
-
-
-def _require_admin(user: User = Depends(require_user)) -> User:
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="file transfer requires admin role")
-    return user
 
 
 def _templates(request: Request):
@@ -66,7 +60,7 @@ def _join(cur: str, name: str) -> str:
 async def index(
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     hosts = db.execute(
         select(Host)
@@ -85,7 +79,7 @@ async def browser(
     host_id: int,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     host = _load_host(db, host_id)
     return _templates(request).TemplateResponse(
@@ -100,7 +94,7 @@ async def list_dir(
     request: Request,
     path: str = "",
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     host = _load_host(db, host_id)
     backend = get_file_backend(request.app.state.config, db, host)
@@ -126,7 +120,7 @@ async def download(
     request: Request,
     path: str,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     host = _load_host(db, host_id)
     backend = get_file_backend(request.app.state.config, db, host)
@@ -174,7 +168,7 @@ async def upload(
     path: str = Form(""),
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     host = _load_host(db, host_id)
     backend = get_file_backend(request.app.state.config, db, host)
@@ -199,7 +193,7 @@ async def mkdir(
     path: str = Form(""),
     name: str = Form(...),
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     host = _load_host(db, host_id)
     backend = get_file_backend(request.app.state.config, db, host)
@@ -224,7 +218,7 @@ async def delete(
     path: str = Form(...),
     is_dir: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     host = _load_host(db, host_id)
     backend = get_file_backend(request.app.state.config, db, host)
@@ -252,7 +246,7 @@ async def rename(
     src: str = Form(...),
     dst: str = Form(...),
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     host = _load_host(db, host_id)
     backend = get_file_backend(request.app.state.config, db, host)
@@ -275,7 +269,7 @@ async def rename(
 async def copy_targets(
     host_id: int,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     """Other hosts (besides this one) that have file transfer configured."""
     hosts = db.execute(
@@ -299,7 +293,7 @@ async def copy_to_host(
     dst_dir: str = Form(""),
     move: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     src_host = _load_host(db, host_id)
     dst_host = _load_host(db, dst_host_id)

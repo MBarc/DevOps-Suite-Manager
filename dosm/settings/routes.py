@@ -7,19 +7,13 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_admin
 from dosm.config import update_config_yaml
 from dosm.db import get_session
 from dosm.models import AuditLog, User
 from dosm.settings.cli_catalog import detect_all
 
 router = APIRouter(prefix="/settings")
-
-
-def _require_admin(user: User = Depends(require_user)) -> User:
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="settings require admin role")
-    return user
 
 
 def _templates(request: Request):
@@ -29,7 +23,7 @@ def _templates(request: Request):
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def settings_home(
     request: Request,
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     cfg = request.app.state.config
     detected = await asyncio.get_event_loop().run_in_executor(
@@ -57,7 +51,7 @@ async def settings_home(
 async def settings_save(
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     """Persist the cli_tools toggle map to config.yaml.
 
@@ -93,7 +87,7 @@ async def settings_save(
 @router.get("/integrations", response_class=HTMLResponse, include_in_schema=False)
 async def integrations_page(
     request: Request,
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     cfg = request.app.state.config
     return _templates(request).TemplateResponse(
@@ -109,7 +103,7 @@ async def integrations_save(
     guacamole_enabled: str | None = Form(None),
     guacamole_base_url: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     cfg = request.app.state.config
     enabled = guacamole_enabled is not None

@@ -11,7 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_operator, require_user
+from dosm.auth.prefs import get_pref, set_pref
+from dosm.credentials.access import visible_credentials
 from dosm.db import get_session
 from dosm.hosts import repo
 from dosm.hosts.repo import HostValidationError, resolve_jump_chain
@@ -61,7 +63,7 @@ def _form_context(db: Session, user: User, host=None, error: str | None = None) 
     port_opts = _port_options(db)
     return {
         "host": host,
-        "credentials": repo.list_credentials(db),
+        "credentials": visible_credentials(db, user),
         "jump_candidates": repo.list_jump_candidates(
             db, exclude_host_id=host.id if host else None
         ),
@@ -84,10 +86,18 @@ async def hosts_list(
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
+    # Remember the host-kind filter per user: an explicit ?kind= is persisted as
+    # a personal pref; a bare /hosts visit restores the last choice.
+    if "kind" in request.query_params:
+        if kind not in ("", "servers", "jumpboxes"):
+            kind = ""
+        set_pref(db, user, "hosts_kind", kind or None)
+    else:
+        kind = get_pref(user, "hosts_kind", "") or ""
     if kind not in ("", "servers", "jumpboxes"):
         kind = ""
     hosts = repo.list_hosts(db, kind=kind or None, tag=tag or None)
-    credentials = repo.list_credentials(db)
+    credentials = visible_credentials(db, user)
     jump_candidates = repo.list_jump_candidates(db)
     n_servers, n_jumpboxes = repo.count_by_kind(db)
     all_tags = repo.list_tags(db)
@@ -179,7 +189,7 @@ async def hosts_create(
     ft_port: str = Form(""),
     ft_credential_id: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     cred_id = _parse_int_or_none(credential_id)
     jump_id = _parse_int_or_none(jump_host_id)
@@ -251,7 +261,7 @@ async def hosts_ping(
     host_id: int,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ) -> JSONResponse:
     """TCP-probe ``host.hostname:host.port``, traversing the configured jump
     chain when present. This is a network reachability check on the protocol
@@ -378,7 +388,7 @@ async def hosts_update(
     ft_credential_id: str = Form(""),
     back: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     host = repo.get_host(db, host_id)
     if host is None:
@@ -428,7 +438,7 @@ async def hosts_update(
 async def hosts_delete(
     host_id: int,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     host = repo.get_host(db, host_id)
     if host is None:

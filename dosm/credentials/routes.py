@@ -9,10 +9,16 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_operator, require_user
+from dosm.credentials.access import (
+    can_see_credential,
+    visible_credentials_query,
+)
 from dosm.db import get_session
 from dosm.models import AuditLog, Credential, Host, User
 from dosm.secrets import SecretNotFound, get_backend
+
+VISIBILITIES = ("shared", "private")
 
 router = APIRouter(prefix="/credentials")
 
@@ -51,7 +57,7 @@ async def credentials_list(
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
 ):
-    rows = list(db.execute(select(Credential).order_by(Credential.name)).scalars())
+    rows = list(db.execute(visible_credentials_query(user)).scalars())
     enriched = []
     for c in rows:
         enriched.append(
@@ -98,12 +104,14 @@ async def credentials_create(
     domain: str = Form(""),
     secret_ref: str = Form(""),
     secret_value: str = Form(""),
+    visibility: str = Form("shared"),
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     cfg = request.app.state.config
     name = name.strip()
     secret_ref = secret_ref.strip() or _auto_secret_ref(name)
+    visibility = visibility if visibility in VISIBILITIES else "shared"
     if kind not in CRED_KINDS:
         return _templates(request).TemplateResponse(
             request,
@@ -124,6 +132,8 @@ async def credentials_create(
         username=username.strip() or None,
         domain=domain.strip() or None,
         secret_ref=secret_ref,
+        owner_id=user.id,
+        visibility=visibility,
     )
     db.add(cred)
     try:
@@ -142,7 +152,7 @@ async def credentials_create(
             actor_id=user.id,
             action="credential.create",
             target=f"credential:{cid}",
-            details=f"kind={kind} secret_ref={secret_ref} inline_secret={'yes' if secret_value else 'no'}",
+            details=f"kind={kind} secret_ref={secret_ref} visibility={visibility} inline_secret={'yes' if secret_value else 'no'}",
         )
     )
     # Commit the credential row + audit before opening a second session for
@@ -174,7 +184,7 @@ async def credentials_detail(
     user: User = Depends(require_user),
 ):
     cred = db.get(Credential, cred_id)
-    if cred is None:
+    if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     cfg = request.app.state.config
     secret_present = False
@@ -202,10 +212,10 @@ async def credentials_edit(
     cred_id: int,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     cred = db.get(Credential, cred_id)
-    if cred is None:
+    if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
         request,
@@ -223,12 +233,13 @@ async def credentials_update(
     username: str = Form(""),
     domain: str = Form(""),
     secret_value: str = Form(""),
+    visibility: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     cfg = request.app.state.config
     cred = db.get(Credential, cred_id)
-    if cred is None:
+    if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     if kind not in CRED_KINDS:
         return _templates(request).TemplateResponse(
@@ -237,10 +248,13 @@ async def credentials_update(
             _form_context(host=cred, user=user, error=f"unknown kind {kind!r}"),
             status_code=400,
         )
+    new_visibility = visibility if visibility in VISIBILITIES else cred.visibility
+    visibility_changed = new_visibility != cred.visibility
     cred.name = name.strip()
     cred.kind = kind
     cred.username = username.strip() or None
     cred.domain = domain.strip() or None
+    cred.visibility = new_visibility
     # secret_ref is immutable after creation — keeps existing value
     cred.updated_at = datetime.now(UTC)
     try:
@@ -254,6 +268,15 @@ async def credentials_update(
             status_code=400,
         )
     db.add(AuditLog(actor_id=user.id, action="credential.update", target=f"credential:{cred.id}"))
+    if visibility_changed:
+        db.add(
+            AuditLog(
+                actor_id=user.id,
+                action="credential.visibility",
+                target=f"credential:{cred.id}",
+                details=f"visibility={new_visibility}",
+            )
+        )
     cred_id_local = cred.id
     secret_ref_local = cred.secret_ref
     db.commit()  # release the writer before talking to the secrets backend
@@ -277,10 +300,10 @@ async def credentials_update(
 async def credentials_delete(
     cred_id: int,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     cred = db.get(Credential, cred_id)
-    if cred is None:
+    if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     if _hosts_using(db, cred.id) > 0:
         # Refuse rather than orphan host references silently.

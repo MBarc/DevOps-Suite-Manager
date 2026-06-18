@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_admin, require_user
 from dosm.certs.sources import SUPPORTED_PROVIDERS, CertSourceError, get_cert_source
 from dosm.db import get_session
 from dosm.models import AuditLog, CertSource, MonitoringSource, User
@@ -156,17 +156,11 @@ async def certs_refresh(
 
 
 # ── Cloud certificate sources (Azure KV / AWS ACM / GCP Certificate Manager) ──
-def _require_admin(user: User = Depends(require_user)) -> User:
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="managing cert sources requires admin role")
-    return user
-
-
 @router.get("/sources", response_class=HTMLResponse, include_in_schema=False)
 async def cert_sources_page(
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     from dosm.models import Credential
 
@@ -199,7 +193,7 @@ def _build_config(provider: str, form) -> str:
 async def cert_source_create(
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     global _vault_cache
     form = await request.form()
@@ -230,7 +224,7 @@ async def cert_source_create(
 async def cert_source_toggle(
     source_id: int,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     global _vault_cache
     source = db.get(CertSource, source_id)
@@ -248,7 +242,7 @@ async def cert_source_toggle(
 async def cert_source_delete(
     source_id: int,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     global _vault_cache
     source = db.get(CertSource, source_id)
@@ -266,7 +260,7 @@ async def cert_source_test(
     request: Request,
     source_id: int,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     source = db.get(CertSource, source_id)
     if source is None:

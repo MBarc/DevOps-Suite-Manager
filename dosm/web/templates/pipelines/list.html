@@ -7,7 +7,7 @@
     <div class="subtitle">Trigger CI/CD runs from DOSM. Providers: GitHub Actions, Azure DevOps, Octopus Deploy, AWX, Terraform Cloud.</div>
   </div>
   <div class="actions">
-    <a class="btn" href="/pipelines/new">+ New pipeline</a>
+    {% if user and user.role != 'viewer' %}<a class="btn" href="/pipelines/new">+ New pipeline</a>{% endif %}
   </div>
 </header>
 

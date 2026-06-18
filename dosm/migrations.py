@@ -312,4 +312,30 @@ def run_migrations(engine: Engine) -> list[str]:
                     {"ts": now_s},
                 )
                 applied.append("hosts.dosm_server_local")
+    # RBAC — per-credential ownership + visibility. Existing rows default to
+    # ``shared`` with no owner, preserving the pre-RBAC behaviour where every
+    # credential was visible to all. ``private`` credentials are visible only to
+    # their owner (and admins).
+    if _add_column_if_missing(
+        engine,
+        "credentials",
+        "owner_id",
+        "owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    ):
+        applied.append("credentials.owner_id")
+    if _add_column_if_missing(
+        engine,
+        "credentials",
+        "visibility",
+        "visibility VARCHAR(16) NOT NULL DEFAULT 'shared'",
+    ):
+        applied.append("credentials.visibility")
+    # RBAC — per-user UI preferences (private to each user).
+    if _add_column_if_missing(
+        engine,
+        "users",
+        "prefs_json",
+        "prefs_json TEXT NOT NULL DEFAULT '{}'",
+    ):
+        applied.append("users.prefs_json")
     return applied

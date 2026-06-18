@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.agent.actions import classify_command, get_action
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_operator
 from dosm.db import get_session, session_scope
 from dosm.models import AuditLog, ChatMessage, Conversation, PlanCard, User
 from dosm.recording import events as rec_events
@@ -54,7 +54,7 @@ async def plan_reject(
     cid: int,
     card_id: int,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     conv, card = _own_card_or_404(db, cid, card_id, user.id)
     if card.status != "pending":
@@ -86,7 +86,7 @@ async def plan_approve(
     card_id: int,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     cfg = request.app.state.config
     form_data = await request.form()
@@ -209,7 +209,7 @@ async def plan_approve_group(
     request: Request,
     message_id: int = Form(...),
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     """Approve and execute all pending safe-tier plan cards for a given message."""
     cfg = request.app.state.config

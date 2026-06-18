@@ -34,6 +34,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="operator")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Per-user UI preferences (JSON object). Private to the user; distinct from
+    # the admin-only global Settings page. See dosm/auth/prefs.py.
+    prefs_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -69,6 +72,13 @@ class Credential(Base):
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(128), nullable=True)
     secret_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    # RBAC — ownership + visibility. ``shared`` (default) is visible to everyone;
+    # ``private`` is visible only to ``owner_id`` and admins. ``owner_id`` is the
+    # user who created it (NULL for pre-RBAC rows / system-seeded credentials).
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="shared")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_admin, require_user
 from dosm.config import update_config_yaml
 from dosm.db import get_session
 from dosm.directory import (
@@ -214,17 +214,11 @@ async def org_list(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _require_admin(user: User = Depends(require_user)) -> User:
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="org config requires admin role")
-    return user
-
-
 @router.get("/configure", response_class=HTMLResponse, include_in_schema=False)
 async def org_configure(
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     cfg = request.app.state.config
     candidates = list_jump_candidates(db)
@@ -250,7 +244,7 @@ async def org_configure_save(
     host_id: str = Form(""),
     use_mock: str | None = Form(None),
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     cfg = request.app.state.config
     mock_on = bool(use_mock)
@@ -310,7 +304,7 @@ async def org_configure_save(
 async def org_configure_test(
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(_require_admin),
+    user: User = Depends(require_admin),
 ):
     cfg = request.app.state.config
     if not _is_configured(cfg):

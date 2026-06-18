@@ -1,0 +1,77 @@
+"""Credential visibility helpers (RBAC private vs shared).
+
+A credential is either ``shared`` (visible to everyone) or ``private`` (visible
+only to its ``owner_id`` and to admins). These helpers are the single source of
+truth for "can this user see / use this credential" and are reused by the
+credentials routes, the host-form credential picker, and every use-time
+resolution path (Guacamole / FTP / metrics / jump chains).
+
+Keeping the rule in one place avoids each call site re-deriving the predicate
+and drifting out of sync.
+"""
+from __future__ import annotations
+
+from sqlalchemy import or_, select
+from sqlalchemy.sql import Select
+
+from dosm.models import Credential, User
+
+
+def _is_admin(user: User | None) -> bool:
+    return user is not None and user.role == "admin"
+
+
+def can_see_credential(user: User | None, cred: Credential) -> bool:
+    """True if ``user`` may see ``cred`` (list it, open its detail page)."""
+    if cred.visibility != "private":
+        return True
+    if _is_admin(user):
+        return True
+    return user is not None and cred.owner_id == user.id
+
+
+def can_use_credential(user: User | None, cred: Credential) -> bool:
+    """True if ``user`` may use ``cred`` to open a connection.
+
+    Same rule as visibility today; kept as a distinct function so the use-time
+    policy can diverge later (e.g. an admin who can *see* but not *use*).
+    """
+    return can_see_credential(user, cred)
+
+
+def visible_credentials_filter(user: User | None):
+    """A SQLAlchemy boolean clause restricting ``Credential`` rows to those
+    ``user`` may see. Use inside ``select(Credential).where(...)``."""
+    if _is_admin(user):
+        return True  # no restriction
+    owner_id = user.id if user is not None else None
+    return or_(
+        Credential.visibility != "private",
+        Credential.owner_id == owner_id,
+    )
+
+
+def visible_credentials_query(user: User | None) -> Select:
+    """A ready ``select(Credential)`` filtered to what ``user`` may see,
+    ordered by name."""
+    stmt = select(Credential)
+    clause = visible_credentials_filter(user)
+    if clause is not True:
+        stmt = stmt.where(clause)
+    return stmt.order_by(Credential.name)
+
+
+def visible_credentials(db, user: User | None) -> list[Credential]:
+    """List of ``Credential`` rows ``user`` may see (for picker dropdowns)."""
+    return list(db.execute(visible_credentials_query(user)).scalars())
+
+
+def first_unusable_credential(user: User | None, creds) -> Credential | None:
+    """Return the first credential in ``creds`` that ``user`` may *not* use, or
+    ``None`` if all are usable. ``None`` entries are skipped. Use at connection
+    time to block a user from connecting via a private credential they don't own
+    (e.g. a shared host pinned to someone else's private credential)."""
+    for cred in creds:
+        if cred is not None and not can_use_credential(user, cred):
+            return cred
+    return None

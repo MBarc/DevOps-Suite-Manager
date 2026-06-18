@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_user
+from dosm.auth.deps import require_operator, require_user
 from dosm.db import get_session
 from dosm.hosts import repo as hosts_repo  # for credential helpers reuse
 from dosm.models import AuditLog, User
@@ -146,7 +146,7 @@ async def pipelines_create(
     description: str = Form(""),
     credential_id: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     form = await request.form()
     config = _decode_config_form(provider, form)
@@ -235,7 +235,7 @@ async def pipelines_update(
     description: str = Form(""),
     credential_id: str = Form(""),
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     p = repo.get_pipeline(db, pid)
     if p is None:
@@ -271,7 +271,7 @@ async def pipelines_update(
 async def pipelines_delete(
     pid: int,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     p = repo.get_pipeline(db, pid)
     if p is None:
@@ -287,7 +287,7 @@ async def pipelines_trigger(
     pid: int,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     p = repo.get_pipeline(db, pid)
     if p is None:
@@ -361,7 +361,7 @@ async def pipelines_run_refresh(
     run_id: int,
     request: Request,
     db: Session = Depends(get_session),
-    user: User = Depends(require_user),
+    user: User = Depends(require_operator),
 ):
     run = repo.get_run(db, run_id)
     if run is None:

@@ -33,7 +33,7 @@
         Files
       </a>
       {% endif %}
-      {% if request.app.state.config.terminals.enabled %}
+      {% if request.app.state.config.terminals.enabled and user is defined and user and user.role == 'admin' %}
       <a href="/terminals" class="{% if path.startswith('/terminals') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
         Terminals
