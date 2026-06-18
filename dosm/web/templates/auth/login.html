@@ -10,6 +10,15 @@
   {% if error %}
     <div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ error }}</div>
   {% endif %}
+  {% if okta_enabled %}
+  <a href="/auth/okta/login?next={{ next | urlencode }}" class="btn"
+     style="display:block; text-align:center; margin-bottom:var(--sp-3)">
+    Sign in with Okta
+  </a>
+  <div class="muted" style="text-align:center; font-size:12px; margin-bottom:var(--sp-3)">
+    or sign in with a local account
+  </div>
+  {% endif %}
   <form method="post" action="/login" class="stack">
     <input type="hidden" name="next" value="{{ next }}" />
     <label>Username

@@ -31,6 +31,8 @@ pipelines_app = typer.Typer(help="Pipeline runner commands.", no_args_is_help=Tr
 folder_app = typer.Typer(help="Manage doc vault folders (taxonomy).", no_args_is_help=True)
 org_app = typer.Typer(help="Organisation directory (AD-backed) commands.", no_args_is_help=True)
 ftp_app = typer.Typer(help="File transfer (FTP / FTPS / SFTP), jump-aware.", no_args_is_help=True)
+okta_app = typer.Typer(help="Okta SSO helpers.", no_args_is_help=True)
+rbac_app = typer.Typer(help="Role-based access control helpers.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
@@ -42,6 +44,8 @@ app.add_typer(pipelines_app, name="pipelines")
 app.add_typer(folder_app, name="folder")
 app.add_typer(org_app, name="org")
 app.add_typer(ftp_app, name="ftp")
+app.add_typer(okta_app, name="okta")
+app.add_typer(rbac_app, name="rbac")
 
 console = Console()
 
@@ -198,6 +202,65 @@ def user_passwd(username: str = typer.Argument(...)) -> None:
             raise typer.Exit(1)
         u.password_hash = hash_password(password)
     console.print(f"[green]Password updated[/green] for {username}")
+
+
+# ---- okta / rbac ----------------------------------------------------------
+
+
+@okta_app.command("test")
+def okta_test() -> None:
+    """Validate Okta config: reach the issuer's discovery doc + JWKS."""
+    import asyncio
+
+    from dosm.auth import okta as okta_oidc
+
+    cfg = load_config()
+    init_engine(cfg)
+    okta = cfg.okta
+    if not okta.enabled:
+        console.print("[yellow]Okta is disabled[/yellow] (okta.enabled: false)")
+    if not okta.issuer or not okta.client_id:
+        console.print("[red]Missing okta.issuer or okta.client_id in config.yaml[/red]")
+        raise typer.Exit(1)
+
+    async def _check() -> tuple[dict, dict]:
+        meta = await okta_oidc.fetch_metadata(okta.issuer)
+        jwks = await okta_oidc.fetch_jwks(meta["jwks_uri"])
+        return meta, jwks
+
+    try:
+        meta, jwks = asyncio.run(_check())
+    except Exception as e:
+        console.print(f"[red]Okta discovery failed:[/red] {e}")
+        raise typer.Exit(1)
+
+    try:
+        get_backend(cfg).get_str("okta/client_secret")
+        secret_state = "[green]present[/green]"
+    except SecretNotFound:
+        secret_state = "[red]missing[/red] (set with: dosm secret set okta/client_secret)"
+
+    console.print("[green]Okta reachable[/green]")
+    console.print(f"  issuer:        {okta.issuer}")
+    console.print(f"  authorize:     {meta.get('authorization_endpoint')}")
+    console.print(f"  token:         {meta.get('token_endpoint')}")
+    console.print(f"  jwks keys:     {len(jwks.get('keys', []))}")
+    console.print(f"  client secret: {secret_state}")
+
+
+@rbac_app.command("show-mapping")
+def rbac_show_mapping() -> None:
+    """Print the AD/Okta group -> DOSM role mapping."""
+    cfg = load_config()
+    rbac = cfg.rbac
+    table = Table("Group (from Okta claim)", "DOSM role")
+    for group, role in sorted(rbac.group_role_map.items()):
+        table.add_row(group, role)
+    if not rbac.group_role_map:
+        console.print("[yellow]No group_role_map configured.[/yellow]")
+    else:
+        console.print(table)
+    console.print(f"Default role (no mapped group): [cyan]{rbac.default_role}[/cyan]")
 
 
 # ---- secret ---------------------------------------------------------------

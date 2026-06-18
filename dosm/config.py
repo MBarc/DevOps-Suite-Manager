@@ -35,6 +35,40 @@ class AuthConfig(BaseModel):
     session_max_age_seconds: int = 60 * 60 * 12  # 12h
 
 
+class OktaConfig(BaseModel):
+    """Okta OIDC single sign-on.
+
+    Authentication only — group membership for authorization rides in on the
+    ID token's ``groups`` claim (Okta federates AD), mapped to a DOSM role by
+    ``RbacConfig.group_role_map``. The client secret is NOT stored here; it
+    lives in the secrets backend under ``okta/client_secret``.
+    """
+
+    enabled: bool = False
+    # e.g. https://your-org.okta.com/oauth2/default  (the authorization server
+    # issuer; DOSM appends /.well-known/openid-configuration for discovery).
+    issuer: str = ""
+    client_id: str = ""
+    # Path DOSM serves the OIDC redirect on; must be registered in the Okta app
+    # as a sign-in redirect URI (scheme+host comes from the incoming request).
+    redirect_path: str = "/auth/okta/callback"
+    scopes: list[str] = Field(default_factory=lambda: ["openid", "profile", "email", "groups"])
+    groups_claim: str = "groups"
+
+
+class RbacConfig(BaseModel):
+    """AD/Okta group → DOSM role mapping.
+
+    Keys are group names exactly as they appear in the ID token ``groups``
+    claim; values are DOSM roles (``admin`` | ``operator`` | ``viewer``). When a
+    user is a member of several mapped groups, the HIGHEST role wins. A user in
+    no mapped group falls back to ``default_role``.
+    """
+
+    group_role_map: dict[str, str] = Field(default_factory=dict)
+    default_role: str = "viewer"
+
+
 class GuacamoleConfig(BaseModel):
     """Apache Guacamole HTML5 SSH/RDP/VNC integration.
 
@@ -199,6 +233,8 @@ class Config(BaseModel):
     llm: LLMConfig = LLMConfig()
     secrets: SecretsConfig = SecretsConfig()
     auth: AuthConfig = AuthConfig()
+    okta: OktaConfig = OktaConfig()
+    rbac: RbacConfig = RbacConfig()
     terminals: TerminalsConfig = TerminalsConfig()
     recording: RecordingConfig = RecordingConfig()
     docs_index: DocsIndexConfig = DocsIndexConfig()

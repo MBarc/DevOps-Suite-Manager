@@ -338,4 +338,27 @@ def run_migrations(engine: Engine) -> list[str]:
         "prefs_json TEXT NOT NULL DEFAULT '{}'",
     ):
         applied.append("users.prefs_json")
+    # Phase 21b — Okta SSO identity columns. Existing local users keep
+    # auth_provider='local'; SSO users are JIT-provisioned with okta_sub set.
+    if _add_column_if_missing(
+        engine,
+        "users",
+        "auth_provider",
+        "auth_provider VARCHAR(16) NOT NULL DEFAULT 'local'",
+    ):
+        applied.append("users.auth_provider")
+    if _add_column_if_missing(engine, "users", "okta_sub", "okta_sub VARCHAR(255)"):
+        # Enforce one DOSM account per Okta subject. NULLs (local users) are
+        # distinct in SQLite, so any number of local accounts coexist.
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_okta_sub ON users(okta_sub)"
+            ))
+        applied.append("users.okta_sub")
+    if _add_column_if_missing(engine, "users", "email", "email VARCHAR(255)"):
+        applied.append("users.email")
+    if _add_column_if_missing(engine, "users", "display_name", "display_name VARCHAR(255)"):
+        applied.append("users.display_name")
+    if _add_column_if_missing(engine, "users", "last_login", "last_login DATETIME"):
+        applied.append("users.last_login")
     return applied

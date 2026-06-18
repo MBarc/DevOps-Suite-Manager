@@ -31,9 +31,18 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # Local-auth password hash. SSO (Okta) users get an unverifiable sentinel
+    # (``!okta``) so the column stays NOT NULL without a SQLite ALTER.
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="operator")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # SSO identity. ``auth_provider`` is ``local`` (default) or ``okta``;
+    # ``okta_sub`` is the Okta subject claim (stable per user), unique when set.
+    auth_provider: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
+    okta_sub: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Per-user UI preferences (JSON object). Private to the user; distinct from
     # the admin-only global Settings page. See dosm/auth/prefs.py.
     prefs_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
