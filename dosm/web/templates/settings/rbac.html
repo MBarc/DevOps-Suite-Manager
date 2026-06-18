@@ -85,14 +85,17 @@
 </section>
 
 <section class="card">
-  <h2>Default role</h2>
+  <h2>Unmapped users</h2>
   <p class="muted" style="font-size:13px; margin-bottom:12px">
-    Assigned to an authenticated user who belongs to none of the mapped groups above.
+    What happens when an authenticated user belongs to <em>none</em> of the mapped groups above.
+    Leave this at <strong>No access</strong> to require group membership — individual users can't
+    get in unless a group grants them a role.
   </p>
   <form method="post" action="/settings/rbac/default" class="row" style="gap:8px; align-items:flex-end">
     <label>
-      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Default role</span>
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Unmapped users get</span>
       <select name="default_role">
+        <option value="none" {% if default_role not in roles %}selected{% endif %}>No access (require group membership)</option>
         {% for role in roles %}
           <option value="{{ role }}" {% if role == default_role %}selected{% endif %}>{{ role }}</option>
         {% endfor %}

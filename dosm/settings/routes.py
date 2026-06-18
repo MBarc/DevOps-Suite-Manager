@@ -219,7 +219,8 @@ async def rbac_default_save(
     user: User = Depends(require_admin),
 ):
     cfg = request.app.state.config
-    if default_role not in ROLE_RANK:
+    # "none" denies access to users in no mapped group (group membership required).
+    if default_role not in ROLE_RANK and default_role != "none":
         raise HTTPException(400, f"invalid role {default_role!r}")
     _save_rbac(cfg, default_role=default_role)
     db.add(AuditLog(actor_id=user.id, action="settings.rbac.default.update",

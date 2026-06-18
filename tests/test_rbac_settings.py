@@ -65,6 +65,14 @@ def test_default_role_save(auth_client, test_config):
     assert test_config.rbac.default_role == "operator"
 
 
+def test_default_role_none_allowed(auth_client, test_config):
+    # "none" = deny unmapped users (require group membership); must be accepted.
+    r = auth_client.post("/settings/rbac/default",
+                         data={"default_role": "none"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert test_config.rbac.default_role == "none"
+
+
 def test_page_renders_and_lists_mappings(auth_client, test_config):
     test_config.rbac.group_role_map = {"DOSM-Ops": "operator"}
     page = auth_client.get("/settings/rbac")

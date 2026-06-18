@@ -40,11 +40,16 @@ class OktaError(Exception):
 # Pure logic (unit-tested offline)
 # ---------------------------------------------------------------------------
 
-def map_groups_to_role(groups, rbac: RbacConfig) -> str:
-    """Map a user's group memberships to a DOSM role. Highest role wins; a user
-    in no mapped group falls back to ``rbac.default_role``."""
-    best_role = rbac.default_role
-    best_rank = ROLE_RANK.get(rbac.default_role, -1)
+def map_groups_to_role(groups, rbac: RbacConfig) -> str | None:
+    """Map a user's group memberships to a DOSM role. Highest mapped role wins.
+
+    A user in **no** mapped group falls back to ``rbac.default_role`` — unless
+    that is set to deny (``"none"`` / unset / any non-role value), in which case
+    this returns ``None`` meaning *access denied*. That's the secure default:
+    only members of a group that's been granted a DOSM role can sign in.
+    """
+    best_role: str | None = None
+    best_rank = -1
     for g in groups or []:
         role = rbac.group_role_map.get(g)
         if role is None:
@@ -52,7 +57,10 @@ def map_groups_to_role(groups, rbac: RbacConfig) -> str:
         rank = ROLE_RANK.get(role, -1)
         if rank > best_rank:
             best_role, best_rank = role, rank
-    return best_role
+    if best_role is not None:
+        return best_role
+    # No mapped group matched — grant the default role only if it's a real role.
+    return rbac.default_role if rbac.default_role in ROLE_RANK else None
 
 
 def extract_identity(claims: dict, groups_claim: str) -> dict:

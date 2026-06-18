@@ -38,6 +38,22 @@ def test_map_groups_default_and_unknown():
     assert okta_oidc.map_groups_to_role(None, rbac) == "viewer"
 
 
+def test_map_groups_denies_unmapped_when_default_none():
+    rbac = RbacConfig(group_role_map={"Admins": "admin"}, default_role="none")
+    # No mapped group → denied (None).
+    assert okta_oidc.map_groups_to_role(["other"], rbac) is None
+    assert okta_oidc.map_groups_to_role([], rbac) is None
+    assert okta_oidc.map_groups_to_role(None, rbac) is None
+    # A mapped group still grants its role.
+    assert okta_oidc.map_groups_to_role(["Admins"], rbac) == "admin"
+
+
+def test_map_groups_default_none_is_the_model_default():
+    # Out of the box, RbacConfig denies unmapped users (group membership required).
+    assert RbacConfig().default_role == "none"
+    assert okta_oidc.map_groups_to_role(["whatever"], RbacConfig()) is None
+
+
 # ---------------------------------------------------------------------------
 # Token signing fixtures
 # ---------------------------------------------------------------------------
@@ -100,21 +116,21 @@ def test_validate_id_token_rejects_wrong_audience(signing_key, jwks_public):
 # ---------------------------------------------------------------------------
 
 @contextmanager
-def _okta_enabled(test_config, group_map):
+def _okta_enabled(test_config, group_map, default_role="viewer"):
     okta, rbac = test_config.okta, test_config.rbac
     saved = (okta.enabled, okta.issuer, okta.client_id, dict(rbac.group_role_map), rbac.default_role)
     okta.enabled = True
     okta.issuer = ISSUER
     okta.client_id = CLIENT_ID
     rbac.group_role_map = dict(group_map)
-    rbac.default_role = "viewer"
+    rbac.default_role = default_role
     try:
         yield
     finally:
         (okta.enabled, okta.issuer, okta.client_id, rbac.group_role_map, rbac.default_role) = saved
 
 
-def _patch_network(monkeypatch, signing_key, jwks_public, *, groups):
+def _patch_network(monkeypatch, signing_key, jwks_public, *, groups, sub="okta-sub-1"):
     metadata = {
         "authorization_endpoint": f"{ISSUER}/authorize",
         "token_endpoint": f"{ISSUER}/token",
@@ -129,7 +145,7 @@ def _patch_network(monkeypatch, signing_key, jwks_public, *, groups):
 
     async def fake_exchange(_meta, **kwargs):
         # nonce was forced deterministic via new_state below
-        return {"id_token": _make_id_token(signing_key, groups=groups, nonce="fixedval")}
+        return {"id_token": _make_id_token(signing_key, groups=groups, nonce="fixedval", sub=sub)}
 
     monkeypatch.setattr(okta_oidc, "fetch_metadata", fake_metadata)
     monkeypatch.setattr(okta_oidc, "fetch_jwks", fake_jwks)
@@ -162,6 +178,28 @@ def test_okta_callback_provisions_user(
         assert u.role == "admin"
         assert u.auth_provider == "okta"
         assert u.email == "ssouser@example.com"
+
+
+def test_okta_callback_denies_user_in_no_mapped_group(
+    app, test_config, session_factory, monkeypatch, signing_key, jwks_public
+):
+    get_backend(test_config).set_str("okta/client_secret", "shh")
+    # The user's groups don't intersect the mapping, and default is deny.
+    _patch_network(monkeypatch, signing_key, jwks_public,
+                   groups=["Some-Other-Group"], sub="denied-sub-1")
+
+    with _okta_enabled(test_config, {"DOSM-Admins": "admin"}, default_role="none"):
+        client = TestClient(app, raise_server_exceptions=True)
+        client.get("/auth/okta/login", follow_redirects=False)
+        r = client.get("/auth/okta/callback?code=abc&state=fixedval", follow_redirects=False)
+        assert r.status_code == 403
+        assert "group granted DOSM access" in r.text
+        # No session was established.
+        assert client.get("/hosts", follow_redirects=False).status_code in (303, 401)
+
+    # And no user row was provisioned for the denied subject.
+    with session_factory() as s:
+        assert s.execute(select(User).where(User.okta_sub == "denied-sub-1")).scalar_one_or_none() is None
 
 
 def test_okta_role_recomputed_on_each_login(

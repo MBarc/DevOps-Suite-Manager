@@ -178,6 +178,32 @@ async def okta_callback(
         raise HTTPException(401, "ID token missing subject")
     role = okta_oidc.map_groups_to_role(identity["groups"], cfg.rbac)
 
+    # Deny anyone who isn't a member of a group granted a DOSM role. We do NOT
+    # provision a user row in this case — group membership is required for access.
+    if role is None:
+        db.add(
+            AuditLog(
+                actor_id=None,
+                action="auth.login.okta.denied",
+                target=f"okta_sub:{identity['sub']}",
+                details=f"email={identity['email']} groups={len(identity['groups'])} (no mapped group)",
+                ip=request.client.host if request.client else None,
+            )
+        )
+        db.commit()
+        return _templates(request).TemplateResponse(
+            request,
+            "auth/login.html",
+            {
+                "error": "Your account isn't a member of any group granted DOSM access. "
+                         "Contact an administrator.",
+                "next": "/",
+                "username": "",
+                "okta_enabled": True,
+            },
+            status_code=403,
+        )
+
     user, prev_role = okta_oidc.provision_user(
         db,
         okta_sub=identity["sub"],

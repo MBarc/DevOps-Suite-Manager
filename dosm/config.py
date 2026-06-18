@@ -66,7 +66,11 @@ class RbacConfig(BaseModel):
     """
 
     group_role_map: dict[str, str] = Field(default_factory=dict)
-    default_role: str = "viewer"
+    # Role for an authenticated user who is in NONE of the mapped groups.
+    # ``"none"`` (the secure default) denies access entirely — only members of a
+    # mapped group can sign in. Set to a real role (viewer/operator/admin) to
+    # instead grant everyone who authenticates that baseline.
+    default_role: str = "none"
 
 
 class GuacamoleConfig(BaseModel):

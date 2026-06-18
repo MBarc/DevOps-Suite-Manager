@@ -116,7 +116,7 @@ The mapping is explicit, declarative configuration — DOSM never guesses.
 
 ```yaml
 rbac:
-  default_role: viewer            # used when no group matches
+  default_role: none              # unmapped users: "none" denies access (default)
   group_role_map:
     DOSM-Admins:     admin
     DOSM-Operators:  operator
@@ -133,7 +133,12 @@ are DOSM roles.
 2. Keep only the ones present in `group_role_map`.
 3. **Highest role wins** — someone in both `DOSM-Operators` and `DOSM-Admins`
    becomes `admin`.
-4. If the user is in **no** mapped group, they get `default_role` (`viewer`).
+4. If the user is in **no** mapped group, they get `default_role`. The secure
+   default is **`none` → access denied**: an individual user can't sign in
+   unless a group grants them a role. Set `default_role` to a real role
+   (viewer/operator/admin) only if you want everyone who authenticates to get
+   that baseline. This is the "Unmapped users" setting on the Access-control
+   page (Settings).
 
 **When it's applied:** on **every login**, not just the first. So moving a user
 between AD groups takes effect the next time they sign in — no manual DOSM
@@ -216,7 +221,7 @@ okta:
   # scopes default to [openid, profile, email, groups]
   # groups_claim defaults to "groups"
 rbac:
-  default_role: viewer
+  default_role: none   # deny unmapped users (group membership required)
   group_role_map:
     DOSM-Admins: admin
     DOSM-Operators: operator

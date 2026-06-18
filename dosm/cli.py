@@ -260,7 +260,10 @@ def rbac_show_mapping() -> None:
         console.print("[yellow]No group_role_map configured.[/yellow]")
     else:
         console.print(table)
-    console.print(f"Default role (no mapped group): [cyan]{rbac.default_role}[/cyan]")
+    if rbac.default_role in ("admin", "operator", "viewer"):
+        console.print(f"Unmapped users get: [cyan]{rbac.default_role}[/cyan]")
+    else:
+        console.print("Unmapped users get: [red]no access[/red] (group membership required)")
 
 
 # ---- secret ---------------------------------------------------------------
