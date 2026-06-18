@@ -246,7 +246,7 @@ limitations). Preserve this.
   hallucinate hosts. Plan card UX will need iteration once Ollama is
   pointed at a real model.
 - **Auth: Okta OIDC SSO + local break-glass** (Phase 21/21b, branch
-  `feature/rbac-okta-ad`). Authorization is the `viewer<operator<admin` role
+  `feature/rbac-okta-ad`; full reference in `docs/rbac-okta.md`). Authorization is the `viewer<operator<admin` role
   ladder, sourced from Okta's `groups` claim mapped via `rbac.group_role_map`.
   Still no MFA on the *local* path (rely on Okta for that). The Okta OIDC flow
   is exercised offline with a self-signed token but **not yet validated against
