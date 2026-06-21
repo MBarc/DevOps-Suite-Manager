@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_operator
+from dosm.auth.tenancy import active_tenant_id
 from dosm.credentials.access import first_unusable_credential
 from dosm.db import get_session
 from dosm.guacamole.auth_json import AuthJsonCodec, build_connection_id, load_secret_key
@@ -16,7 +17,7 @@ from dosm.guacamole.client import (
     GuacamoleUnreachable,
     fetch_session_token,
 )
-from dosm.hosts.repo import resolve_jump_chain
+from dosm.hosts.repo import get_host, resolve_jump_chain
 from dosm.jumps import (
     JumpAuthError,
     JumpUnreachableError,
@@ -26,7 +27,7 @@ from dosm.jumps import (
     probe_forward,
     verify_ssh_credentials,
 )
-from dosm.models import AuditLog, Host, User
+from dosm.models import AuditLog, User
 from dosm.recording import events as rec_events
 
 router = APIRouter()
@@ -42,11 +43,12 @@ async def host_connect(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ) -> HTMLResponse:
     cfg = request.app.state.config
     gc = cfg.guacamole
 
-    host = db.get(Host, host_id)
+    host = get_host(db, host_id, tid)
     if host is None:
         raise HTTPException(404)
 
@@ -198,6 +200,7 @@ async def host_connect(
 
     db.add(
         AuditLog(
+            tenant_id=host.tenant_id,
             actor_id=user.id,
             action="host.connect" if iframe_url else "host.connect.fail",
             target=f"host:{host.id}",
@@ -238,6 +241,7 @@ async def host_disconnect(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ) -> Response:
     """Release a tunnel lease registered for a Guacamole session.
 
@@ -248,11 +252,12 @@ async def host_disconnect(
     """
     released = await get_tunnel_manager().release_session(sid)
     if released:
-        host = db.get(Host, host_id)
+        host = get_host(db, host_id, tid)
         if host:
             rec_events.record_host_close(user.id, host.name)
         db.add(
             AuditLog(
+                tenant_id=host.tenant_id if host else tid,
                 actor_id=user.id,
                 action="host.disconnect",
                 target=f"host:{host_id}",

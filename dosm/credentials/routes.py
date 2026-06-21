@@ -10,12 +10,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_operator, require_user
+from dosm.auth.tenancy import active_tenant_id, require_active_tenant
 from dosm.credentials.access import (
     can_see_credential,
     visible_credentials_query,
 )
 from dosm.db import get_session
-from dosm.models import AuditLog, Credential, Host, User
+from dosm.models import AuditLog, Credential, Host, Tenant, User
 from dosm.secrets import SecretNotFound, get_backend
 
 VISIBILITIES = ("shared", "private")
@@ -34,13 +35,27 @@ KIND_LABELS = {
 }
 
 
-def _auto_secret_ref(name: str) -> str:
+def _auto_secret_ref(name: str, tenant_slug: str) -> str:
+    """Build the auto secret path. Credential names are unique *per tenant*, so
+    the path is namespaced by tenant slug to avoid cross-tenant collisions on
+    the (now non-unique) name slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
-    return f"credentials/{slug}"
+    return f"t/{tenant_slug}/credentials/{slug}"
 
 
 def _templates(request: Request):
     return request.app.state.templates
+
+
+def _get_credential(db: Session, cred_id: int, tid: int | None) -> Credential | None:
+    """Fetch a credential scoped to tenant ``tid``. Returns None when it belongs
+    to a different tenant so callers 404 rather than leak existence."""
+    cred = db.get(Credential, cred_id)
+    if cred is None:
+        return None
+    if tid is not None and cred.tenant_id != tid:
+        return None
+    return cred
 
 
 def _hosts_using(db: Session, cred_id: int) -> int:
@@ -56,8 +71,9 @@ async def credentials_list(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    rows = list(db.execute(visible_credentials_query(user)).scalars())
+    rows = list(db.execute(visible_credentials_query(user, tid)).scalars())
     enriched = []
     for c in rows:
         enriched.append(
@@ -107,10 +123,13 @@ async def credentials_create(
     visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int = Depends(require_active_tenant),
 ):
     cfg = request.app.state.config
     name = name.strip()
-    secret_ref = secret_ref.strip() or _auto_secret_ref(name)
+    tenant = db.get(Tenant, tid)
+    tenant_slug = tenant.slug if tenant is not None else str(tid)
+    secret_ref = secret_ref.strip() or _auto_secret_ref(name, tenant_slug)
     visibility = visibility if visibility in VISIBILITIES else "shared"
     if kind not in CRED_KINDS:
         return _templates(request).TemplateResponse(
@@ -127,6 +146,7 @@ async def credentials_create(
             status_code=400,
         )
     cred = Credential(
+        tenant_id=tid,
         name=name,
         kind=kind,
         username=username.strip() or None,
@@ -149,6 +169,7 @@ async def credentials_create(
     cid = cred.id
     db.add(
         AuditLog(
+            tenant_id=tid,
             actor_id=user.id,
             action="credential.create",
             target=f"credential:{cid}",
@@ -165,6 +186,7 @@ async def credentials_create(
         except Exception as e:
             db.add(
                 AuditLog(
+                    tenant_id=tid,
                     actor_id=user.id,
                     action="credential.create.partial",
                     target=f"credential:{cid}",
@@ -182,8 +204,9 @@ async def credentials_detail(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    cred = db.get(Credential, cred_id)
+    cred = _get_credential(db, cred_id, tid)
     if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     cfg = request.app.state.config
@@ -213,8 +236,9 @@ async def credentials_edit(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    cred = db.get(Credential, cred_id)
+    cred = _get_credential(db, cred_id, tid)
     if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
@@ -236,9 +260,10 @@ async def credentials_update(
     visibility: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
-    cred = db.get(Credential, cred_id)
+    cred = _get_credential(db, cred_id, tid)
     if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     if kind not in CRED_KINDS:
@@ -267,10 +292,12 @@ async def credentials_update(
             _form_context(host=cred, user=user, error=str(e.__cause__ or e)),
             status_code=400,
         )
-    db.add(AuditLog(actor_id=user.id, action="credential.update", target=f"credential:{cred.id}"))
+    audit_tid = cred.tenant_id
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="credential.update", target=f"credential:{cred.id}"))
     if visibility_changed:
         db.add(
             AuditLog(
+                tenant_id=audit_tid,
                 actor_id=user.id,
                 action="credential.visibility",
                 target=f"credential:{cred.id}",
@@ -287,6 +314,7 @@ async def credentials_update(
             with __import__("dosm.db", fromlist=["session_scope"]).session_scope() as s2:
                 s2.add(
                     AuditLog(
+                        tenant_id=audit_tid,
                         actor_id=user.id,
                         action="credential.update.partial",
                         target=f"credential:{cred_id_local}",
@@ -301,15 +329,17 @@ async def credentials_delete(
     cred_id: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    cred = db.get(Credential, cred_id)
+    cred = _get_credential(db, cred_id, tid)
     if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     if _hosts_using(db, cred.id) > 0:
         # Refuse rather than orphan host references silently.
         raise HTTPException(409, "credential is in use by one or more hosts")
     name = cred.name
+    audit_tid = cred.tenant_id
     db.delete(cred)
-    db.add(AuditLog(actor_id=user.id, action="credential.delete", target=f"credential:{cred_id}", details=f"name={name}"))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="credential.delete", target=f"credential:{cred_id}", details=f"name={name}"))
     db.commit()
     return RedirectResponse("/credentials", status_code=303)

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dosm.auth.tenancy import tenant_clause
 from dosm.config import Config
 from dosm.models import Pipeline, PipelinePayload, PipelineRun
 from dosm.pipelines.adapters import (
@@ -21,16 +22,31 @@ class PipelineNotFound(LookupError):
     pass
 
 
-def list_pipelines(db: Session) -> list[Pipeline]:
-    return list(db.execute(select(Pipeline).order_by(Pipeline.name)).scalars())
+def list_pipelines(db: Session, tid: int | None) -> list[Pipeline]:
+    stmt = select(Pipeline).order_by(Pipeline.name)
+    clause = tenant_clause(Pipeline, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    return list(db.execute(stmt).scalars())
 
 
-def get_pipeline(db: Session, pid: int) -> Pipeline | None:
-    return db.get(Pipeline, pid)
+def get_pipeline(db: Session, pid: int, tid: int | None) -> Pipeline | None:
+    """Fetch a pipeline by id, scoped to tenant ``tid``. Returns None when it
+    belongs to a different tenant so callers 404 rather than leak existence."""
+    pipeline = db.get(Pipeline, pid)
+    if pipeline is None:
+        return None
+    if tid is not None and pipeline.tenant_id != tid:
+        return None
+    return pipeline
 
 
-def get_pipeline_by_name(db: Session, name: str) -> Pipeline | None:
-    return db.execute(select(Pipeline).where(Pipeline.name == name)).scalar_one_or_none()
+def get_pipeline_by_name(db: Session, name: str, tid: int | None) -> Pipeline | None:
+    stmt = select(Pipeline).where(Pipeline.name == name)
+    clause = tenant_clause(Pipeline, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    return db.execute(stmt).scalar_one_or_none()
 
 
 def list_runs(db: Session, pipeline_id: int, limit: int = 25) -> list[PipelineRun]:
@@ -51,6 +67,7 @@ def get_run(db: Session, run_id: int) -> PipelineRun | None:
 def create_pipeline(
     db: Session,
     *,
+    tenant_id: int,
     name: str,
     provider: str,
     description: str | None,
@@ -61,6 +78,7 @@ def create_pipeline(
     adapter = get_adapter(provider)
     cfg_norm = adapter.validate_config(config)
     p = Pipeline(
+        tenant_id=tenant_id,
         name=name.strip(),
         provider=provider,
         description=description or None,

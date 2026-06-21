@@ -12,8 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
+from dosm.auth.tenancy import active_tenant_id, require_active_tenant, tenant_clause
 from dosm.db import get_session
-from dosm.models import AuditLog, Host, NetworkPort, NetworkScan, NetworkScanResult, User
+from dosm.hosts import repo as hosts_repo
+from dosm.models import AuditLog, NetworkPort, NetworkScan, NetworkScanResult, User
 from dosm.network.executor import quick_check
 from dosm.network.scanner import get_scan_activity, is_running, start_scan
 
@@ -22,6 +24,18 @@ router = APIRouter(prefix="/network")
 
 def _templates(request: Request):
     return request.app.state.templates
+
+
+def _get_scan(db: Session, sid: int, tid: int | None) -> NetworkScan | None:
+    """Fetch a scan by id, scoped to tenant ``tid``. Returns None when the scan
+    belongs to a different tenant (so callers 404 rather than leak existence).
+    ``tid`` None (platform all-tenants) skips the tenant check."""
+    scan = db.get(NetworkScan, sid)
+    if scan is None:
+        return None
+    if tid is not None and scan.tenant_id != tid:
+        return None
+    return scan
 
 
 # ── Port Library ─────────────────────────────────────────────────────────────
@@ -114,8 +128,9 @@ async def port_checker(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    hosts = db.execute(select(Host).order_by(Host.name)).scalars().all()
+    hosts = hosts_repo.list_hosts(db, tid=tid)
     return _templates(request).TemplateResponse(
         request, "network/port_checker.html", {"hosts": hosts, "user": user}
     )
@@ -129,8 +144,9 @@ async def port_checker_run(
     port: int = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    source = db.get(Host, source_host_id)
+    source = hosts_repo.get_host(db, source_host_id, tid)
     if source is None:
         return JSONResponse({"error": "Source host not found."}, status_code=404)
 
@@ -138,6 +154,7 @@ async def port_checker_run(
     reachable, latency_ms, error_msg = await quick_check(cfg, db, source, dst_address.strip(), port)
 
     db.add(AuditLog(
+        tenant_id=source.tenant_id,
         actor_id=user.id,
         action="network.check",
         target=f"host:{source_host_id}",
@@ -163,10 +180,13 @@ async def map_list(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    scans = db.execute(
-        select(NetworkScan).order_by(NetworkScan.created_at.desc())
-    ).scalars().all()
+    stmt = select(NetworkScan).order_by(NetworkScan.created_at.desc())
+    clause = tenant_clause(NetworkScan, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    scans = db.execute(stmt).scalars().all()
     scan_stats = []
     for s in scans:
         total = db.execute(
@@ -191,8 +211,9 @@ async def map_new_form(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    hosts = db.execute(select(Host).order_by(Host.name)).scalars().all()
+    hosts = hosts_repo.list_hosts(db, tid=tid)
     ports = db.execute(select(NetworkPort).order_by(NetworkPort.port_number)).scalars().all()
     return _templates(request).TemplateResponse(
         request,
@@ -206,6 +227,7 @@ async def map_create(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int = Depends(require_active_tenant),
 ):
     form = await request.form()
     title = (form.get("title") or "").strip()
@@ -219,7 +241,7 @@ async def map_create(
     port_ids = [int(v) for v in form.getlist("port_ids") if v]
 
     if not source_ids and not include_local:
-        hosts = db.execute(select(Host).order_by(Host.name)).scalars().all()
+        hosts = hosts_repo.list_hosts(db, tid=tid)
         ports = db.execute(select(NetworkPort).order_by(NetworkPort.port_number)).scalars().all()
         return _templates(request).TemplateResponse(
             request,
@@ -229,7 +251,7 @@ async def map_create(
         )
 
     if not port_ids:
-        hosts = db.execute(select(Host).order_by(Host.name)).scalars().all()
+        hosts = hosts_repo.list_hosts(db, tid=tid)
         ports = db.execute(select(NetworkPort).order_by(NetworkPort.port_number)).scalars().all()
         return _templates(request).TemplateResponse(
             request,
@@ -238,10 +260,10 @@ async def map_create(
             status_code=400,
         )
 
-    # Build destination list
+    # Build destination list (only hosts within the active tenant resolve)
     destinations: list[dict] = []
     for hid in dest_host_ids:
-        h = db.get(Host, hid)
+        h = hosts_repo.get_host(db, hid, tid)
         if h:
             destinations.append({"type": "inventory", "host_id": h.id, "address": h.hostname, "label": h.name})
 
@@ -258,7 +280,7 @@ async def map_create(
             destinations.append({"type": "adhoc", "host_id": None, "address": address, "label": label})
 
     if not destinations:
-        hosts = db.execute(select(Host).order_by(Host.name)).scalars().all()
+        hosts = hosts_repo.list_hosts(db, tid=tid)
         ports = db.execute(select(NetworkPort).order_by(NetworkPort.port_number)).scalars().all()
         return _templates(request).TemplateResponse(
             request,
@@ -269,6 +291,7 @@ async def map_create(
 
     config = {"sources": source_ids, "destinations": destinations, "port_ids": port_ids, "local_source": include_local}
     scan = NetworkScan(
+        tenant_id=tid,
         title=title,
         status="pending",
         config_json=json.dumps(config),
@@ -276,8 +299,8 @@ async def map_create(
     )
     db.add(scan)
     db.flush()
-    _create_result_rows(db, scan.id, source_ids, destinations, port_ids, include_local=include_local)
-    db.add(AuditLog(actor_id=user.id, action="network.scan.create", target=f"scan:{scan.id}", details=title))
+    _create_result_rows(db, scan.id, source_ids, destinations, port_ids, include_local=include_local, tid=tid)
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="network.scan.create", target=f"scan:{scan.id}", details=title))
     db.commit()
 
     cfg = request.app.state.config
@@ -294,7 +317,9 @@ def _create_result_rows(
     port_ids: list[int],
     *,
     include_local: bool = False,
+    tid: int | None = None,
 ) -> None:
+    # Port library is global (shared across tenants); not tenant-scoped here.
     ports = {p.id: p for p in db.execute(select(NetworkPort)).scalars()}
     if include_local:
         for dst in destinations:
@@ -312,7 +337,7 @@ def _create_result_rows(
                     protocol=p.protocol,
                 ))
     for src_id in source_ids:
-        src = db.get(Host, src_id)
+        src = hosts_repo.get_host(db, src_id, tid)
         if src is None:
             continue
         for dst in destinations:
@@ -337,8 +362,9 @@ async def map_detail(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    scan = db.get(NetworkScan, sid)
+    scan = _get_scan(db, sid, tid)
     if scan is None:
         raise HTTPException(404)
 
@@ -372,8 +398,9 @@ async def map_status(
     sid: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    scan = db.get(NetworkScan, sid)
+    scan = _get_scan(db, sid, tid)
     if scan is None:
         raise HTTPException(404)
     results = db.execute(
@@ -422,13 +449,15 @@ async def map_rerun(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    original = db.get(NetworkScan, sid)
+    original = _get_scan(db, sid, tid)
     if original is None:
         raise HTTPException(404)
 
     config = json.loads(original.config_json)
     new_scan = NetworkScan(
+        tenant_id=original.tenant_id,
         title=original.title,
         status="pending",
         config_json=original.config_json,
@@ -443,8 +472,10 @@ async def map_rerun(
         config.get("destinations", []),
         config.get("port_ids", []),
         include_local=config.get("local_source", False),
+        tid=original.tenant_id,
     )
     db.add(AuditLog(
+        tenant_id=original.tenant_id,
         actor_id=user.id,
         action="network.scan.rerun",
         target=f"scan:{new_scan.id}",
@@ -464,16 +495,17 @@ async def map_rename(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     body = await request.json()
     title = (body.get("title") or "").strip()
     if not title:
         return JSONResponse({"error": "Title cannot be empty"}, status_code=422)
-    scan = db.get(NetworkScan, sid)
+    scan = _get_scan(db, sid, tid)
     if scan is None:
         raise HTTPException(404)
     scan.title = title
-    db.add(AuditLog(actor_id=user.id, action="network.scan.rename", target=f"scan:{sid}", details=title))
+    db.add(AuditLog(tenant_id=scan.tenant_id, actor_id=user.id, action="network.scan.rename", target=f"scan:{sid}", details=title))
     db.commit()
     return JSONResponse({"ok": True, "title": title})
 
@@ -483,12 +515,14 @@ async def map_delete(
     sid: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    scan = db.get(NetworkScan, sid)
+    scan = _get_scan(db, sid, tid)
     if scan is None:
         raise HTTPException(404)
+    audit_tid = scan.tenant_id
     db.delete(scan)
-    db.add(AuditLog(actor_id=user.id, action="network.scan.delete", target=f"scan:{sid}"))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="network.scan.delete", target=f"scan:{sid}"))
     db.commit()
     return RedirectResponse("/network/map", status_code=303)
 
@@ -498,8 +532,9 @@ async def map_export_json(
     sid: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    scan = db.get(NetworkScan, sid)
+    scan = _get_scan(db, sid, tid)
     if scan is None:
         raise HTTPException(404)
     results = db.execute(
@@ -542,8 +577,9 @@ async def map_export_csv(
     sid: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    scan = db.get(NetworkScan, sid)
+    scan = _get_scan(db, sid, tid)
     if scan is None:
         raise HTTPException(404)
     results = db.execute(

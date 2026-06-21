@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
+from dosm.auth.tenancy import active_tenant_id, require_active_tenant
 from dosm.db import get_session
 from dosm.docs_index.indexer import reindex_async
 from dosm.models import AuditLog, RecordingSession, User
@@ -95,10 +96,18 @@ class OptionsRequest(BaseModel):
 
 @router.get("/status")
 async def recording_status(
+    db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ) -> JSONResponse:
     rec = get_active(user.id)
     if rec is None:
+        return JSONResponse({"active": False})
+    # Confirm the persisted row is the user's and within the active tenant.
+    row = db.get(RecordingSession, rec.recording_id)
+    if row is not None and row.user_id != user.id:
+        return JSONResponse({"active": False})
+    if row is not None and tid is not None and row.tenant_id != tid:
         return JSONResponse({"active": False})
     elapsed = int((datetime.now(UTC) - rec.started_at).total_seconds())
     return JSONResponse(
@@ -118,6 +127,7 @@ async def recording_start(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int = Depends(require_active_tenant),
 ) -> JSONResponse:
     cfg = request.app.state.config
     if not cfg.recording.enabled:
@@ -131,6 +141,7 @@ async def recording_start(
     tmp_path = cfg.home / cfg.recording.tmp_dir / f"{slug}.md"
 
     row = RecordingSession(
+        tenant_id=tid,
         user_id=user.id,
         slug=slug,
         options_json=json.dumps(opts.to_dict()),
@@ -142,6 +153,7 @@ async def recording_start(
 
     db.add(
         AuditLog(
+            tenant_id=tid,
             actor_id=user.id,
             action="recording.start",
             target=f"recording:{rec_id}",
@@ -171,6 +183,7 @@ async def recording_stop(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ) -> JSONResponse:
     cfg = request.app.state.config
     rec = clear_active(user.id)
@@ -192,6 +205,11 @@ async def recording_stop(
         shutil.move(str(rec.tmp_path), str(final_path))
 
     row = db.get(RecordingSession, rec.recording_id)
+    if row and row.user_id != user.id:
+        raise HTTPException(404, "no active recording for this user")
+    if row and tid is not None and row.tenant_id != tid:
+        raise HTTPException(404, "no active recording for this user")
+    audit_tid = row.tenant_id if row else tid
     if row:
         row.status = "finalized"
         row.stopped_at = datetime.now(UTC)
@@ -199,6 +217,7 @@ async def recording_stop(
 
     db.add(
         AuditLog(
+            tenant_id=audit_tid,
             actor_id=user.id,
             action="recording.stop",
             target=f"recording:{rec.recording_id}",
@@ -246,16 +265,22 @@ async def recording_update_options(
     body: OptionsRequest,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ) -> JSONResponse:
     rec = get_active(user.id)
     if rec is None:
+        raise HTTPException(404, "no active recording")
+
+    row = db.get(RecordingSession, rec.recording_id)
+    if row is not None and row.user_id != user.id:
+        raise HTTPException(404, "no active recording")
+    if row is not None and tid is not None and row.tenant_id != tid:
         raise HTTPException(404, "no active recording")
 
     new_opts = RecordingOptions.from_dict({**rec.options.to_dict(), **body.options})
     rec.writer.options = new_opts
     rec.options = new_opts
 
-    row = db.get(RecordingSession, rec.recording_id)
     if row:
         row.options_json = json.dumps(new_opts.to_dict())
     db.commit()

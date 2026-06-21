@@ -3,7 +3,8 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from dosm.models import Credential, Host, HostTag, Tag
+from dosm.auth.tenancy import tenant_clause
+from dosm.models import Credential, Host, HostTag, OrgUnit, Tag
 
 SUPPORTED_PROTOCOLS = ("ssh", "rdp", "vnc")
 # File-transfer methods a host can additionally expose (a capability, not the
@@ -20,26 +21,58 @@ def _normalize_tags(raw: str) -> list[str]:
     return sorted({t.strip() for t in raw.split(",") if t.strip()})
 
 
-def get_or_create_tag(db: Session, name: str) -> Tag:
-    tag = db.execute(select(Tag).where(Tag.name == name)).scalar_one_or_none()
+def get_or_create_tag(db: Session, name: str, tid: int) -> Tag:
+    tag = db.execute(
+        select(Tag).where(Tag.name == name, Tag.tenant_id == tid)
+    ).scalar_one_or_none()
     if tag is None:
-        tag = Tag(name=name)
+        tag = Tag(name=name, tenant_id=tid)
         db.add(tag)
         db.flush()
     return tag
 
 
-def list_hosts(db: Session, *, kind: str | None = None, tag: str | None = None) -> list[Host]:
-    """List hosts, optionally filtered by role and/or tag."""
+def org_subtree_ids(db: Session, unit_id: int) -> list[int]:
+    """All OrgUnit ids in the subtree rooted at ``unit_id`` (including it).
+    Walked level-by-level; the tree is at most 3 deep. Kept here (rather than
+    importing dosm.applications.repo) to avoid pulling the applications package's
+    route imports into the hosts repo."""
+    ids = [unit_id]
+    frontier = [unit_id]
+    while frontier:
+        rows = db.execute(
+            select(OrgUnit.id).where(OrgUnit.parent_id.in_(frontier))
+        ).scalars().all()
+        if not rows:
+            break
+        ids.extend(rows)
+        frontier = rows
+    return ids
+
+
+def list_hosts(
+    db: Session,
+    *,
+    tid: int | None,
+    kind: str | None = None,
+    tag: str | None = None,
+    org_unit_id: int | None = None,
+) -> list[Host]:
+    """List hosts in tenant ``tid`` (None = platform all-tenants view),
+    optionally filtered by role, tag, and/or org subtree."""
     stmt = (
         select(Host)
         .options(
             selectinload(Host.tags),
             selectinload(Host.credential),
             selectinload(Host.jump_host),
+            selectinload(Host.org_unit),
         )
         .order_by(Host.name)
     )
+    clause = tenant_clause(Host, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
     if kind == "jumpboxes":
         stmt = stmt.where(Host.is_jumpbox.is_(True))
     elif kind == "servers":
@@ -52,35 +85,58 @@ def list_hosts(db: Session, *, kind: str | None = None, tag: str | None = None) 
                 .where(Tag.name == tag)
             )
         )
+    if org_unit_id is not None:
+        stmt = stmt.where(Host.org_unit_id.in_(org_subtree_ids(db, org_unit_id)))
     return list(db.execute(stmt).scalars())
 
 
-def count_by_kind(db: Session) -> tuple[int, int]:
-    """Return (servers_count, jumpboxes_count)."""
-    rows = db.execute(select(Host.is_jumpbox)).scalars().all()
+def count_by_kind(db: Session, tid: int | None) -> tuple[int, int]:
+    """Return (servers_count, jumpboxes_count) within tenant ``tid``."""
+    stmt = select(Host.is_jumpbox)
+    clause = tenant_clause(Host, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    rows = db.execute(stmt).scalars().all()
     jumpboxes = sum(1 for v in rows if v)
     servers = len(rows) - jumpboxes
     return servers, jumpboxes
 
 
-def get_host(db: Session, host_id: int) -> Host | None:
-    return db.get(Host, host_id)
+def get_host(db: Session, host_id: int, tid: int | None) -> Host | None:
+    """Fetch a host by id, scoped to tenant ``tid``. Returns None when the host
+    belongs to a different tenant (so callers 404 rather than leak existence).
+    ``tid`` None (platform all-tenants) skips the tenant check."""
+    host = db.get(Host, host_id)
+    if host is None:
+        return None
+    if tid is not None and host.tenant_id != tid:
+        return None
+    return host
 
 
-def list_credentials(db: Session) -> list[Credential]:
-    return list(db.execute(select(Credential).order_by(Credential.name)).scalars())
+def list_credentials(db: Session, tid: int | None) -> list[Credential]:
+    stmt = select(Credential).order_by(Credential.name)
+    clause = tenant_clause(Credential, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    return list(db.execute(stmt).scalars())
 
 
-def list_tags(db: Session) -> list[Tag]:
+def list_tags(db: Session, tid: int | None) -> list[Tag]:
     stmt = (
         select(Tag)
         .where(Tag.id.in_(select(HostTag.tag_id)))
         .order_by(Tag.name)
     )
+    clause = tenant_clause(Tag, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
     return list(db.execute(stmt).scalars())
 
 
-def list_jump_candidates(db: Session, exclude_host_id: int | None = None) -> list[Host]:
+def list_jump_candidates(
+    db: Session, tid: int | None, exclude_host_id: int | None = None
+) -> list[Host]:
     """Hosts eligible to act as a jump box: flagged is_jumpbox, not the host
     itself. Protocol isn't filtered - DOSM's tunnel mechanism currently only
     works with SSH hops, but the inventory accepts RDP/VNC jumpboxes for
@@ -91,13 +147,18 @@ def list_jump_candidates(db: Session, exclude_host_id: int | None = None) -> lis
         .where(Host.is_jumpbox.is_(True))
         .order_by(Host.name)
     )
+    clause = tenant_clause(Host, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
     if exclude_host_id is not None:
         stmt = stmt.where(Host.id != exclude_host_id)
     return list(db.execute(stmt).scalars())
 
 
-def _validate_jump(db: Session, host_id: int | None, jump_host_id: int | None) -> None:
-    """Reject self-reference, non-SSH jump hosts, and cycles."""
+def _validate_jump(
+    db: Session, host_id: int | None, jump_host_id: int | None, tid: int | None
+) -> None:
+    """Reject self-reference, non-SSH jump hosts, cycles, and cross-tenant jumps."""
     if jump_host_id is None:
         return
     if host_id is not None and jump_host_id == host_id:
@@ -116,7 +177,7 @@ def _validate_jump(db: Session, host_id: int | None, jump_host_id: int | None) -
             raise HostValidationError("jump chain forms a cycle")
         seen.add(cur_id)
         node = db.get(Host, cur_id)
-        if node is None:
+        if node is None or (tid is not None and node.tenant_id != tid):
             raise HostValidationError(f"jump host {cur_id} not found")
         if not node.is_jumpbox:
             raise HostValidationError(
@@ -133,9 +194,21 @@ def _validate_ft(method: str | None) -> str | None:
     return method
 
 
+def _validate_org_unit(db: Session, org_unit_id: int | None, tid: int | None) -> int | None:
+    """A host may be assigned to any org node (application, environment, or unit
+    - its deepest known placement). Confirm the node exists in this tenant."""
+    if org_unit_id is None:
+        return None
+    node = db.get(OrgUnit, org_unit_id)
+    if node is None or (tid is not None and node.tenant_id != tid):
+        raise HostValidationError("Selected application/environment/unit no longer exists.")
+    return org_unit_id
+
+
 def create_host(
     db: Session,
     *,
+    tenant_id: int,
     name: str,
     hostname: str,
     port: int,
@@ -149,6 +222,7 @@ def create_host(
     ft_method: str | None = None,
     ft_port: int | None = None,
     ft_credential_id: int | None = None,
+    org_unit_id: int | None = None,
 ) -> Host:
     if protocol not in SUPPORTED_PROTOCOLS:
         raise HostValidationError(f"Unsupported protocol: {protocol!r}")
@@ -156,10 +230,12 @@ def create_host(
     if ft_method is None:
         ft_port = None
         ft_credential_id = None
+    org_unit_id = _validate_org_unit(db, org_unit_id, tenant_id)
     if is_jumpbox:
         jump_host_id = None  # jumpboxes connect directly - no chained jumps
-    _validate_jump(db, host_id=None, jump_host_id=jump_host_id)
+    _validate_jump(db, host_id=None, jump_host_id=jump_host_id, tid=tenant_id)
     host = Host(
+        tenant_id=tenant_id,
         name=name,
         hostname=hostname,
         port=port,
@@ -172,11 +248,12 @@ def create_host(
         ft_method=ft_method,
         ft_port=ft_port,
         ft_credential_id=ft_credential_id,
+        org_unit_id=org_unit_id,
     )
     db.add(host)
     db.flush()
     for tag_name in _normalize_tags(tags_csv):
-        tag = get_or_create_tag(db, tag_name)
+        tag = get_or_create_tag(db, tag_name, tenant_id)
         db.add(HostTag(host_id=host.id, tag_id=tag.id))
     db.flush()
     return host
@@ -198,6 +275,7 @@ def update_host(
     ft_method: str | None = None,
     ft_port: int | None = None,
     ft_credential_id: int | None = None,
+    org_unit_id: int | None = None,
 ) -> Host:
     if protocol not in SUPPORTED_PROTOCOLS:
         raise HostValidationError(f"Unsupported protocol: {protocol!r}")
@@ -205,6 +283,7 @@ def update_host(
     if ft_method is None:
         ft_port = None
         ft_credential_id = None
+    org_unit_id = _validate_org_unit(db, org_unit_id, host.tenant_id)
     if host.is_jumpbox and not is_jumpbox:
         in_use = db.execute(
             select(Host.id).where(Host.jump_host_id == host.id).limit(1)
@@ -215,7 +294,7 @@ def update_host(
             )
     if is_jumpbox:
         jump_host_id = None  # jumpboxes connect directly - no chained jumps
-    _validate_jump(db, host_id=host.id, jump_host_id=jump_host_id)
+    _validate_jump(db, host_id=host.id, jump_host_id=jump_host_id, tid=host.tenant_id)
     host.name = name
     host.hostname = hostname
     host.port = port
@@ -227,9 +306,10 @@ def update_host(
     host.ft_method = ft_method
     host.ft_port = ft_port
     host.ft_credential_id = ft_credential_id
+    host.org_unit_id = org_unit_id
     db.query(HostTag).filter(HostTag.host_id == host.id).delete()
     for tag_name in _normalize_tags(tags_csv):
-        tag = get_or_create_tag(db, tag_name)
+        tag = get_or_create_tag(db, tag_name, host.tenant_id)
         db.add(HostTag(host_id=host.id, tag_id=tag.id))
     db.flush()
     return host

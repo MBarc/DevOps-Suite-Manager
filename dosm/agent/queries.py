@@ -7,8 +7,56 @@ No human approval is required - these are read-only.
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+
+# ---------------------------------------------------------------------------
+# Tenant scoping for the agent.
+#
+# Agent query/action runners have a fixed ``(cfg, args)`` signature and are
+# invoked from the chat-stream loop and the plan-card routes, neither of which
+# can pass extra positional state through that signature. We bridge the active
+# tenant via a ContextVar set by the caller (the stream loop / plan routes) from
+# the Conversation's ``tenant_id``. Runners read it through ``agent_tenant_id()``
+# and thread it into the tenant-scoped repos so the agent only ever sees ITS
+# tenant's hosts/credentials/pipelines/monitoring.
+#
+# A platform admin operating in the all-tenants view (no active tenant) yields
+# ``None`` here, which the repos treat as "no tenant filter". ``_UNSET`` lets us
+# tell "caller never set it" apart from an explicit ``None``.
+# ---------------------------------------------------------------------------
+_UNSET: object = object()
+_AGENT_TENANT: ContextVar[object] = ContextVar("dosm_agent_tenant", default=_UNSET)
+
+
+def agent_tenant_id() -> int | None:
+    """The tenant id the current agent turn operates within (``None`` = the
+    platform all-tenants view, or the caller did not scope the turn)."""
+    val = _AGENT_TENANT.get()
+    return None if val is _UNSET else val  # type: ignore[return-value]
+
+
+@contextmanager
+def agent_tenant(tid: int | None) -> Iterator[None]:
+    """Scope a block (a runner invocation) to tenant ``tid``. Used by the chat
+    stream loop and the plan-card routes around each runner call."""
+    token = _AGENT_TENANT.set(tid)
+    try:
+        yield
+    finally:
+        _AGENT_TENANT.reset(token)
+
+
+def set_agent_tenant(tid: int | None) -> None:
+    """Pin the agent tenant for the rest of the current context (no reset).
+
+    For long-lived single-task flows (the chat-stream generation task) where a
+    ``with`` block would force re-indenting the whole body. Each generation runs
+    in its own asyncio task with an isolated context, so the value does not leak
+    across requests."""
+    _AGENT_TENANT.set(tid)
 
 
 @dataclass
@@ -90,19 +138,14 @@ def query_tools() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 async def _list_hosts_runner(cfg, args: dict) -> QueryResult:
-    from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
-
     from dosm.db import session_scope
-    from dosm.models import Host
+    from dosm.hosts.repo import list_hosts
 
+    tid = agent_tenant_id()
     filt = (args.get("filter") or "").lower().strip()
     with session_scope() as s:
-        hosts = list(
-            s.execute(
-                select(Host).options(selectinload(Host.tags)).order_by(Host.name)
-            ).scalars()
-        )
+        # list_hosts eager-loads tags/credential/jump_host and is tenant-scoped.
+        hosts = list_hosts(s, tid=tid)
         if filt:
             hosts = [
                 h for h in hosts
@@ -147,20 +190,26 @@ async def _host_metrics_runner(cfg, args: dict) -> QueryResult:
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.metrics.sources import MetricsError, make_source_for_host
     from dosm.models import Host
 
+    tid = agent_tenant_id()
     host_name = (args.get("host") or "").strip()
     if not host_name:
         return QueryResult(ok=False, summary="host argument is required", error="host argument is required")
 
     with session_scope() as s:
-        host = s.execute(
+        stmt = (
             select(Host)
             .where(Host.name == host_name)
             .options(selectinload(Host.credential))
-        ).scalar_one_or_none()
+        )
+        clause = tenant_clause(Host, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        host = s.execute(stmt).scalar_one_or_none()
         if host is None:
             return QueryResult(ok=False, summary=f"host {host_name!r} not found", error=f"No host named {host_name!r}")
         try:
@@ -207,19 +256,16 @@ register_query(HOST_METRICS)
 # ---------------------------------------------------------------------------
 
 async def _query_monitoring_runner(cfg, args: dict) -> QueryResult:
-    from sqlalchemy import select
-
     from dosm.db import session_scope
-    from dosm.models import MonitoringSource
     from dosm.monitoring.adapters import make_adapter
+    from dosm.monitoring.repo import list_enabled
     from dosm.secrets import get_backend
 
+    tid = agent_tenant_id()
     hostname = (args.get("host") or "").strip()
 
     with session_scope() as s:
-        sources = list(
-            s.execute(select(MonitoringSource).where(MonitoringSource.enabled.is_(True))).scalars()
-        )
+        sources = list_enabled(s, tid)
         if not sources:
             return QueryResult(ok=True, summary="No monitoring sources configured", data="No enabled monitoring sources configured.")
 
@@ -337,8 +383,9 @@ async def _list_pipelines_runner(cfg, args: dict) -> QueryResult:
     from dosm.db import session_scope
     from dosm.pipelines.repo import list_pipelines
 
+    tid = agent_tenant_id()
     with session_scope() as s:
-        pipelines = list_pipelines(s)
+        pipelines = list_pipelines(s, tid)
         if not pipelines:
             return QueryResult(ok=True, summary="No pipelines", data="No pipelines configured.")
         lines = [
@@ -365,6 +412,7 @@ async def _list_pipeline_runs_runner(cfg, args: dict) -> QueryResult:
     from dosm.db import session_scope
     from dosm.pipelines.repo import get_pipeline_by_name, list_pipelines, list_runs
 
+    tid = agent_tenant_id()
     name = (args.get("name") or "").strip()
     try:
         limit = min(int(args.get("limit") or 10), 25)
@@ -373,7 +421,7 @@ async def _list_pipeline_runs_runner(cfg, args: dict) -> QueryResult:
 
     with session_scope() as s:
         if name:
-            pipeline = get_pipeline_by_name(s, name)
+            pipeline = get_pipeline_by_name(s, name, tid)
             if pipeline is None:
                 return QueryResult(ok=False, summary=f"Pipeline {name!r} not found", error=f"No pipeline named {name!r}")
             runs = list_runs(s, pipeline.id, limit=limit)
@@ -388,7 +436,7 @@ async def _list_pipeline_runs_runner(cfg, args: dict) -> QueryResult:
                 return QueryResult(ok=True, summary=f"No runs for {name!r}", data=f"No runs yet for pipeline {name!r}.")
             return QueryResult(ok=True, summary=f"{len(lines)} run(s) for {name!r}", data="\n".join(lines))
         else:
-            pipelines = list_pipelines(s)
+            pipelines = list_pipelines(s, tid)
             lines = []
             for p in pipelines[:15]:
                 runs = list_runs(s, p.id, limit=1)
@@ -421,22 +469,33 @@ register_query(LIST_PIPELINE_RUNS)
 async def _find_person_runner(cfg, args: dict) -> QueryResult:
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import Department, DepartmentMember
 
+    tid = agent_tenant_id()
     query = (args.get("name_or_dept") or "").strip().lower()
     if not query:
         return QueryResult(ok=False, summary="name_or_dept is required", error="name_or_dept argument is required")
 
     with session_scope() as s:
-        depts = list(s.execute(select(Department)).scalars())
+        dept_stmt = select(Department)
+        dclause = tenant_clause(Department, tid)
+        if dclause is not None:
+            dept_stmt = dept_stmt.where(dclause)
+        depts = list(s.execute(dept_stmt).scalars())
         dept_matches = [
             d for d in depts
             if query in d.name.lower() or query in (d.slug or "").lower()
             or query in (d.manager_name or "").lower()
         ]
 
+        # Members are tenant-scoped through their department; restrict to
+        # departments visible in this tenant so people never leak across tenants.
+        dept_ids = {d.id for d in depts}
         members = list(s.execute(select(DepartmentMember)).scalars())
+        if tid is not None:
+            members = [m for m in members if m.department_id in dept_ids]
         member_matches = [
             m for m in members
             if query in m.display_name.lower()
@@ -486,13 +545,12 @@ register_query(FIND_PERSON)
 # ---------------------------------------------------------------------------
 
 async def _list_credentials_runner(cfg, args: dict) -> QueryResult:
-    from sqlalchemy import select
-
     from dosm.db import session_scope
-    from dosm.models import Credential
+    from dosm.hosts.repo import list_credentials
 
+    tid = agent_tenant_id()
     with session_scope() as s:
-        creds = list(s.execute(select(Credential).order_by(Credential.name)).scalars())
+        creds = list_credentials(s, tid)
         if not creds:
             return QueryResult(ok=True, summary="No credentials", data="No credential profiles configured.")
         lines = [

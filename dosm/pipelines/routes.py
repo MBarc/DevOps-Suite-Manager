@@ -7,7 +7,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_operator, require_user
+from dosm.auth.deps import require_operator, require_user, user_has_role
+from dosm.auth.tenancy import active_tenant_id, require_active_tenant
 from dosm.db import get_session
 from dosm.hosts import repo as hosts_repo  # for credential helpers reuse
 from dosm.models import AuditLog, User
@@ -33,7 +34,7 @@ def _templates(request: Request):
     return request.app.state.templates
 
 
-def _form_context(db: Session, user: User, pipeline=None, error: str | None = None) -> dict:
+def _form_context(db: Session, user: User, tid: int | None, pipeline=None, error: str | None = None) -> dict:
     cfg: dict = {}
     schema: list = []
     if pipeline is not None:
@@ -60,7 +61,7 @@ def _form_context(db: Session, user: User, pipeline=None, error: str | None = No
         "field_schemas": field_schemas,
         "cred_hints": cred_hints,
         "selected_provider": selected,
-        "credentials": hosts_repo.list_credentials(db),
+        "credentials": hosts_repo.list_credentials(db, tid),
         "user": user,
         "error": error,
     }
@@ -112,8 +113,9 @@ async def pipelines_list(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    pipelines = repo.list_pipelines(db)
+    pipelines = repo.list_pipelines(db, tid)
     enriched = []
     for p in pipelines:
         latest = repo.list_runs(db, p.id, limit=1)
@@ -137,9 +139,10 @@ async def pipelines_new(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     return _templates(request).TemplateResponse(
-        request, "pipelines/form.html", _form_context(db, user)
+        request, "pipelines/form.html", _form_context(db, user, tid)
     )
 
 
@@ -152,6 +155,7 @@ async def pipelines_create(
     credential_id: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int = Depends(require_active_tenant),
 ):
     form = await request.form()
     config = _decode_config_form(provider, form)
@@ -159,6 +163,7 @@ async def pipelines_create(
     try:
         p = repo.create_pipeline(
             db,
+            tenant_id=tid,
             name=name.strip(),
             provider=provider,
             description=description.strip() or None,
@@ -171,11 +176,12 @@ async def pipelines_create(
         return _templates(request).TemplateResponse(
             request,
             "pipelines/form.html",
-            _form_context(db, user, error=str(e.__cause__ or e)),
+            _form_context(db, user, tid, error=str(e.__cause__ or e)),
             status_code=400,
         )
     db.add(
         AuditLog(
+            tenant_id=tid,
             actor_id=user.id,
             action="pipeline.create",
             target=f"pipeline:{p.id}",
@@ -191,8 +197,9 @@ async def pipelines_detail(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid)
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
     runs = repo.list_runs(db, p.id, limit=25)
@@ -216,7 +223,7 @@ async def pipelines_detail(
         {"p": p, "cfg": cfg, "schema": schema, "runs": runs_view, "user": user,
          "target_summary": target_summary, "provider_name": provider_name,
          "payloads": payloads_view, "payload_values_json": json.dumps(payload_values),
-         "can_manage_payloads": user.role in ("operator", "admin")},
+         "can_manage_payloads": user_has_role(user, "operator")},
     )
 
 
@@ -241,12 +248,13 @@ async def pipelines_edit(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid)
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
-        request, "pipelines/form.html", _form_context(db, user, pipeline=p)
+        request, "pipelines/form.html", _form_context(db, user, tid, pipeline=p)
     )
 
 
@@ -260,8 +268,9 @@ async def pipelines_update(
     credential_id: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid)
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
     form = await request.form()
@@ -283,10 +292,10 @@ async def pipelines_update(
         return _templates(request).TemplateResponse(
             request,
             "pipelines/form.html",
-            _form_context(db, user, pipeline=p, error=str(e.__cause__ or e)),
+            _form_context(db, user, tid, pipeline=p, error=str(e.__cause__ or e)),
             status_code=400,
         )
-    db.add(AuditLog(actor_id=user.id, action="pipeline.update", target=f"pipeline:{p.id}"))
+    db.add(AuditLog(tenant_id=p.tenant_id, actor_id=user.id, action="pipeline.update", target=f"pipeline:{p.id}"))
     db.commit()
     return RedirectResponse(f"/pipelines/{p.id}", status_code=303)
 
@@ -296,12 +305,14 @@ async def pipelines_delete(
     pid: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid)
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
+    audit_tid = p.tenant_id
     repo.delete_pipeline(db, p)
-    db.add(AuditLog(actor_id=user.id, action="pipeline.delete", target=f"pipeline:{pid}"))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="pipeline.delete", target=f"pipeline:{pid}"))
     db.commit()
     return RedirectResponse("/pipelines", status_code=303)
 
@@ -312,8 +323,9 @@ async def pipelines_trigger(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid)
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
     cfg = request.app.state.config
@@ -357,6 +369,7 @@ async def pipelines_trigger(
     rec_events.record_pipeline_triggered(user.id, p.name, run.id, p.provider)
     db.add(
         AuditLog(
+            tenant_id=p.tenant_id,
             actor_id=user.id,
             action="pipeline.run" if run.status != "failed" else "pipeline.run.fail",
             target=f"pipeline:{p.id}",
@@ -377,11 +390,15 @@ async def pipelines_run_detail(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     run = repo.get_run(db, run_id)
     if run is None:
         raise HTTPException(404)
-    p = repo.get_pipeline(db, run.pipeline_id)
+    # Scope the run through its (tenant-scoped) pipeline - 404 cross-tenant.
+    p = repo.get_pipeline(db, run.pipeline_id, tid)
+    if p is None:
+        raise HTTPException(404)
     inputs = json.loads(run.inputs) if run.inputs else {}
     return _templates(request).TemplateResponse(
         request,
@@ -396,18 +413,23 @@ async def pipelines_run_refresh(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
     run = repo.get_run(db, run_id)
     if run is None:
         raise HTTPException(404)
+    # Scope the run through its (tenant-scoped) pipeline - 404 cross-tenant.
+    p_for_rec = repo.get_pipeline(db, run.pipeline_id, tid)
+    if p_for_rec is None:
+        raise HTTPException(404)
     cfg = request.app.state.config
     old_status = run.status
     await repo.refresh_run(cfg, db, run)
-    p_for_rec = repo.get_pipeline(db, run.pipeline_id)
-    if p_for_rec and run.status != old_status:
+    if run.status != old_status:
         rec_events.record_pipeline_status(user.id, p_for_rec.name, run.id, run.status)
     db.add(
         AuditLog(
+            tenant_id=p_for_rec.tenant_id,
             actor_id=user.id,
             action="pipeline.run.refresh",
             target=f"pipeline_run:{run.id}",
@@ -434,10 +456,10 @@ def _payload_values_from_form(schema: list[dict], form) -> dict:
     return {"__raw__": raw} if raw else {}
 
 
-def _payload_or_404(db, pid: int, payload_id: int, user):
-    """Load a payload, enforcing it belongs to the pipeline and the user may see
-    it (404 - not 403 - so private payloads don't leak)."""
-    p = repo.get_pipeline(db, pid)
+def _payload_or_404(db, pid: int, payload_id: int, user, tid: int | None):
+    """Load a payload, enforcing it belongs to the (tenant-scoped) pipeline and
+    the user may see it (404 - not 403 - so private payloads don't leak)."""
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
     pl = repo.get_payload(db, payload_id)
@@ -452,8 +474,9 @@ async def payload_new_form(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid)
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
@@ -472,8 +495,9 @@ async def payload_create(
     visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid)
+    p = repo.get_pipeline(db, pid, tid)
     if p is None:
         raise HTTPException(404)
     schema = _schema_for(p)
@@ -499,7 +523,7 @@ async def payload_create(
              "visibility": visibility},
             status_code=400,
         )
-    db.add(AuditLog(actor_id=user.id, action="payload.create",
+    db.add(AuditLog(tenant_id=p.tenant_id, actor_id=user.id, action="payload.create",
                     target=f"pipeline:{pid}", details=f"payload={pl.id} name={pl.name!r} visibility={pl.visibility}"))
     db.commit()
     return RedirectResponse(f"/pipelines/{pid}", status_code=303)
@@ -512,8 +536,9 @@ async def payload_edit_form(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p, pl = _payload_or_404(db, pid, payload_id, user)
+    p, pl = _payload_or_404(db, pid, payload_id, user, tid)
     return _templates(request).TemplateResponse(
         request,
         "pipelines/payload_form.html",
@@ -532,8 +557,9 @@ async def payload_update(
     visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p, pl = _payload_or_404(db, pid, payload_id, user)
+    p, pl = _payload_or_404(db, pid, payload_id, user, tid)
     schema = _schema_for(p)
     form = await request.form()
     try:
@@ -549,7 +575,7 @@ async def payload_update(
              "user": user, "error": str(e)},
             status_code=400,
         )
-    db.add(AuditLog(actor_id=user.id, action="payload.update",
+    db.add(AuditLog(tenant_id=p.tenant_id, actor_id=user.id, action="payload.update",
                     target=f"pipeline:{pid}", details=f"payload={pl.id} name={pl.name!r}"))
     db.commit()
     return RedirectResponse(f"/pipelines/{pid}", status_code=303)
@@ -562,14 +588,15 @@ async def payload_rename(
     name: str = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p, pl = _payload_or_404(db, pid, payload_id, user)
+    p, pl = _payload_or_404(db, pid, payload_id, user, tid)
     old = pl.name
     try:
         repo.update_payload(db, pl, name=name)
     except (repo.PayloadNameConflict, ValueError) as e:
         raise HTTPException(400, str(e)) from e
-    db.add(AuditLog(actor_id=user.id, action="payload.rename",
+    db.add(AuditLog(tenant_id=p.tenant_id, actor_id=user.id, action="payload.rename",
                     target=f"pipeline:{pid}", details=f"payload={pl.id} {old!r} -> {pl.name!r}"))
     db.commit()
     return RedirectResponse(f"/pipelines/{pid}", status_code=303)
@@ -581,10 +608,11 @@ async def payload_copy(
     payload_id: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p, pl = _payload_or_404(db, pid, payload_id, user)
+    p, pl = _payload_or_404(db, pid, payload_id, user, tid)
     new = repo.copy_payload(db, pl, created_by_id=user.id)
-    db.add(AuditLog(actor_id=user.id, action="payload.copy",
+    db.add(AuditLog(tenant_id=p.tenant_id, actor_id=user.id, action="payload.copy",
                     target=f"pipeline:{pid}", details=f"from={pl.id} to={new.id} name={new.name!r}"))
     db.commit()
     return RedirectResponse(f"/pipelines/{pid}", status_code=303)
@@ -596,11 +624,13 @@ async def payload_delete(
     payload_id: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    p, pl = _payload_or_404(db, pid, payload_id, user)
+    p, pl = _payload_or_404(db, pid, payload_id, user, tid)
     name = pl.name
+    audit_tid = p.tenant_id
     repo.delete_payload(db, pl)
-    db.add(AuditLog(actor_id=user.id, action="payload.delete",
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="payload.delete",
                     target=f"pipeline:{pid}", details=f"payload={payload_id} name={name!r}"))
     db.commit()
     return RedirectResponse(f"/pipelines/{pid}", status_code=303)

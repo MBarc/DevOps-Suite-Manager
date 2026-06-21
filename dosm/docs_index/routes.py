@@ -8,13 +8,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
+from dosm.auth.tenancy import (
+    active_tenant_id,
+    require_active_tenant,
+    tenant_clause,
+)
 from dosm.db import get_session
 from dosm.docs_index import applications as folder_repo
 from dosm.docs_index import vault
 from dosm.docs_index.indexer import get_index_status, reindex_async
 from dosm.docs_index.markdown import render as render_markdown
 from dosm.docs_index.search import search as search_docs
-from dosm.models import AuditLog, Document, User
+from dosm.models import AuditLog, Document, Folder, User
 
 router = APIRouter(prefix="/docs")
 
@@ -25,6 +30,29 @@ def _templates(request: Request):
     return request.app.state.templates
 
 
+# Folder (taxonomy) queries are tenant-scoped inline here - the shared
+# folder_repo helpers are tenant-agnostic, so we filter by tenant_id at the
+# call sites that need isolation (None = platform all-tenants read view).
+
+
+def _list_folders(db: Session, tid: int | None) -> list[Folder]:
+    stmt = select(Folder).order_by(Folder.name)
+    clause = tenant_clause(Folder, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    return list(db.execute(stmt).scalars())
+
+
+def _get_folder_by_slug(db: Session, slug: str, tid: int | None) -> Folder | None:
+    # Folder.slug is unique only within a tenant, so a bare slug lookup can
+    # match multiple tenants in the all-tenants view; scope and take the first.
+    stmt = select(Folder).where(Folder.slug == slug)
+    clause = tenant_clause(Folder, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    return db.execute(stmt).scalars().first()
+
+
 # ── Doc list ─────────────────────────────────────────────────────────────────
 
 
@@ -33,15 +61,20 @@ async def docs_home(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    folders = folder_repo.list_folders(db)
+    folders = _list_folders(db, tid)
     counts = {f.id: folder_repo.doc_count(db, f.id) for f in folders}
-    unfiled = list(db.execute(
+    stmt = (
         select(Document)
         .where(Document.folder_id.is_(None))
         .where(~Document.rel_path.startswith("org/"))
         .order_by(Document.rel_path)
-    ).scalars())
+    )
+    clause = tenant_clause(Document, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    unfiled = list(db.execute(stmt).scalars())
     return _templates(request).TemplateResponse(
         request,
         "docs/list.html",
@@ -65,9 +98,10 @@ async def docs_search(
     limit: int = 10,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
-    hits = search_docs(db, cfg, q, limit=limit) if q else []
+    hits = search_docs(db, cfg, q, limit=limit, tid=tid) if q else []
     return _templates(request).TemplateResponse(
         request,
         "docs/search.html",
@@ -84,10 +118,11 @@ async def docs_reindex(
     force: int = 0,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
     reindex_async(cfg, force=bool(force))
-    db.add(AuditLog(actor_id=user.id, action="docs.reindex", target="docs_index", details=f"force={bool(force)}"))
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="docs.reindex", target="docs_index", details=f"force={bool(force)}"))
     db.commit()
     return RedirectResponse("/docs", status_code=303)
 
@@ -114,6 +149,7 @@ async def docs_view(
     request: Request = None,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ) -> Response:
     cfg = request.app.state.config
     try:
@@ -133,7 +169,11 @@ async def docs_view(
 
     _, body = vault.parse_frontmatter(text)
     rendered = render_markdown(body)
-    doc = db.execute(select(Document).where(Document.rel_path == path)).scalar_one_or_none()
+    doc_stmt = select(Document).where(Document.rel_path == path)
+    clause = tenant_clause(Document, tid)
+    if clause is not None:
+        doc_stmt = doc_stmt.where(clause)
+    doc = db.execute(doc_stmt).scalars().first()
     return _templates(request).TemplateResponse(
         request,
         "docs/view.html",
@@ -156,8 +196,9 @@ async def docs_new(
     app: str = "",
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    folders = folder_repo.list_folders(db)
+    folders = _list_folders(db, tid)
     return _templates(request).TemplateResponse(
         request,
         "docs/editor.html",
@@ -180,6 +221,7 @@ async def docs_edit(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
     try:
@@ -190,7 +232,7 @@ async def docs_edit(
         raise HTTPException(404)
     text = target.read_text(encoding="utf-8", errors="replace")
     fm, body = vault.parse_frontmatter(text)
-    folders = folder_repo.list_folders(db)
+    folders = _list_folders(db, tid)
     return _templates(request).TemplateResponse(
         request,
         "docs/editor.html",
@@ -217,11 +259,12 @@ async def docs_save(
     original_mtime: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int = Depends(require_active_tenant),
 ):
     cfg = request.app.state.config
     title = title.strip() or "Untitled"
     app_slug = app_slug.strip() or vault.UNFILED_SLUG
-    folders = folder_repo.list_folders(db)
+    folders = _list_folders(db, tid)
 
     if path:
         # Editing existing doc - save to same path, don't move across folder dirs.
@@ -261,7 +304,7 @@ async def docs_save(
         action = "docs.create"
 
     rel_saved = saved.relative_to(cfg.docs_dir).as_posix()
-    db.add(AuditLog(actor_id=user.id, action=action, target=f"doc:{rel_saved}", details=f"title={title!r}"))
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action=action, target=f"doc:{rel_saved}", details=f"title={title!r}"))
     db.commit()
     reindex_async(cfg, force=False)
     return RedirectResponse(f"/docs/view?path={rel_saved}", status_code=303)
@@ -314,6 +357,7 @@ async def docs_delete(
     path: str = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
     try:
@@ -322,7 +366,7 @@ async def docs_delete(
         raise HTTPException(400, "invalid path")
     except FileNotFoundError:
         raise HTTPException(404)
-    db.add(AuditLog(actor_id=user.id, action="docs.delete", target=f"doc:{path}"))
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="docs.delete", target=f"doc:{path}"))
     db.commit()
     reindex_async(cfg, force=False)
     return RedirectResponse("/docs", status_code=303)
@@ -336,8 +380,9 @@ async def docs_import_form(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    folders = folder_repo.list_folders(db)
+    folders = _list_folders(db, tid)
     return _templates(request).TemplateResponse(
         request,
         "docs/import.html",
@@ -353,8 +398,9 @@ async def docs_import(
     title_override: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    folders = folder_repo.list_folders(db)
+    folders = _list_folders(db, tid)
     app_slug = app_slug.strip() or vault.UNFILED_SLUG
     raw = await file.read()
     if len(raw) > _MAX_UPLOAD_BYTES:
@@ -420,8 +466,9 @@ async def folders_list(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    folder_list = folder_repo.list_folders(db)
+    folder_list = _list_folders(db, tid)
     counts = {f.id: folder_repo.doc_count(db, f.id) for f in folder_list}
     return _templates(request).TemplateResponse(
         request,
@@ -438,18 +485,23 @@ async def folders_create(
     description: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int = Depends(require_active_tenant),
 ):
     name = name.strip()
     slug = slug.strip() or vault.slugify(name)
     if not slug:
         raise HTTPException(400, "slug is required")
     try:
-        folder = folder_repo.create_folder(db, name=name, slug=slug, description=description or None)
-        db.add(AuditLog(actor_id=user.id, action="folder.create", target=f"folder:{slug}"))
+        # Constructed inline (not via folder_repo) so we can set tenant_id; the
+        # shared repo helper is tenant-agnostic.
+        folder = Folder(name=name, slug=slug, description=description or None, tenant_id=tid)
+        db.add(folder)
+        db.flush()
+        db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="folder.create", target=f"folder:{slug}"))
         db.commit()
     except Exception as e:
         db.rollback()
-        folder_list = folder_repo.list_folders(db)
+        folder_list = _list_folders(db, tid)
         counts = {f.id: folder_repo.doc_count(db, f.id) for f in folder_list}
         return _templates(request).TemplateResponse(
             request,
@@ -467,17 +519,20 @@ async def folder_detail(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    folder = folder_repo.get_folder_by_slug(db, slug)
+    folder = _get_folder_by_slug(db, slug, tid)
     if folder is None:
         raise HTTPException(404)
-    docs = list(
-        db.execute(
-            select(Document)
-            .where(Document.folder_id == folder.id)
-            .order_by(Document.rel_path)
-        ).scalars()
+    doc_stmt = (
+        select(Document)
+        .where(Document.folder_id == folder.id)
+        .order_by(Document.rel_path)
     )
+    clause = tenant_clause(Document, tid)
+    if clause is not None:
+        doc_stmt = doc_stmt.where(clause)
+    docs = list(db.execute(doc_stmt).scalars())
     return _templates(request).TemplateResponse(
         request,
         "docs/application_detail.html",
@@ -491,11 +546,13 @@ async def folder_delete(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    folder = folder_repo.get_folder_by_slug(db, slug)
+    folder = _get_folder_by_slug(db, slug, tid)
     if folder is None:
         raise HTTPException(404)
+    audit_tid = folder.tenant_id
     folder_repo.delete_folder(db, folder)
-    db.add(AuditLog(actor_id=user.id, action="folder.delete", target=f"folder:{slug}"))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="folder.delete", target=f"folder:{slug}"))
     db.commit()
     return RedirectResponse("/docs/folders", status_code=303)

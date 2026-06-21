@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_admin, user_has_role
+from dosm.auth.tenancy import active_tenant_id, resolve_tenant_id
 from dosm.db import get_session
 from dosm.models import AuditLog, User
 from dosm.recording.events import (
@@ -54,6 +55,7 @@ async def terminals_runas(
     record: int = Form(1),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
     """Construct an ephemeral wrapped shell and redirect to its session page."""
     cfg = request.app.state.config
@@ -69,6 +71,7 @@ async def terminals_runas(
     token = register_runas(wrapped)
     db.add(
         AuditLog(
+            tenant_id=tid,
             actor_id=user.id,
             action="terminal.runas",
             target=f"shell:{shell_id}",
@@ -141,6 +144,7 @@ async def terminals_ws(
             return
         user_id = user.id
         username = user.username
+        tenant_id = resolve_tenant_id(websocket, user)
 
     cfg = websocket.app.state.config
     shell = find_shell(discover_shells(cfg.terminals, cfg.cli_tools), shell_id)
@@ -175,6 +179,7 @@ async def terminals_ws(
     with Session() as s:
         s.add(
             AuditLog(
+                tenant_id=tenant_id,
                 actor_id=user_id,
                 action="terminal.start",
                 target=f"shell:{shell.id}",
@@ -250,6 +255,7 @@ async def terminals_ws(
         with Session() as s:
             s.add(
                 AuditLog(
+                    tenant_id=tenant_id,
                     actor_id=user_id,
                     action="terminal.end",
                     target=f"shell:{shell.id}",

@@ -40,7 +40,15 @@ def require_user(
 # that used to be copy-pasted into every module; ``user_has_role`` is the plain
 # predicate for places that can't use ``Depends`` (WebSocket handlers).
 
-ROLE_RANK: dict[str, int] = {"viewer": 0, "operator": 1, "admin": 2}
+ROLE_RANK: dict[str, int] = {
+    "viewer": 0,
+    "operator": 1,
+    "admin": 2,
+    # Platform Admin sits above tenant admin: full access across *all* tenants.
+    # Tenant-confined roles (viewer/operator/admin) only ever see their own
+    # tenant; platform_admin is tenant-less and uses the active-tenant switcher.
+    "platform_admin": 3,
+}
 
 
 def user_has_role(user: User | None, minimum: str) -> bool:
@@ -71,8 +79,14 @@ def require_role(minimum: str):
 
 
 # Convenience dependencies for the common gates.
+require_platform_admin = require_role("platform_admin")
 require_admin = require_role("admin")
 require_operator = require_role("operator")
+
+
+def is_platform_admin(user: User | None) -> bool:
+    """True if ``user`` is a tenant-less platform administrator."""
+    return user_has_role(user, "platform_admin")
 
 
 class _NotAuthenticated(HTTPException):

@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_admin
+from dosm.auth.tenancy import active_tenant_id, tenant_clause
 from dosm.db import get_session
 from dosm.ftp.base import FileTransferError
 from dosm.ftp.service import (
@@ -38,9 +39,9 @@ def _templates(request: Request):
     return request.app.state.templates
 
 
-def _load_host(db: Session, host_id: int) -> Host:
+def _load_host(db: Session, host_id: int, tid: int | None) -> Host:
     host = db.get(Host, host_id)
-    if host is None:
+    if host is None or (tid is not None and host.tenant_id != tid):
         raise HTTPException(404, "host not found")
     if not host_has_file_transfer(host):
         raise HTTPException(
@@ -61,13 +62,18 @@ async def index(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    hosts = db.execute(
+    stmt = (
         select(Host)
         .where(Host.ft_method.isnot(None))
         .where(Host.ft_method != "")
         .order_by(Host.name)
-    ).scalars().all()
+    )
+    clause = tenant_clause(Host, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    hosts = db.execute(stmt).scalars().all()
     return _templates(request).TemplateResponse(
         request, "ftp/index.html", {"hosts": hosts, "user": user}
     )
@@ -80,8 +86,9 @@ async def browser(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = _load_host(db, host_id)
+    host = _load_host(db, host_id, tid)
     return _templates(request).TemplateResponse(
         request, "ftp/browser.html", {"host": host, "user": user}
     )
@@ -95,8 +102,9 @@ async def list_dir(
     path: str = "",
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = _load_host(db, host_id)
+    host = _load_host(db, host_id, tid)
     backend = get_file_backend(request.app.state.config, db, host)
     try:
         entries = await backend.list_dir(path)
@@ -121,8 +129,9 @@ async def download(
     path: str,
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = _load_host(db, host_id)
+    host = _load_host(db, host_id, tid)
     backend = get_file_backend(request.app.state.config, db, host)
     spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
     try:
@@ -134,6 +143,7 @@ async def download(
     size = spool.tell()
     spool.seek(0)
     db.add(AuditLog(
+        tenant_id=host.tenant_id,
         actor_id=user.id, action="host.files.download",
         target=f"host:{host_id}", details=f"path={path} bytes={size}",
     ))
@@ -169,8 +179,9 @@ async def upload(
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = _load_host(db, host_id)
+    host = _load_host(db, host_id, tid)
     backend = get_file_backend(request.app.state.config, db, host)
     dest = _join(path, file.filename or "upload.bin")
     try:
@@ -178,6 +189,7 @@ async def upload(
     except FileTransferError as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     db.add(AuditLog(
+        tenant_id=host.tenant_id,
         actor_id=user.id, action="host.files.upload",
         target=f"host:{host_id}", details=f"path={dest} bytes={sent}",
     ))
@@ -194,8 +206,9 @@ async def mkdir(
     name: str = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = _load_host(db, host_id)
+    host = _load_host(db, host_id, tid)
     backend = get_file_backend(request.app.state.config, db, host)
     target = _join(path, name.strip())
     try:
@@ -203,6 +216,7 @@ async def mkdir(
     except FileTransferError as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     db.add(AuditLog(
+        tenant_id=host.tenant_id,
         actor_id=user.id, action="host.files.mkdir",
         target=f"host:{host_id}", details=f"path={target}",
     ))
@@ -219,8 +233,9 @@ async def delete(
     is_dir: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = _load_host(db, host_id)
+    host = _load_host(db, host_id, tid)
     backend = get_file_backend(request.app.state.config, db, host)
     try:
         if is_dir:
@@ -230,6 +245,7 @@ async def delete(
     except FileTransferError as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     db.add(AuditLog(
+        tenant_id=host.tenant_id,
         actor_id=user.id, action="host.files.delete",
         target=f"host:{host_id}", details=f"path={path} dir={bool(is_dir)}",
     ))
@@ -247,8 +263,9 @@ async def rename(
     dst: str = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = _load_host(db, host_id)
+    host = _load_host(db, host_id, tid)
     backend = get_file_backend(request.app.state.config, db, host)
     src_path = _join(path, src)
     dst_path = _join(path, dst.strip())
@@ -257,6 +274,7 @@ async def rename(
     except FileTransferError as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     db.add(AuditLog(
+        tenant_id=host.tenant_id,
         actor_id=user.id, action="host.files.rename",
         target=f"host:{host_id}", details=f"{src_path} -> {dst_path}",
     ))
@@ -270,15 +288,20 @@ async def copy_targets(
     host_id: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
     """Other hosts (besides this one) that have file transfer configured."""
-    hosts = db.execute(
+    stmt = (
         select(Host)
         .where(Host.ft_method.isnot(None))
         .where(Host.ft_method != "")
         .where(Host.id != host_id)
         .order_by(Host.name)
-    ).scalars().all()
+    )
+    clause = tenant_clause(Host, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    hosts = db.execute(stmt).scalars().all()
     return JSONResponse({
         "targets": [{"id": h.id, "name": h.name, "method": h.ft_method} for h in hosts]
     })
@@ -294,9 +317,10 @@ async def copy_to_host(
     move: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    src_host = _load_host(db, host_id)
-    dst_host = _load_host(db, dst_host_id)
+    src_host = _load_host(db, host_id, tid)
+    dst_host = _load_host(db, dst_host_id, tid)
     basename = src.rsplit("/", 1)[-1]
     if not basename:
         return JSONResponse({"error": "source is not a file"}, status_code=400)
@@ -310,6 +334,7 @@ async def copy_to_host(
     except FileTransferError as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     db.add(AuditLog(
+        tenant_id=src_host.tenant_id,
         actor_id=user.id,
         action="host.files.move" if is_move else "host.files.copy",
         target=f"host:{host_id}",

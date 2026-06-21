@@ -23,6 +23,32 @@ class Base(DeclarativeBase):
     pass
 
 
+# ---- Tenants (multi-tenancy) ----------------------------------------------
+
+
+class Tenant(Base):
+    """An isolated workspace. Every operational row (hosts, credentials, docs,
+    pipelines, monitoring, etc.) belongs to exactly one tenant and is invisible
+    to other tenants. ``platform_admin`` users are tenant-less (``User.tenant_id``
+    NULL) and can act across all tenants via an active-tenant switcher."""
+
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Tenant {self.slug}>"
+
+
+# Slug of the tenant created on first upgrade to hold all pre-multi-tenant data.
+DEFAULT_TENANT_SLUG = "default"
+
+
 # ---- Users / auth ---------------------------------------------------------
 
 
@@ -35,6 +61,15 @@ class User(Base):
     # (``!okta``) so the column stays NOT NULL without a SQLite ALTER.
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="operator")
+    # Multi-tenancy: the tenant this user belongs to. NULL means platform-level
+    # (a ``platform_admin`` who is not confined to any single tenant). Username
+    # stays globally unique because the login form carries no tenant context.
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Per-user role override. When True, the role was pinned manually by an
+    # admin and the Okta login flow must NOT recompute it from group claims.
+    role_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # SSO identity. ``auth_provider`` is ``local`` (default) or ``okta``;
     # ``okta_sub`` is the Okta subject claim (stable per user), unique when set.
@@ -60,9 +95,15 @@ host_tags = None  # placeholder to satisfy any tooling; real join defined below
 
 class Tag(Base):
     __tablename__ = "tags"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_tag_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
 
 class HostTag(Base):
@@ -74,9 +115,15 @@ class HostTag(Base):
 
 class Credential(Base):
     __tablename__ = "credentials"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_credential_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     kind: Mapped[str] = mapped_column(String(32), nullable=False)  # login | ssh_key | pat
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -102,9 +149,15 @@ class CertSource(Base):
     identity (``auth_mode='ambient'`` - managed identity / instance role)."""
 
     __tablename__ = "cert_sources"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_cert_source_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     # Non-secret provider config as JSON: vault_url / region / project+location.
     config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
@@ -125,9 +178,15 @@ class CertSource(Base):
 
 class Host(Base):
     __tablename__ = "hosts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_host_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
     protocol: Mapped[str] = mapped_column(String(16), nullable=False, default="ssh")  # ssh | rdp | vnc
@@ -151,6 +210,14 @@ class Host(Base):
         ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
     )
 
+    # 3-tier organisation: application -> environment -> (optional) unit. A host
+    # points at its *deepest* assigned node (an application, an environment, or a
+    # unit); the tree is walked to roll hosts up to coarser tiers. SET NULL so
+    # deleting an org node only unassigns hosts, never deletes them.
+    org_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("org_units.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -158,6 +225,9 @@ class Host(Base):
 
     credential: Mapped[Credential | None] = relationship(
         "Credential", foreign_keys=lambda: [Host.credential_id]
+    )
+    org_unit: Mapped[OrgUnit | None] = relationship(
+        "OrgUnit", foreign_keys=lambda: [Host.org_unit_id], lazy="selectin"
     )
     ft_credential: Mapped[Credential | None] = relationship(
         "Credential", foreign_keys=lambda: [Host.ft_credential_id]
@@ -173,6 +243,69 @@ class Host(Base):
     )
 
 
+class OrgUnit(Base):
+    """A node in the 3-tier host organisation tree.
+
+    ``tier`` is one of ``application`` (top), ``environment`` (dev/test/prod/dr),
+    or ``unit`` (an optional extra division such as a region: US/EU/AU). The
+    hierarchy is enforced in the repo layer: an application has no parent, an
+    environment's parent is an application, a unit's parent is an environment.
+    Self-referencing like ``Department``/``Host.jump_host``; deleting a node
+    cascades to its descendants (and SET NULLs the ``Host.org_unit_id`` of any
+    hosts that pointed at the removed nodes).
+    """
+
+    __tablename__ = "org_units"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "parent_id", "name", name="uq_org_unit_parent_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    tier: Mapped[str] = mapped_column(String(16), nullable=False)  # application | environment | unit
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("org_units.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    parent: Mapped[OrgUnit | None] = relationship(
+        "OrgUnit",
+        back_populates="children",
+        remote_side=lambda: [OrgUnit.id],
+        foreign_keys=lambda: [OrgUnit.parent_id],
+    )
+    children: Mapped[list[OrgUnit]] = relationship(
+        "OrgUnit",
+        back_populates="parent",
+        foreign_keys=lambda: [OrgUnit.parent_id],
+        cascade="all, delete-orphan",
+        order_by="OrgUnit.name",
+    )
+
+    @property
+    def path(self) -> list[OrgUnit]:
+        """Nodes from the root application down to (and including) self."""
+        chain: list[OrgUnit] = []
+        cur: OrgUnit | None = self
+        while cur is not None:
+            chain.append(cur)
+            cur = cur.parent
+        chain.reverse()
+        return chain
+
+    @property
+    def path_str(self) -> str:
+        return " / ".join(n.name for n in self.path)
+
+
 # ---- Organization graph ---------------------------------------------------
 
 
@@ -186,10 +319,17 @@ class Department(Base):
     """
 
     __tablename__ = "departments"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_department_tenant_name"),
+        UniqueConstraint("tenant_id", "slug", name="uq_department_tenant_slug"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
-    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # AD group - what binds this dept to a real-world group of people.
@@ -279,19 +419,32 @@ class Folder(Base):
     """Taxonomy label that groups related documentation (e.g. 'Service Fabric', 'Dynatrace')."""
 
     __tablename__ = "applications"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_folder_tenant_name"),
+        UniqueConstraint("tenant_id", "slug", name="uq_folder_tenant_slug"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
-    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "rel_path", name="uq_document_tenant_relpath"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    rel_path: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    rel_path: Mapped[str] = mapped_column(String(512), nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     modified_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -330,6 +483,9 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -409,9 +565,15 @@ class Pipeline(Base):
     """
 
     __tablename__ = "pipelines"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_pipeline_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="github_actions")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     config: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
@@ -490,9 +652,15 @@ class MonitoringSource(Base):
     columns here hold only the path references."""
 
     __tablename__ = "monitoring_sources"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_monitoring_source_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     tool: Mapped[str] = mapped_column(String(32), nullable=False)
     # dynatrace: base URL  |  datadog: site (e.g. datadoghq.com)  |  servicenow: base URL
     url: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -558,6 +726,11 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    # Tenant the action occurred within. NULL for platform-level events
+    # (tenant CRUD, login-deny before a user/tenant is resolved).
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     actor_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -573,6 +746,9 @@ class RecordingSession(Base):
     __tablename__ = "recording_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -609,6 +785,9 @@ class NetworkScan(Base):
     __tablename__ = "network_scans"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     title: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     # pending | running | completed | failed
@@ -655,6 +834,8 @@ class NetworkScanResult(Base):
 
 __all__ = [
     "Base",
+    "Tenant",
+    "DEFAULT_TENANT_SLUG",
     "User",
     "Department",
     "DepartmentMember",

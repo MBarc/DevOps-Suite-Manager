@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from sqlalchemy import or_
 
+from dosm.auth.deps import user_has_role
 from dosm.models import PipelinePayload, User
 
 
 def _is_admin(user: User | None) -> bool:
-    return user is not None and user.role == "admin"
+    # admin OR platform_admin - both get the unrestricted visibility view
+    # (payloads are tenant-scoped via their parent pipeline, not here).
+    return user_has_role(user, "admin")
 
 
 def can_see_payload(user: User | None, payload: PipelinePayload) -> bool:

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dosm.agent.actions import classify_command, get_action
+from dosm.agent.queries import agent_tenant
 from dosm.auth.deps import require_operator
 from dosm.db import get_session, session_scope
 from dosm.models import AuditLog, ChatMessage, Conversation, PlanCard, User
@@ -164,7 +165,10 @@ async def plan_approve(
     db.commit()
 
     try:
-        result = await spec.runner(cfg, args)
+        # Scope the action to the conversation's tenant so the agent only
+        # touches that tenant's hosts/credentials/pipelines/monitoring.
+        with agent_tenant(conv.tenant_id):
+            result = await spec.runner(cfg, args)
     except Exception as e:
         from dosm.agent.actions import ActionResult
 
@@ -216,6 +220,7 @@ async def plan_approve_group(
     conv = db.get(Conversation, cid)
     if conv is None or conv.user_id != user.id:
         raise HTTPException(404)
+    conv_tenant_id = conv.tenant_id  # capture before later commits expire it
 
     pending_cards = list(
         db.execute(
@@ -270,7 +275,8 @@ async def plan_approve_group(
             user.id, plan_tool, "approved", args.get("host"), args.get("command")
         )
         try:
-            result = await spec.runner(cfg, args)
+            with agent_tenant(conv_tenant_id):
+                result = await spec.runner(cfg, args)
         except Exception as e:
             from dosm.agent.actions import ActionResult
 

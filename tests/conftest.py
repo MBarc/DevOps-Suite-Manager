@@ -11,21 +11,27 @@ from dosm.config import Config, DocsIndexConfig, PipelinesConfig, RecordingConfi
 from dosm.models import (
     AuditLog,
     Base,
+    CertSource,
     ChatMessage,
     Conversation,
     Credential,
+    Department,
+    DepartmentMember,
     DocChunk,
     Document,
     Folder,
     Host,
     HostTag,
     MonitoringSource,
+    NetworkScan,
+    OrgUnit,
     Pipeline,
     PipelinePayload,
     PipelineRun,
     PlanCard,
     RecordingSession,
     Tag,
+    Tenant,
     User,
 )
 
@@ -89,23 +95,37 @@ def app(test_config, db_engine, session_factory):
 
 
 @pytest.fixture(scope="session")
-def admin_user(session_factory):
+def default_tenant(session_factory):
+    """The Default tenant created by ``run_migrations`` - the home of the test
+    admin and the tenant most single-tenant tests operate within."""
+    with session_factory() as s:
+        t = s.execute(
+            text("SELECT id FROM tenants WHERE slug = 'default'")
+        ).scalar_one()
+        return {"id": int(t), "slug": "default"}
+
+
+@pytest.fixture(scope="session")
+def admin_user(session_factory, default_tenant):
     with session_factory() as s:
         user = User(
             username="testadmin",
             password_hash=hash_password("testpass"),
             role="admin",
+            tenant_id=default_tenant["id"],
             is_active=True,
         )
         s.add(user)
         s.commit()
         s.refresh(user)
-        return {"id": user.id, "username": user.username}
+        return {"id": user.id, "username": user.username, "tenant_id": user.tenant_id}
 
 
 @pytest.fixture(autouse=True)
-def clean_tables(session_factory, admin_user):
-    """Wipe all rows (except the test admin user) after every test."""
+def clean_tables(session_factory, admin_user, default_tenant):
+    """Wipe all rows after every test, preserving the test admin and the
+    Default tenant (and any other session-scoped tenants/users created by
+    isolation-test fixtures, which manage their own teardown)."""
     yield
     with session_factory() as s:
         for model in [
@@ -122,6 +142,11 @@ def clean_tables(session_factory, admin_user):
             HostTag,
             Host,
             Credential,
+            CertSource,
+            DepartmentMember,
+            Department,
+            OrgUnit,
+            NetworkScan,
             MonitoringSource,
             RecordingSession,
             Tag,

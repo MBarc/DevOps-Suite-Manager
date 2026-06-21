@@ -71,16 +71,19 @@ def ftps(tmp_path):
 def _make_host(session_factory, test_config, *, port, method, username, password,
                name, jump_host_id=None):
     """Create an ssh host with file transfer configured via ft_* fields."""
+    from sqlalchemy import text
+
     with session_factory() as s:
+        tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
         ref = f"ftp/{name}"
         get_backend(test_config).set_str(ref, password)
         cred = Credential(name=f"cred-{name}", kind="login", username=username,
-                          secret_ref=ref)
+                          secret_ref=ref, tenant_id=tid)
         s.add(cred)
         s.flush()
         host = Host(name=name, hostname="127.0.0.1", port=22, protocol="ssh",
                     credential_id=cred.id, jump_host_id=jump_host_id,
-                    ft_method=method, ft_port=port)
+                    ft_method=method, ft_port=port, tenant_id=tid)
         s.add(host)
         s.commit()
         return host.id
@@ -134,8 +137,10 @@ def test_non_admin_is_forbidden(app, session_factory, test_config, ftps):
                      username="ftpuser", password="ftppw", name="ftps-gate")
     with session_factory() as s:
         if not s.execute(select(User).where(User.username == "ftp-operator")).scalar_one_or_none():
+            from sqlalchemy import text
+            tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
             s.add(User(username="ftp-operator", password_hash=hash_password("pw"),
-                       role="operator", is_active=True))
+                       role="operator", tenant_id=tid, is_active=True))
             s.commit()
     c = TestClient(app)
     c.post("/login", data={"username": "ftp-operator", "password": "pw", "next": "/"},
@@ -174,7 +179,9 @@ def test_host_form_sets_and_clears_file_transfer(auth_client, session_factory):
 
 def test_non_file_transfer_host_rejected(auth_client, session_factory, test_config):
     with session_factory() as s:
-        host = Host(name="ssh-only", hostname="10.0.0.9", port=22, protocol="ssh")
+        from sqlalchemy import text
+        tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+        host = Host(name="ssh-only", hostname="10.0.0.9", port=22, protocol="ssh", tenant_id=tid)
         s.add(host)
         s.commit()
         hid = host.id
@@ -276,17 +283,19 @@ def test_ftps_through_ssh_jump(session_factory, test_config, ftps):
         jump_srv, jump_port = await start_jump()
         try:
             with session_factory() as s:
+                from sqlalchemy import text
+                tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
                 get_backend(test_config).set_str("ftp/test", "ftppw")
                 cred = Credential(name="cred-jump", kind="login", username="ftpuser",
-                                  secret_ref="ftp/test")
+                                  secret_ref="ftp/test", tenant_id=tid)
                 s.add(cred)
                 jump = Host(name="jumpbox", hostname="127.0.0.1", port=jump_port,
-                            protocol="ssh", is_jumpbox=True)
+                            protocol="ssh", is_jumpbox=True, tenant_id=tid)
                 s.add(jump)
                 s.flush()
                 target = Host(name="ftps-jumped", hostname="127.0.0.1", port=22,
                               protocol="ssh", credential_id=cred.id, jump_host_id=jump.id,
-                              ft_method="ftps", ft_port=srv.port)
+                              ft_method="ftps", ft_port=srv.port, tenant_id=tid)
                 s.add(target)
                 s.commit()
                 tid = target.id

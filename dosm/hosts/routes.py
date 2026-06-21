@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dosm.applications import repo as org_repo
 from dosm.auth.deps import require_operator, require_user
 from dosm.auth.prefs import get_pref, set_pref
+from dosm.auth.tenancy import active_tenant_id, require_active_tenant
 from dosm.credentials.access import visible_credentials
 from dosm.db import get_session
 from dosm.hosts import repo
@@ -59,13 +61,26 @@ def _port_options(db: Session) -> list[tuple[int, str]]:
     return sorted(labels.items())
 
 
-def _form_context(db: Session, user: User, host=None, error: str | None = None) -> dict:
+def _org_units_payload(db: Session, tid: int | None) -> list[dict]:
+    """Flat list of org units for the host form's cascading picker. The form's
+    JS rebuilds the application -> environment -> unit selects from this."""
+    return [
+        {"id": u.id, "name": u.name, "tier": u.tier, "parent_id": u.parent_id}
+        for u in org_repo.list_units(db, tid)
+    ]
+
+
+def _form_context(db: Session, user: User, tid: int | None, host=None,
+                  error: str | None = None,
+                  preset_org_unit_id: int | None = None) -> dict:
     port_opts = _port_options(db)
     return {
         "host": host,
-        "credentials": visible_credentials(db, user),
+        "org_units": _org_units_payload(db, tid),
+        "preset_org_unit_id": preset_org_unit_id,
+        "credentials": visible_credentials(db, user, tid),
         "jump_candidates": repo.list_jump_candidates(
-            db, exclude_host_id=host.id if host else None
+            db, tid, exclude_host_id=host.id if host else None
         ),
         "protocols": list(repo.SUPPORTED_PROTOCOLS),
         "default_ports": PROTOCOL_DEFAULT_PORTS,
@@ -83,9 +98,38 @@ async def hosts_list(
     request: Request,
     kind: str = "",
     tag: str = "",
+    org_unit_id: str = "",
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
+    ou_id = _parse_int_or_none(org_unit_id)
+    # View mode (explorer tree+detail, or the classic flat table) is a per-user
+    # pref; an explicit ?view= persists, a bare /hosts visit restores it.
+    view = request.query_params.get("view", "")
+    if view in ("explorer", "table"):
+        set_pref(db, user, "hosts_view", view)
+    else:
+        view = get_pref(user, "hosts_view", "explorer") or "explorer"
+    if view not in ("explorer", "table"):
+        view = "explorer"
+
+    if view == "explorer":
+        hosts = repo.list_hosts(db, tid=tid)  # all hosts; explorer filters client-side
+        tree = org_repo.build_tree(db, tid)
+        n_unassigned = sum(1 for h in hosts if h.org_unit_id is None)
+        return _templates(request).TemplateResponse(
+            request, "hosts/explorer.html", {
+                "hosts": hosts,
+                "tree": tree,
+                "n_total": len(hosts),
+                "n_unassigned": n_unassigned,
+                "initial_org_unit_id": ou_id,
+                "user": user,
+                "guacamole_enabled": request.app.state.config.guacamole.enabled,
+            }
+        )
+
     # Remember the host-kind filter per user: an explicit ?kind= is persisted as
     # a personal pref; a bare /hosts visit restores the last choice.
     if "kind" in request.query_params:
@@ -96,11 +140,16 @@ async def hosts_list(
         kind = get_pref(user, "hosts_kind", "") or ""
     if kind not in ("", "servers", "jumpboxes"):
         kind = ""
-    hosts = repo.list_hosts(db, kind=kind or None, tag=tag or None)
-    credentials = visible_credentials(db, user)
-    jump_candidates = repo.list_jump_candidates(db)
-    n_servers, n_jumpboxes = repo.count_by_kind(db)
-    all_tags = repo.list_tags(db)
+    hosts = repo.list_hosts(db, tid=tid, kind=kind or None, tag=tag or None, org_unit_id=ou_id)
+    org_filter_options = [
+        {"id": u.id, "label": u.path_str, "tier": u.tier}
+        for u in sorted(org_repo.list_units(db, tid), key=lambda u: u.path_str.lower())
+    ]
+    selected_org_unit = org_repo.get_unit(db, ou_id, tid) if ou_id else None
+    credentials = visible_credentials(db, user, tid)
+    jump_candidates = repo.list_jump_candidates(db, tid)
+    n_servers, n_jumpboxes = repo.count_by_kind(db, tid)
+    all_tags = repo.list_tags(db, tid)
     port_opts = _port_options(db)
     return _templates(request).TemplateResponse(
         request, "hosts/list.html", {
@@ -114,6 +163,9 @@ async def hosts_list(
             "port_numbers": [n for n, _ in port_opts],
             "kind": kind,
             "tag": tag,
+            "org_unit_id": ou_id,
+            "org_filter_options": org_filter_options,
+            "selected_org_unit": selected_org_unit,
             "all_tags": all_tags,
             "n_total": n_servers + n_jumpboxes,
             "n_servers": n_servers,
@@ -127,11 +179,17 @@ async def hosts_list(
 @router.get("/new", response_class=HTMLResponse, include_in_schema=False)
 async def hosts_new(
     request: Request,
+    org_unit_id: str = "",
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
+    # "Add host here" from the explorer prefills the org placement.
+    preset = _parse_int_or_none(org_unit_id)
+    if preset is not None and org_repo.get_unit(db, preset, tid) is None:
+        preset = None
     return _templates(request).TemplateResponse(
-        request, "hosts/form.html", _form_context(db, user)
+        request, "hosts/form.html", _form_context(db, user, tid, preset_org_unit_id=preset)
     )
 
 
@@ -188,14 +246,17 @@ async def hosts_create(
     ft_method: str = Form(""),
     ft_port: str = Form(""),
     ft_credential_id: str = Form(""),
+    org_unit_id: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int = Depends(require_active_tenant),
 ):
     cred_id = _parse_int_or_none(credential_id)
     jump_id = _parse_int_or_none(jump_host_id)
     try:
         host = repo.create_host(
             db,
+            tenant_id=tid,
             name=name.strip(),
             hostname=hostname.strip(),
             port=port,
@@ -208,13 +269,14 @@ async def hosts_create(
             ft_method=ft_method or None,
             ft_port=_parse_int_or_none(ft_port),
             ft_credential_id=_parse_int_or_none(ft_credential_id),
+            org_unit_id=_parse_int_or_none(org_unit_id),
         )
     except IntegrityError as e:
         db.rollback()
         return _templates(request).TemplateResponse(
             request,
             "hosts/form.html",
-            _form_context(db, user, host=None, error=_friendly_integrity_error(e)),
+            _form_context(db, user, tid, host=None, error=_friendly_integrity_error(e)),
             status_code=400,
         )
     except HostValidationError as e:
@@ -222,11 +284,12 @@ async def hosts_create(
         return _templates(request).TemplateResponse(
             request,
             "hosts/form.html",
-            _form_context(db, user, host=None, error=str(e)),
+            _form_context(db, user, tid, host=None, error=str(e)),
             status_code=400,
         )
     db.add(
         AuditLog(
+            tenant_id=tid,
             actor_id=user.id,
             action="host.create",
             target=f"host:{host.id}",
@@ -246,8 +309,9 @@ async def hosts_detail(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = repo.get_host(db, host_id)
+    host = repo.get_host(db, host_id, tid)
     if host is None:
         raise HTTPException(404)
     chain = repo.resolve_jump_chain(db, host)
@@ -262,6 +326,7 @@ async def hosts_ping(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ) -> JSONResponse:
     """TCP-probe ``host.hostname:host.port``, traversing the configured jump
     chain when present. This is a network reachability check on the protocol
@@ -269,7 +334,7 @@ async def hosts_ping(
     operator actually cares about is "can I reach the service through the
     jumps I configured."
     """
-    host = repo.get_host(db, host_id)
+    host = repo.get_host(db, host_id, tid)
     if host is None:
         raise HTTPException(404)
     cfg = request.app.state.config
@@ -405,12 +470,13 @@ async def hosts_edit(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = repo.get_host(db, host_id)
+    host = repo.get_host(db, host_id, tid)
     if host is None:
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
-        request, "hosts/form.html", _form_context(db, user, host=host)
+        request, "hosts/form.html", _form_context(db, user, tid, host=host)
     )
 
 
@@ -430,11 +496,13 @@ async def hosts_update(
     ft_method: str = Form(""),
     ft_port: str = Form(""),
     ft_credential_id: str = Form(""),
+    org_unit_id: str = Form(""),
     back: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = repo.get_host(db, host_id)
+    host = repo.get_host(db, host_id, tid)
     if host is None:
         raise HTTPException(404)
     cred_id = _parse_int_or_none(credential_id)
@@ -455,13 +523,14 @@ async def hosts_update(
             ft_method=ft_method or None,
             ft_port=_parse_int_or_none(ft_port),
             ft_credential_id=_parse_int_or_none(ft_credential_id),
+            org_unit_id=_parse_int_or_none(org_unit_id),
         )
     except IntegrityError as e:
         db.rollback()
         return _templates(request).TemplateResponse(
             request,
             "hosts/form.html",
-            _form_context(db, user, host=host, error=_friendly_integrity_error(e)),
+            _form_context(db, user, tid, host=host, error=_friendly_integrity_error(e)),
             status_code=400,
         )
     except HostValidationError as e:
@@ -469,10 +538,11 @@ async def hosts_update(
         return _templates(request).TemplateResponse(
             request,
             "hosts/form.html",
-            _form_context(db, user, host=host, error=str(e)),
+            _form_context(db, user, tid, host=host, error=str(e)),
             status_code=400,
         )
-    db.add(AuditLog(actor_id=user.id, action="host.update", target=f"host:{host.id}"))
+    db.add(AuditLog(tenant_id=host.tenant_id, actor_id=user.id,
+                    action="host.update", target=f"host:{host.id}"))
     db.commit()
     redirect_to = "/hosts" if back == "list" else f"/hosts/{host.id}"
     return RedirectResponse(redirect_to, status_code=303)
@@ -483,11 +553,45 @@ async def hosts_delete(
     host_id: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    host = repo.get_host(db, host_id)
+    host = repo.get_host(db, host_id, tid)
     if host is None:
         raise HTTPException(404)
+    audit_tid = host.tenant_id
     repo.delete_host(db, host)
-    db.add(AuditLog(actor_id=user.id, action="host.delete", target=f"host:{host_id}"))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id,
+                    action="host.delete", target=f"host:{host_id}"))
     db.commit()
     return RedirectResponse("/hosts", status_code=303)
+
+
+@router.post("/{host_id}/assign-org", include_in_schema=False)
+async def hosts_assign_org(
+    host_id: int,
+    org_unit_id: str = Form(""),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
+) -> JSONResponse:
+    """Reassign a host's org placement - the explorer's drag-and-drop onto a
+    folder. An empty ``org_unit_id`` clears the assignment (drop on Unassigned).
+    Returns JSON so the UI can update the card + counts in place."""
+    host = repo.get_host(db, host_id, tid)
+    if host is None:
+        raise HTTPException(404)
+    oid = _parse_int_or_none(org_unit_id)
+    try:
+        org_repo.assign_host(db, host, oid)
+    except org_repo.OrgValidationError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    unit = org_repo.get_unit(db, oid, host.tenant_id) if oid else None
+    path = unit.path_str if unit else None
+    db.add(AuditLog(
+        tenant_id=host.tenant_id,
+        actor_id=user.id, action="host.update", target=f"host:{host.id}",
+        details=f"org-assign -> {path or 'unassigned'}",
+    ))
+    db.commit()
+    return JSONResponse({"ok": True, "org_unit_id": oid, "path": path})

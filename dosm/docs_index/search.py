@@ -52,13 +52,18 @@ def _snippet(text: str, query: str) -> str:
     return prefix + t[start:end].strip() + suffix
 
 
-def _like_search(db: Session, query: str, limit: int, *, exclude_org: bool = True) -> list[SearchHit]:
+def _like_search(
+    db: Session, query: str, limit: int, *, exclude_org: bool = True, tid: int | None = None
+) -> list[SearchHit]:
     q = f"%{query}%"
     stmt = select(DocChunk, Document).join(Document, Document.id == DocChunk.doc_id).where(
         or_(DocChunk.text.ilike(q), Document.rel_path.ilike(q))
     )
     if exclude_org:
         stmt = stmt.where(~Document.rel_path.startswith("org/"))
+    # DocChunk has no tenant_id; restrict via its parent Document's tenant.
+    if tid is not None:
+        stmt = stmt.where(Document.tenant_id == tid)
     stmt = stmt.limit(limit)
     hits: list[SearchHit] = []
     for chunk, doc in db.execute(stmt).all():
@@ -78,7 +83,8 @@ def _like_search(db: Session, query: str, limit: int, *, exclude_org: bool = Tru
 
 
 def _vector_search(
-    db: Session, embedder: Embedder, query: str, limit: int, *, exclude_org: bool = True
+    db: Session, embedder: Embedder, query: str, limit: int, *, exclude_org: bool = True,
+    tid: int | None = None,
 ) -> list[SearchHit]:
     qvec = embedder.embed_query(query)  # (dim,)
 
@@ -90,6 +96,9 @@ def _vector_search(
     )
     if exclude_org:
         stmt = stmt.where(~Document.rel_path.startswith("org/"))
+    # DocChunk has no tenant_id; restrict via its parent Document's tenant.
+    if tid is not None:
+        stmt = stmt.where(Document.tenant_id == tid)
     rows = db.execute(stmt).all()
     if not rows:
         return []
@@ -120,7 +129,8 @@ def _vector_search(
 
 
 def search(
-    db: Session, cfg: Config, query: str, *, limit: int = 10, exclude_org: bool = True
+    db: Session, cfg: Config, query: str, *, limit: int = 10, exclude_org: bool = True,
+    tid: int | None = None,
 ) -> list[SearchHit]:
     """Vector search if we have an embedder + embedded chunks; else LIKE.
 
@@ -131,17 +141,21 @@ def search(
     exclude_org: hide org/* documents from human-facing searches; pass
     False when calling from the agent's search_docs query tool so it can
     still answer "who do I email about X" from synced org data.
+
+    tid: tenant scope. ``None`` is the platform-admin all-tenants read view
+    (no tenant filter); a concrete id restricts hits to documents in that
+    tenant (DocChunk has no tenant_id, so it is filtered via its Document).
     """
     query = (query or "").strip()
     if not query:
         return []
     embedder = _get_embedder(cfg, block=False)
     if isinstance(embedder, NoEmbedder):
-        return _like_search(db, query, limit, exclude_org=exclude_org)
+        return _like_search(db, query, limit, exclude_org=exclude_org, tid=tid)
     try:
-        hits = _vector_search(db, embedder, query, limit, exclude_org=exclude_org)
+        hits = _vector_search(db, embedder, query, limit, exclude_org=exclude_org, tid=tid)
         if hits:
             return hits
     except Exception:
         pass
-    return _like_search(db, query, limit, exclude_org=exclude_org)
+    return _like_search(db, query, limit, exclude_org=exclude_org, tid=tid)

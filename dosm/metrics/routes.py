@@ -6,6 +6,7 @@ import json
 from fastapi import APIRouter, WebSocket
 from sqlalchemy.orm import sessionmaker
 
+from dosm.auth.tenancy import resolve_tenant_id
 from dosm.db import get_engine
 from dosm.metrics.sources import (
     LocalSource,
@@ -48,6 +49,14 @@ async def metrics_ws(
             host = s.get(Host, host_id)
             user = s.get(User, uid)
             if host is None or user is None or not user.is_active:
+                await websocket.close(code=4404)
+                return
+            # Tenant scope: a user must not stream metrics for another tenant's
+            # host. Platform admins with an active tenant are confined to it;
+            # with no active tenant (all-tenants view) tid is None and any host
+            # is allowed (read-only overview).
+            tid = resolve_tenant_id(websocket, user)
+            if tid is not None and host.tenant_id != tid:
                 await websocket.close(code=4404)
                 return
             try:

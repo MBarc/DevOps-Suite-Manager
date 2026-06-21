@@ -24,9 +24,11 @@ def _reset_rbac(test_config):
 
 def _operator_client(app, session_factory):
     with session_factory() as s:
-        from sqlalchemy import select
+        from sqlalchemy import select, text
         if s.execute(select(User).where(User.username == "rbacop")).scalar_one_or_none() is None:
-            s.add(User(username="rbacop", password_hash=hash_password("pw"), role="operator", is_active=True))
+            tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+            s.add(User(username="rbacop", password_hash=hash_password("pw"), role="operator",
+                       tenant_id=tid, is_active=True))
             s.commit()
     c = TestClient(app, raise_server_exceptions=True)
     c.post("/login", data={"username": "rbacop", "password": "pw", "next": "/"}, follow_redirects=False)

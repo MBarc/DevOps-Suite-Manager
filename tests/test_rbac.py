@@ -8,6 +8,12 @@ from dosm.auth.passwords import hash_password
 from dosm.models import Credential, User
 
 
+def _default_tid(s):
+    from sqlalchemy import text
+
+    return s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+
+
 def _ensure_user(session_factory, username: str, role: str) -> int:
     """Create (or fetch) a local user with a known password 'testpass'."""
     from sqlalchemy import select
@@ -19,6 +25,7 @@ def _ensure_user(session_factory, username: str, role: str) -> int:
                 username=username,
                 password_hash=hash_password("testpass"),
                 role=role,
+                tenant_id=_default_tid(s),
                 is_active=True,
             )
             s.add(u)
@@ -106,6 +113,7 @@ def _make_credential(session_factory, owner_id: int, visibility: str) -> int:
             secret_ref=f"credentials/test-{visibility}-{owner_id}",
             owner_id=owner_id,
             visibility=visibility,
+            tenant_id=_default_tid(s),
         )
         s.add(cred)
         s.commit()

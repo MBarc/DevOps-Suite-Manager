@@ -64,6 +64,7 @@ async def _poll_one(cfg: Config, run_id: int) -> bool:
                 return False
             db.add(
                 AuditLog(
+                    tenant_id=pipeline.tenant_id if pipeline else None,
                     actor_id=None,
                     action="pipeline.run.status",
                     target=f"pipeline_run:{run.id}",

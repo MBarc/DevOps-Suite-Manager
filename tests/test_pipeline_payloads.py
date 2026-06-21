@@ -23,11 +23,18 @@ SCHEMA = [
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def _default_tid(s):
+    from sqlalchemy import text
+
+    return s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+
+
 def _ensure_user(session_factory, username: str, role: str) -> int:
     with session_factory() as s:
         u = s.execute(select(User).where(User.username == username)).scalar_one_or_none()
         if u is None:
-            u = User(username=username, password_hash=hash_password("testpass"), role=role, is_active=True)
+            u = User(username=username, password_hash=hash_password("testpass"), role=role,
+                     tenant_id=_default_tid(s), is_active=True)
             s.add(u)
             s.commit()
             s.refresh(u)
@@ -59,6 +66,7 @@ def pipeline_id(session_factory):
             provider="github_actions",
             config=json.dumps({"owner": "o", "repo": "r", "workflow": "w.yml", "ref": "main"}),
             inputs_schema=json.dumps(SCHEMA),
+            tenant_id=_default_tid(s),
         )
         s.add(p)
         s.commit()

@@ -5,7 +5,24 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC
 
+from dosm.agent.queries import agent_tenant_id
 from dosm.config import Config
+
+
+def _require_agent_tenant() -> int | None:
+    """The tenant id the current agent turn is scoped to. ``None`` means the
+    platform all-tenants view (a platform admin with no active tenant). Write
+    runners that create rows reject ``None`` since a row must live in a tenant."""
+    return agent_tenant_id()
+
+
+def _tenant_slug(db, tid: int) -> str:
+    """Resolve a tenant's slug for secret-ref prefixing. Falls back to the id
+    string (mirrors dosm/credentials/routes.py) if the tenant row is missing."""
+    from dosm.models import Tenant
+
+    tenant = db.get(Tenant, tid)
+    return tenant.slug if tenant is not None else str(tid)
 
 
 @dataclass
@@ -115,10 +132,12 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
 
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
-    from dosm.jumps.connections import build_jump_chain, connect_through_chain
+    from dosm.hosts.repo import get_host
     from dosm.models import Host
 
+    tid = _require_agent_tenant()
     host_id = args.get("host_id")
     host_name = args.get("host")
     command = (args.get("command") or "").strip()
@@ -137,9 +156,13 @@ async def _ssh_exec_runner(cfg: Config, args: dict) -> ActionResult:
     with session_scope() as s:
         host: Host | None = None
         if host_id is not None:
-            host = s.get(Host, int(host_id))
+            host = get_host(s, int(host_id), tid)
         elif host_name:
-            host = s.execute(select(Host).where(Host.name == host_name)).scalar_one_or_none()
+            stmt = select(Host).where(Host.name == host_name)
+            clause = tenant_clause(Host, tid)
+            if clause is not None:
+                stmt = stmt.where(clause)
+            host = s.execute(stmt).scalar_one_or_none()
         if host is None:
             return ActionResult(ok=False, summary=f"host not found: {host_id or host_name!r}")
         if host.protocol != "ssh":
@@ -269,10 +292,16 @@ async def _local_exec_runner(cfg: Config, args: dict) -> ActionResult:
     try:
         from sqlalchemy import select as _sel
 
+        from dosm.auth.tenancy import tenant_clause as _tclause
         from dosm.db import session_scope as _scope
         from dosm.models import Host as _Host
+        _tid = _require_agent_tenant()
         with _scope() as _s:
-            _rows = list(_s.execute(_sel(_Host.name, _Host.hostname)).all())
+            _stmt = _sel(_Host.name, _Host.hostname)
+            _c = _tclause(_Host, _tid)
+            if _c is not None:
+                _stmt = _stmt.where(_c)
+            _rows = list(_s.execute(_stmt).all())
         for _label, _addr in _rows:
             if _label and _addr and _label != _addr:
                 command = _re.sub(r'\b' + _re.escape(_label) + r'\b', _addr, command)
@@ -358,11 +387,13 @@ async def _winrm_exec_runner(cfg: Config, args: dict) -> ActionResult:
 
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.jumps.tunnels import get_tunnel_manager
     from dosm.models import Host
     from dosm.secrets import SecretNotFound, get_backend
 
+    tid = _require_agent_tenant()
     host_name = (args.get("host") or "").strip()
     command = (args.get("command") or "").strip()
     timeout = float(args.get("timeout") or 30.0)
@@ -378,7 +409,11 @@ async def _winrm_exec_runner(cfg: Config, args: dict) -> ActionResult:
 
     # Step 1: resolve host + creds - close session before async tunnel work.
     with session_scope() as s:
-        host = s.execute(select(Host).where(Host.name == host_name)).scalar_one_or_none()
+        stmt = select(Host).where(Host.name == host_name)
+        clause = tenant_clause(Host, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        host = s.execute(stmt).scalar_one_or_none()
         if host is None:
             return ActionResult(ok=False, summary=f"host {host_name!r} not found")
         cred = host.credential
@@ -524,9 +559,10 @@ async def _run_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
     if not isinstance(inputs, dict):
         return ActionResult(ok=False, summary="`inputs` must be an object")
 
+    tid = _require_agent_tenant()
     started = time.monotonic()
     with session_scope() as s:
-        pipeline = pipelines_repo.get_pipeline_by_name(s, name)
+        pipeline = pipelines_repo.get_pipeline_by_name(s, name, tid)
         if pipeline is None:
             return ActionResult(ok=False, summary=f"pipeline {name!r} not found")
         try:
@@ -603,6 +639,9 @@ async def _create_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.pipelines.adapters import PipelineProviderError, list_providers
     from dosm.pipelines.repo import create_pipeline
 
+    tid = _require_agent_tenant()
+    if tid is None:
+        return ActionResult(ok=False, summary="select an active tenant before creating a pipeline")
     name = (args.get("name") or "").strip()
     provider = (args.get("provider") or "").strip()
     if not name:
@@ -636,6 +675,7 @@ async def _create_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
         with session_scope() as s:
             p = create_pipeline(
                 s,
+                tenant_id=tid,
                 name=name,
                 provider=provider,
                 description=description,
@@ -644,7 +684,7 @@ async def _create_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
                 credential_id=credential_id,
             )
             pid = p.id
-            s.add(AuditLog(action="pipeline.create", target=f"pipeline:{pid}", details=f"agent provider={provider}"))
+            s.add(AuditLog(tenant_id=tid, action="pipeline.create", target=f"pipeline:{pid}", details=f"agent provider={provider}"))
     except PipelineProviderError as e:
         return ActionResult(ok=False, summary=f"Provider config error: {e}", stderr=str(e))
     except IntegrityError as e:
@@ -681,13 +721,14 @@ async def _update_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.pipelines.adapters import PipelineProviderError, list_providers
     from dosm.pipelines.repo import get_pipeline_by_name, update_pipeline
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     try:
         with session_scope() as s:
-            p = get_pipeline_by_name(s, name)
+            p = get_pipeline_by_name(s, name, tid)
             if p is None:
                 return ActionResult(ok=False, summary=f"Pipeline {name!r} not found")
 
@@ -764,12 +805,13 @@ async def _delete_pipeline_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.models import AuditLog
     from dosm.pipelines.repo import delete_pipeline, get_pipeline_by_name
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     with session_scope() as s:
-        p = get_pipeline_by_name(s, name)
+        p = get_pipeline_by_name(s, name, tid)
         if p is None:
             return ActionResult(ok=False, summary=f"Pipeline {name!r} not found")
         pid = p.id
@@ -905,18 +947,22 @@ async def _sync_org_group_runner(cfg: Config, args: dict) -> ActionResult:
 
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import Department
 
+    tid = _require_agent_tenant()
     group_name = (args.get("group_name") or "").strip()
     if not group_name:
         return ActionResult(ok=False, summary="group_name is required")
 
     # Resolve the department ID first (fast DB read)
     with session_scope() as s:
-        dept_row = s.execute(
-            select(Department).where(Department.ad_group_name == group_name)
-        ).scalar_one_or_none()
+        stmt = select(Department).where(Department.ad_group_name == group_name)
+        clause = tenant_clause(Department, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        dept_row = s.execute(stmt).scalar_one_or_none()
         if dept_row is None:
             return ActionResult(ok=False, summary=f"No department with AD group name {group_name!r}")
         dept_id = dept_row.id
@@ -966,6 +1012,9 @@ async def _create_host_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.hosts.repo import HostValidationError, create_host
     from dosm.models import AuditLog
 
+    tid = _require_agent_tenant()
+    if tid is None:
+        return ActionResult(ok=False, summary="select an active tenant before creating a host")
     name = (args.get("name") or "").strip()
     hostname = (args.get("hostname") or "").strip()
     if not name or not hostname:
@@ -994,12 +1043,13 @@ async def _create_host_runner(cfg: Config, args: dict) -> ActionResult:
         with session_scope() as s:
             host = create_host(
                 s,
+                tenant_id=tid,
                 name=name, hostname=hostname, port=port, protocol=protocol,
                 description=description, credential_id=credential_id,
                 jump_host_id=jump_host_id, tags_csv=tags_csv, is_jumpbox=is_jumpbox,
             )
             host_id = host.id
-            s.add(AuditLog(action="host.create", target=f"host:{host_id}", details=f"agent name={name}"))
+            s.add(AuditLog(tenant_id=tid, action="host.create", target=f"host:{host_id}", details=f"agent name={name}"))
     except HostValidationError as e:
         return ActionResult(ok=False, summary=f"Validation error: {e}", stderr=str(e))
     except Exception as e:
@@ -1029,16 +1079,22 @@ register_action(CREATE_HOST)
 async def _update_host_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.hosts.repo import HostValidationError, update_host
     from dosm.models import AuditLog, Host
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     with session_scope() as s:
-        host = s.execute(select(Host).where(Host.name == name)).scalar_one_or_none()
+        stmt = select(Host).where(Host.name == name)
+        clause = tenant_clause(Host, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        host = s.execute(stmt).scalar_one_or_none()
         if host is None:
             return ActionResult(ok=False, summary=f"Host {name!r} not found")
 
@@ -1071,7 +1127,7 @@ async def _update_host_runner(cfg: Config, args: dict) -> ActionResult:
                 description=description, credential_id=credential_id,
                 jump_host_id=jump_host_id, tags_csv=tags_csv, is_jumpbox=is_jumpbox,
             )
-            s.add(AuditLog(action="host.update", target=f"host:{host.id}", details=f"agent name={name}"))
+            s.add(AuditLog(tenant_id=host.tenant_id, action="host.update", target=f"host:{host.id}", details=f"agent name={name}"))
         except HostValidationError as e:
             return ActionResult(ok=False, summary=f"Validation error: {e}", stderr=str(e))
         except Exception as e:
@@ -1102,10 +1158,13 @@ register_action(UPDATE_HOST)
 # ---- create_credential / update_credential --------------------------------
 
 
-def _auto_secret_ref(name: str) -> str:
+def _auto_secret_ref(name: str, tenant_slug: str) -> str:
+    """Tenant-namespaced secret path, mirroring dosm/credentials/routes.py.
+    The path is prefixed by tenant slug to avoid cross-tenant collisions on the
+    (now non-unique) name slug."""
     import re
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
-    return f"credentials/{slug}"
+    return f"t/{tenant_slug}/credentials/{slug}"
 
 
 async def _create_credential_runner(cfg: Config, args: dict) -> ActionResult:
@@ -1115,6 +1174,9 @@ async def _create_credential_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.models import AuditLog, Credential
     from dosm.secrets import get_backend
 
+    tid = _require_agent_tenant()
+    if tid is None:
+        return ActionResult(ok=False, summary="select an active tenant before creating a credential")
     name = (args.get("name") or "").strip()
     kind = (args.get("kind") or "login").strip()
     username = (args.get("username") or "").strip() or None
@@ -1128,19 +1190,22 @@ async def _create_credential_runner(cfg: Config, args: dict) -> ActionResult:
     if not secret_value:
         return ActionResult(ok=False, summary="secret_value is required - enter it in the plan card form")
 
-    secret_ref = _auto_secret_ref(name)
     cred_id: int
 
     # Commit DB row first, then write secret (single-writer SQLite rule)
     with session_scope() as s:
-        cred = Credential(name=name, kind=kind, username=username, domain=domain, secret_ref=secret_ref)
+        secret_ref = _auto_secret_ref(name, _tenant_slug(s, tid))
+        cred = Credential(
+            tenant_id=tid, name=name, kind=kind, username=username,
+            domain=domain, secret_ref=secret_ref,
+        )
         s.add(cred)
         try:
             s.flush()
         except IntegrityError as e:
             return ActionResult(ok=False, summary=f"Duplicate name: {e.__cause__ or e}", stderr=str(e))
         cred_id = cred.id
-        s.add(AuditLog(action="credential.create", target=f"credential:{cred_id}", details=f"agent kind={kind}"))
+        s.add(AuditLog(tenant_id=tid, action="credential.create", target=f"credential:{cred_id}", details=f"agent kind={kind}"))
 
     try:
         get_backend(cfg).set_str(secret_ref, secret_value)
@@ -1172,10 +1237,12 @@ async def _update_credential_runner(cfg: Config, args: dict) -> ActionResult:
 
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import AuditLog, Credential
     from dosm.secrets import get_backend
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
@@ -1185,7 +1252,11 @@ async def _update_credential_runner(cfg: Config, args: dict) -> ActionResult:
     secret_value = (args.get("secret_value") or "").strip()
 
     with session_scope() as s:
-        cred = s.execute(select(Credential).where(Credential.name == name)).scalar_one_or_none()
+        stmt = select(Credential).where(Credential.name == name)
+        clause = tenant_clause(Credential, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        cred = s.execute(stmt).scalar_one_or_none()
         if cred is None:
             return ActionResult(ok=False, summary=f"Credential {name!r} not found")
         if username is not None:
@@ -1195,7 +1266,7 @@ async def _update_credential_runner(cfg: Config, args: dict) -> ActionResult:
         cred.updated_at = datetime.now(UTC)
         secret_ref = cred.secret_ref
         cred_id = cred.id
-        s.add(AuditLog(action="credential.update", target=f"credential:{cred_id}", details="agent"))
+        s.add(AuditLog(tenant_id=cred.tenant_id, action="credential.update", target=f"credential:{cred_id}", details="agent"))
 
     if secret_value:
         try:
@@ -1228,22 +1299,29 @@ register_action(UPDATE_CREDENTIAL)
 async def _delete_credential_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import AuditLog, Credential
     from dosm.secrets import get_backend
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     with session_scope() as s:
-        cred = s.execute(select(Credential).where(Credential.name == name)).scalar_one_or_none()
+        stmt = select(Credential).where(Credential.name == name)
+        clause = tenant_clause(Credential, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        cred = s.execute(stmt).scalar_one_or_none()
         if cred is None:
             return ActionResult(ok=False, summary=f"Credential {name!r} not found")
         secret_ref = cred.secret_ref
         cred_id = cred.id
+        audit_tid = cred.tenant_id
         s.delete(cred)
-        s.add(AuditLog(action="credential.delete", target=f"credential:{cred_id}", details="agent"))
+        s.add(AuditLog(tenant_id=audit_tid, action="credential.delete", target=f"credential:{cred_id}", details="agent"))
 
     try:
         get_backend(cfg).delete(secret_ref)
@@ -1272,19 +1350,25 @@ register_action(DELETE_CREDENTIAL)
 async def _toggle_monitoring_runner(cfg: Config, args: dict, *, enable: bool) -> ActionResult:
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import AuditLog, MonitoringSource
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     with session_scope() as s:
-        src = s.execute(select(MonitoringSource).where(MonitoringSource.name == name)).scalar_one_or_none()
+        stmt = select(MonitoringSource).where(MonitoringSource.name == name)
+        clause = tenant_clause(MonitoringSource, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        src = s.execute(stmt).scalar_one_or_none()
         if src is None:
             return ActionResult(ok=False, summary=f"Monitoring source {name!r} not found")
         src.enabled = enable
-        s.add(AuditLog(action=f"monitoring.source.{'enable' if enable else 'disable'}", target=f"source:{src.id}", details="agent"))
+        s.add(AuditLog(tenant_id=src.tenant_id, action=f"monitoring.source.{'enable' if enable else 'disable'}", target=f"source:{src.id}", details="agent"))
 
     verb = "Enabled" if enable else "Disabled"
     return ActionResult(ok=True, summary=f"{verb} monitoring source {name!r}", extra={"source": name, "enabled": enable})
@@ -1296,20 +1380,27 @@ async def _toggle_monitoring_runner(cfg: Config, args: dict, *, enable: bool) ->
 async def _delete_host_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import AuditLog, Host
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     with session_scope() as s:
-        host = s.execute(select(Host).where(Host.name == name)).scalar_one_or_none()
+        stmt = select(Host).where(Host.name == name)
+        clause = tenant_clause(Host, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        host = s.execute(stmt).scalar_one_or_none()
         if host is None:
             return ActionResult(ok=False, summary=f"Host {name!r} not found")
         host_id = host.id
+        audit_tid = host.tenant_id
         s.delete(host)
-        s.add(AuditLog(action="host.delete", target=f"host:{host_id}", details="agent"))
+        s.add(AuditLog(tenant_id=audit_tid, action="host.delete", target=f"host:{host_id}", details="agent"))
 
     return ActionResult(ok=True, summary=f"Deleted host {name!r}")
 
@@ -1339,6 +1430,9 @@ async def _create_monitoring_source_runner(cfg: Config, args: dict) -> ActionRes
     from dosm.models import AuditLog, MonitoringSource
     from dosm.secrets import get_backend
 
+    tid = _require_agent_tenant()
+    if tid is None:
+        return ActionResult(ok=False, summary="select an active tenant before creating a monitoring source")
     name = (args.get("name") or "").strip()
     tool = (args.get("tool") or "").strip()
     url = (args.get("url") or "").strip()
@@ -1357,14 +1451,14 @@ async def _create_monitoring_source_runner(cfg: Config, args: dict) -> ActionRes
     enabled = bool(args.get("enabled", True))
 
     with session_scope() as s:
-        src = MonitoringSource(name=name, tool=tool, url=url, username=username, enabled=enabled)
+        src = MonitoringSource(tenant_id=tid, name=name, tool=tool, url=url, username=username, enabled=enabled)
         s.add(src)
         try:
             s.flush()
         except IntegrityError as e:
             return ActionResult(ok=False, summary=f"Duplicate name: {e.__cause__ or e}", stderr=str(e))
         sid = src.id
-        s.add(AuditLog(action="monitoring_source.create", target=f"source:{sid}", details=f"agent tool={tool}"))
+        s.add(AuditLog(tenant_id=tid, action="monitoring_source.create", target=f"source:{sid}", details=f"agent tool={tool}"))
 
     backend = get_backend(cfg)
     try:
@@ -1410,16 +1504,22 @@ register_action(CREATE_MONITORING_SOURCE)
 async def _update_monitoring_source_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import AuditLog, MonitoringSource
     from dosm.secrets import get_backend
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     with session_scope() as s:
-        src = s.execute(select(MonitoringSource).where(MonitoringSource.name == name)).scalar_one_or_none()
+        stmt = select(MonitoringSource).where(MonitoringSource.name == name)
+        clause = tenant_clause(MonitoringSource, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        src = s.execute(stmt).scalar_one_or_none()
         if src is None:
             return ActionResult(ok=False, summary=f"Monitoring source {name!r} not found")
 
@@ -1438,7 +1538,7 @@ async def _update_monitoring_source_runner(cfg: Config, args: dict) -> ActionRes
         sid = src.id
         token_secret = src.token_secret
         token2_secret = src.token2_secret
-        s.add(AuditLog(action="monitoring_source.update", target=f"source:{sid}", details=f"agent name={name}"))
+        s.add(AuditLog(tenant_id=src.tenant_id, action="monitoring_source.update", target=f"source:{sid}", details=f"agent name={name}"))
 
     token = (args.get("token") or "").strip()
     token2 = (args.get("token2") or "").strip()
@@ -1488,22 +1588,29 @@ register_action(UPDATE_MONITORING_SOURCE)
 async def _delete_monitoring_source_runner(cfg: Config, args: dict) -> ActionResult:
     from sqlalchemy import select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.db import session_scope
     from dosm.models import AuditLog, MonitoringSource
     from dosm.secrets import get_backend
 
+    tid = _require_agent_tenant()
     name = (args.get("name") or "").strip()
     if not name:
         return ActionResult(ok=False, summary="name is required")
 
     with session_scope() as s:
-        src = s.execute(select(MonitoringSource).where(MonitoringSource.name == name)).scalar_one_or_none()
+        stmt = select(MonitoringSource).where(MonitoringSource.name == name)
+        clause = tenant_clause(MonitoringSource, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        src = s.execute(stmt).scalar_one_or_none()
         if src is None:
             return ActionResult(ok=False, summary=f"Monitoring source {name!r} not found")
         sid = src.id
+        audit_tid = src.tenant_id
         token_paths = [p for p in (src.token_secret, src.token2_secret) if p]
         s.delete(src)
-        s.add(AuditLog(action="monitoring_source.delete", target=f"source:{sid}", details=f"agent name={name}"))
+        s.add(AuditLog(tenant_id=audit_tid, action="monitoring_source.delete", target=f"source:{sid}", details=f"agent name={name}"))
 
     backend = get_backend(cfg)
     for path in token_paths:

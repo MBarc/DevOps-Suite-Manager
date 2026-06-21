@@ -16,7 +16,7 @@ from dosm.db import session_scope
 from dosm.docs_index.chunker import Chunk, chunk_text
 from dosm.docs_index.embedder import Embedder, NoEmbedder, make_embedder
 from dosm.docs_index.parsers import ParseError, parse
-from dosm.models import DocChunk, Document, Folder
+from dosm.models import DEFAULT_TENANT_SLUG, DocChunk, Document, Folder, Tenant
 
 
 @dataclass
@@ -38,6 +38,19 @@ _status = IndexStats()
 _status_lock = threading.Lock()
 _embedder: Embedder | None = None
 _embedder_lock = threading.Lock()
+
+
+def _default_tenant_id(s) -> int:
+    """Resolve the Default tenant's id (Document.tenant_id is NOT NULL).
+
+    The docs filesystem is shared in Phase 24a, so background-indexed
+    Documents are assigned to the Default tenant; per-tenant docs roots are a
+    later phase. Resolved per session-scope (cheap indexed slug lookup) to
+    avoid stale cross-process caching of an id.
+    """
+    return s.execute(
+        select(Tenant.id).where(Tenant.slug == DEFAULT_TENANT_SLUG)
+    ).scalar_one()
 
 
 def get_index_status() -> IndexStats:
@@ -192,7 +205,10 @@ def _index_one(
             text, title = parse(path)
         except ParseError as e:
             if doc is None:
-                doc = Document(rel_path=rel, sha256=digest, size_bytes=size, modified_at=mtime)
+                doc = Document(
+                    tenant_id=_default_tenant_id(s),
+                    rel_path=rel, sha256=digest, size_bytes=size, modified_at=mtime,
+                )
                 s.add(doc)
             doc.status = "error"
             doc.error = str(e)
@@ -228,6 +244,7 @@ def _index_one(
         display_title = title or fm_title
         if doc is None:
             doc = Document(
+                tenant_id=_default_tenant_id(s),
                 rel_path=rel,
                 sha256=digest,
                 size_bytes=size,

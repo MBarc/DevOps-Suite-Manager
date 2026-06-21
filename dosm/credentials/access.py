@@ -14,11 +14,15 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.sql import Select
 
+from dosm.auth.deps import user_has_role
+from dosm.auth.tenancy import tenant_clause
 from dosm.models import Credential, User
 
 
 def _is_admin(user: User | None) -> bool:
-    return user is not None and user.role == "admin"
+    # admin OR platform_admin - both get the unrestricted visibility view
+    # (still tenant-scoped separately via ``tenant_clause``).
+    return user_has_role(user, "admin")
 
 
 def can_see_credential(user: User | None, cred: Credential) -> bool:
@@ -51,19 +55,24 @@ def visible_credentials_filter(user: User | None):
     )
 
 
-def visible_credentials_query(user: User | None) -> Select:
-    """A ready ``select(Credential)`` filtered to what ``user`` may see,
-    ordered by name."""
+def visible_credentials_query(user: User | None, tid: int | None) -> Select:
+    """A ready ``select(Credential)`` filtered to what ``user`` may see within
+    tenant ``tid``, ordered by name. ``tid`` is the active tenant id (None =
+    platform-admin all-tenants view, no tenant restriction)."""
     stmt = select(Credential)
-    clause = visible_credentials_filter(user)
-    if clause is not True:
-        stmt = stmt.where(clause)
+    tclause = tenant_clause(Credential, tid)
+    if tclause is not None:
+        stmt = stmt.where(tclause)
+    vclause = visible_credentials_filter(user)
+    if vclause is not True:
+        stmt = stmt.where(vclause)
     return stmt.order_by(Credential.name)
 
 
-def visible_credentials(db, user: User | None) -> list[Credential]:
-    """List of ``Credential`` rows ``user`` may see (for picker dropdowns)."""
-    return list(db.execute(visible_credentials_query(user)).scalars())
+def visible_credentials(db, user: User | None, tid: int | None) -> list[Credential]:
+    """List of ``Credential`` rows ``user`` may see in tenant ``tid`` (for
+    picker dropdowns)."""
+    return list(db.execute(visible_credentials_query(user, tid)).scalars())
 
 
 def first_unusable_credential(user: User | None, creds) -> Credential | None:

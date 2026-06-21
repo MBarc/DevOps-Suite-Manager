@@ -14,12 +14,16 @@ from dosm.models import Host
 def _make_rdp_via_gateway(session_factory, *, gw_host="127.0.0.1", gw_port=1):
     """Create an RDP target behind an RDP jumpbox. The gateway points at a
     closed local port so the probe fails fast and deterministically."""
+    from sqlalchemy import text
+
     with session_factory() as s:
-        gw = Host(name="rdgw", hostname=gw_host, port=gw_port, protocol="rdp", is_jumpbox=True)
+        tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+        gw = Host(name="rdgw", hostname=gw_host, port=gw_port, protocol="rdp",
+                  is_jumpbox=True, tenant_id=tid)
         s.add(gw)
         s.flush()
         target = Host(name="winbox", hostname="10.0.0.50", port=3389,
-                      protocol="rdp", jump_host_id=gw.id)
+                      protocol="rdp", jump_host_id=gw.id, tenant_id=tid)
         s.add(target)
         s.commit()
         return target.id

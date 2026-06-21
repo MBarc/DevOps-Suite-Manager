@@ -17,8 +17,13 @@ from dosm.agent.prompt import (
     strip_query_blocks,
     tools_for_agent,
 )
-from dosm.agent.queries import get_query
+from dosm.agent.queries import get_query, set_agent_tenant
 from dosm.auth.deps import require_user
+from dosm.auth.tenancy import (
+    active_tenant_id,
+    require_active_tenant,
+    tenant_clause,
+)
 from dosm.db import get_session, session_scope
 from dosm.llm.ollama import OllamaClient, OllamaError, OllamaUnreachable
 from dosm.llm.retrieval import (
@@ -48,6 +53,22 @@ def _templates(request: Request):
     return request.app.state.templates
 
 
+def _get_owned_conversation(
+    db: Session, cid: int, user: User, tid: int | None
+) -> Conversation | None:
+    """Fetch a conversation owned by ``user`` and within tenant ``tid``.
+
+    Returns None (callers 404) when it is missing, belongs to another user, or
+    lives in a different tenant. ``tid`` None is the platform all-tenants view.
+    """
+    conv = db.get(Conversation, cid)
+    if conv is None or conv.user_id != user.id:
+        return None
+    if tid is not None and conv.tenant_id != tid:
+        return None
+    return conv
+
+
 def _latest_messages(db: Session, conv_id: int) -> list[ChatMessage]:
     return list(
         db.execute(
@@ -71,14 +92,17 @@ async def chat_home(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    convs = list(
-        db.execute(
-            select(Conversation)
-            .where(Conversation.user_id == user.id)
-            .order_by(Conversation.updated_at.desc())
-        ).scalars()
+    stmt = (
+        select(Conversation)
+        .where(Conversation.user_id == user.id)
+        .order_by(Conversation.updated_at.desc())
     )
+    clause = tenant_clause(Conversation, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    convs = list(db.execute(stmt).scalars())
     return _templates(request).TemplateResponse(
         request,
         "chat/list.html",
@@ -90,8 +114,9 @@ async def chat_home(
 async def chat_new(
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int = Depends(require_active_tenant),
 ):
-    conv = Conversation(user_id=user.id, title="New chat", mode="agent")
+    conv = Conversation(tenant_id=tid, user_id=user.id, title="New chat", mode="agent")
     db.add(conv)
     db.flush()
     cid = conv.id
@@ -104,13 +129,14 @@ async def chat_rename(
     title: str = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None or conv.user_id != user.id:
+    conv = _get_owned_conversation(db, cid, user, tid)
+    if conv is None:
         raise HTTPException(404)
     title = title.strip()[:255] or "New chat"
     conv.title = title
-    db.add(AuditLog(actor_id=user.id, action="chat.rename", target=f"conversation:{cid}", details=title))
+    db.add(AuditLog(tenant_id=conv.tenant_id, actor_id=user.id, action="chat.rename", target=f"conversation:{cid}", details=title))
     db.commit()
     return RedirectResponse(f"/chat/{cid}", status_code=303)
 
@@ -120,12 +146,14 @@ async def chat_delete(
     cid: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None or conv.user_id != user.id:
+    conv = _get_owned_conversation(db, cid, user, tid)
+    if conv is None:
         raise HTTPException(404)
+    audit_tid = conv.tenant_id
     db.delete(conv)
-    db.add(AuditLog(actor_id=user.id, action="chat.delete", target=f"conversation:{cid}"))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="chat.delete", target=f"conversation:{cid}"))
     db.commit()
     return RedirectResponse("/chat", status_code=303)
 
@@ -139,18 +167,21 @@ async def chat_view(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None or conv.user_id != user.id:
+    conv = _get_owned_conversation(db, cid, user, tid)
+    if conv is None:
         raise HTTPException(404)
 
-    convs = list(
-        db.execute(
-            select(Conversation)
-            .where(Conversation.user_id == user.id)
-            .order_by(Conversation.updated_at.desc())
-        ).scalars()
+    convs_stmt = (
+        select(Conversation)
+        .where(Conversation.user_id == user.id)
+        .order_by(Conversation.updated_at.desc())
     )
+    clause = tenant_clause(Conversation, tid)
+    if clause is not None:
+        convs_stmt = convs_stmt.where(clause)
+    convs = list(db.execute(convs_stmt).scalars())
     messages = _latest_messages(db, cid)
 
     plan_rows = list(
@@ -260,9 +291,10 @@ async def chat_post_message(
     content: str = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    conv = db.get(Conversation, cid)
-    if conv is None or conv.user_id != user.id:
+    conv = _get_owned_conversation(db, cid, user, tid)
+    if conv is None:
         raise HTTPException(404)
 
     content = content.strip()
@@ -301,6 +333,7 @@ def _sse(event: str | None, data: str) -> bytes:
 async def _generate_reply(
     *,
     conv_id: int,
+    tenant_id: int | None,
     future: asyncio.Future,
     queue: asyncio.Queue,
     history_for_llm: list[dict],
@@ -318,6 +351,12 @@ async def _generate_reply(
     dict once the assistant message has been written to the DB.  Always
     puts a ``None`` sentinel into the queue last so any drain loop exits.
     """
+    # Pin the tenant for every query/action runner invoked during this turn so
+    # the agent only ever reads/writes within the conversation's tenant. Safe to
+    # set without reset: each generation runs in its own asyncio task with an
+    # isolated copy of the context.
+    set_agent_tenant(tenant_id)
+
     llm_messages = list(history_for_llm)
     final_content = ""
     error_text: str | None = None
@@ -494,12 +533,14 @@ async def _generate_reply(
                 })
 
             conv_row = s.get(Conversation, conv_id)
+            audit_tenant_id = conv_row.tenant_id if conv_row is not None else None
             if conv_row is not None:
                 conv_row.updated_at = datetime.now(UTC)
                 if not conv_row.model:
                     conv_row.model = cfg.llm.model
             s.add(
                 AuditLog(
+                    tenant_id=audit_tenant_id,
                     actor_id=actor_id,
                     action="chat.reply",
                     target=f"conversation:{conv_id}",
@@ -549,6 +590,7 @@ async def chat_stream(
     request: Request,
     reply_to: int,
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
 
@@ -575,8 +617,8 @@ async def chat_stream(
 
     # --- Fresh generation ---
     with session_scope() as s:
-        conv = s.get(Conversation, cid)
-        if conv is None or conv.user_id != user.id:
+        conv = _get_owned_conversation(s, cid, user, tid)
+        if conv is None:
             raise HTTPException(404)
         messages = _latest_messages(s, cid)
         triggering = next((m for m in messages if m.id == reply_to), None)
@@ -595,7 +637,13 @@ async def chat_stream(
         # A 3B model won't reliably infer execution context from abstract rules alone;
         # showing "protocol=ssh" next to the host name makes the right tool obvious.
         _query_lower = query.lower()
-        _all_hosts = list(s.execute(select(Host)).scalars())
+        # Scope inventory context to the conversation's tenant so a platform
+        # admin's agent never leaks host names across tenants.
+        _host_stmt = select(Host)
+        _host_clause = tenant_clause(Host, conv.tenant_id)
+        if _host_clause is not None:
+            _host_stmt = _host_stmt.where(_host_clause)
+        _all_hosts = list(s.execute(_host_stmt).scalars())
         _mentioned = [h for h in _all_hosts if h.name.lower() in _query_lower]
         if _mentioned:
             _host_lines = "\n".join(
@@ -624,6 +672,7 @@ async def chat_stream(
         next_ord = (messages[-1].ord + 1) if messages else 0
         actor_id = user.id
         conv_id = conv.id
+        conv_tenant_id = conv.tenant_id
 
     client = OllamaClient(base_url=cfg.llm.base_url, model=cfg.llm.model, timeout=300.0)
     agent_tools = tools_for_agent()
@@ -635,6 +684,7 @@ async def chat_stream(
 
     asyncio.create_task(_generate_reply(
         conv_id=conv_id,
+        tenant_id=conv_tenant_id,
         future=future,
         queue=queue,
         history_for_llm=history_for_llm,

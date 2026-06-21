@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_user
+from dosm.auth.tenancy import active_tenant_id, require_active_tenant, tenant_clause
 from dosm.db import get_session
 from dosm.hosts.repo import list_hosts
 from dosm.models import AuditLog, MonitoringMatch, MonitoringSource, Tag, User
@@ -94,11 +95,12 @@ async def search_hosts(
     q: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> JSONResponse:
     if not q:
         return JSONResponse([])
     q_lower = q.lower()
-    hosts = list_hosts(db)
+    hosts = list_hosts(db, tid=tid)
     matches = [
         {"name": h.name, "hostname": h.hostname}
         for h in hosts
@@ -118,12 +120,13 @@ async def monitoring_page(
     refresh: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> HTMLResponse:
     results: list[HostCheckResult] | None = None
     error: str | None = None
 
     if hostname:
-        sources = repo.list_enabled(db)
+        sources = repo.list_enabled(db, tid)
         if not sources:
             error = "No monitoring sources are configured yet. Add one under Manage Sources."
         else:
@@ -139,7 +142,7 @@ async def monitoring_page(
             "hostname": hostname,
             "results": results,
             "error": error,
-            "has_sources": repo.has_any(db),
+            "has_sources": repo.has_any(db, tid),
             "tool_labels": TOOL_LABELS,
         },
     )
@@ -154,8 +157,9 @@ async def list_sources(
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> HTMLResponse:
-    sources = repo.list_sources(db)
+    sources = repo.list_sources(db, tid)
     return _t(request).TemplateResponse(
         request,
         "monitoring_sources.html",
@@ -202,11 +206,13 @@ async def create_source(
     enabled: str | None = Form(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int = Depends(require_active_tenant),
 ) -> RedirectResponse:
     if tool not in TOOL_CHOICES:
         raise HTTPException(status_code=400, detail=f"Unknown tool: {tool}")
 
     source = MonitoringSource(
+        tenant_id=tid,
         name=name.strip(),
         tool=tool,
         url=url.strip(),
@@ -228,7 +234,7 @@ async def create_source(
         backend.set_str(path2, token2.strip())
         source.token2_secret = path2
 
-    db.add(AuditLog(actor_id=user.id, action="monitoring_source.create", target=source.name))
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="monitoring_source.create", target=source.name))
     db.commit()
     return RedirectResponse("/monitoring/sources", status_code=303)
 
@@ -243,8 +249,9 @@ async def edit_source_form(
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> HTMLResponse:
-    source = repo.get_source(db, source_id)
+    source = repo.get_source(db, source_id, tid)
     if source is None:
         raise HTTPException(status_code=404)
     return _t(request).TemplateResponse(
@@ -278,8 +285,9 @@ async def update_source(
     enabled: str | None = Form(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> RedirectResponse:
-    source = repo.get_source(db, source_id)
+    source = repo.get_source(db, source_id, tid)
     if source is None:
         raise HTTPException(status_code=404)
 
@@ -301,7 +309,7 @@ async def update_source(
         backend.set_str(path2, token2.strip())
         source.token2_secret = path2
 
-    db.add(AuditLog(actor_id=user.id, action="monitoring_source.update", target=source.name))
+    db.add(AuditLog(tenant_id=source.tenant_id, actor_id=user.id, action="monitoring_source.update", target=source.name))
     db.commit()
     return RedirectResponse("/monitoring/sources", status_code=303)
 
@@ -316,12 +324,14 @@ async def delete_source(
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> RedirectResponse:
-    source = repo.get_source(db, source_id)
+    source = repo.get_source(db, source_id, tid)
     if source is None:
         raise HTTPException(status_code=404)
 
     name = source.name
+    audit_tid = source.tenant_id
     cfg = request.app.state.config
     backend = get_backend(cfg)
     for path in (source.token_secret, source.token2_secret):
@@ -331,7 +341,7 @@ async def delete_source(
             except Exception:
                 pass
 
-    db.add(AuditLog(actor_id=user.id, action="monitoring_source.delete", target=name))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="monitoring_source.delete", target=name))
     db.delete(source)
     db.commit()
     return RedirectResponse("/monitoring/sources", status_code=303)
@@ -374,10 +384,15 @@ async def coverage_page(
     tags: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> HTMLResponse:
-    sources = repo.list_enabled(db)
-    all_hosts = list_hosts(db)
-    all_tags = list(db.execute(select(Tag).order_by(Tag.name)).scalars())
+    sources = repo.list_enabled(db, tid)
+    all_hosts = list_hosts(db, tid=tid)
+    tags_stmt = select(Tag).order_by(Tag.name)
+    tag_clause = tenant_clause(Tag, tid)
+    if tag_clause is not None:
+        tags_stmt = tags_stmt.where(tag_clause)
+    all_tags = list(db.execute(tags_stmt).scalars())
 
     selected_tags = [t for t in tags.split(",") if t.strip()] if tags else []
     hosts = _filter_hosts(all_hosts, pattern.strip(), selected_tags)

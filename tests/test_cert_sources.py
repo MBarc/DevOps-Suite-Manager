@@ -38,8 +38,10 @@ def _sid(session_factory, name):
 def test_cert_source_crud_and_vault_section(auth_client, session_factory):
     # mock isn't user-selectable, so seed it directly for the vault-section flow.
     with session_factory() as s:
+        from sqlalchemy import text
+        tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
         s.add(CertSource(name="mock-vault", provider="mock", config_json="{}",
-                         auth_mode="ambient", enabled=True))
+                         auth_mode="ambient", enabled=True, tenant_id=tid))
         s.commit()
     sid = _sid(session_factory, "mock-vault")
     try:
@@ -143,8 +145,10 @@ def test_route_create_cloud_and_rejects_mock(auth_client, session_factory):
 def test_cert_sources_admin_gated(app, session_factory):
     with session_factory() as s:
         if not s.execute(select(User).where(User.username == "cs-op")).scalar_one_or_none():
+            from sqlalchemy import text
+            tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
             s.add(User(username="cs-op", password_hash=hash_password("pw"),
-                       role="operator", is_active=True))
+                       role="operator", tenant_id=tid, is_active=True))
             s.commit()
     c = TestClient(app)
     c.post("/login", data={"username": "cs-op", "password": "pw", "next": "/"}, follow_redirects=False)

@@ -17,11 +17,19 @@ from dosm.config import load_config
 from dosm.db import create_all, init_engine, session_scope
 from dosm.docs_index.indexer import get_index_status, reindex
 from dosm.guacamole.auth_json import KEY_BYTES, load_secret_key
-from dosm.models import AuditLog, Credential, Host, User
+from dosm.models import (
+    DEFAULT_TENANT_SLUG,
+    AuditLog,
+    Credential,
+    Host,
+    Tenant,
+    User,
+)
 from dosm.secrets import SecretNotFound, get_backend
 
 app = typer.Typer(help="DevOps Operations Suite Manager.", no_args_is_help=True, add_completion=False)
 db_app = typer.Typer(help="Database admin commands.", no_args_is_help=True)
+tenant_app = typer.Typer(help="Tenant (workspace) management.", no_args_is_help=True)
 user_app = typer.Typer(help="Local user management.", no_args_is_help=True)
 secret_app = typer.Typer(help="Manage secrets via the configured backend.", no_args_is_help=True)
 cred_app = typer.Typer(help="Manage credential records (references into the secrets backend).", no_args_is_help=True)
@@ -35,7 +43,12 @@ org_app = typer.Typer(help="Organisation directory (AD-backed) commands.", no_ar
 ftp_app = typer.Typer(help="File transfer (FTP / FTPS / SFTP), jump-aware.", no_args_is_help=True)
 okta_app = typer.Typer(help="Okta SSO helpers.", no_args_is_help=True)
 rbac_app = typer.Typer(help="Role-based access control helpers.", no_args_is_help=True)
+applications_app = typer.Typer(
+    help="Host organisation: application -> environment -> unit tree.",
+    no_args_is_help=True,
+)
 app.add_typer(db_app, name="db")
+app.add_typer(tenant_app, name="tenant")
 app.add_typer(user_app, name="user")
 app.add_typer(secret_app, name="secret")
 app.add_typer(cred_app, name="credential")
@@ -49,6 +62,7 @@ app.add_typer(org_app, name="org")
 app.add_typer(ftp_app, name="ftp")
 app.add_typer(okta_app, name="okta")
 app.add_typer(rbac_app, name="rbac")
+app.add_typer(applications_app, name="application")
 
 console = Console()
 
@@ -57,6 +71,55 @@ def _load() -> None:
     """Load config + init DB engine so CLI subcommands can use session_scope."""
     cfg = load_config()
     init_engine(cfg)
+
+
+# ---- tenant resolution ----------------------------------------------------
+#
+# The CLI has no web session, so resource commands carry an explicit tenant.
+# These helpers turn a ``--tenant SLUG`` option into a tenant id.
+
+
+def _resolve_tenant(s, slug: str | None) -> int:
+    """Return the tenant id for ``slug`` (defaults to the Default tenant when
+    ``slug`` is None). Exits with a clear error if the tenant does not exist."""
+    wanted = (slug or DEFAULT_TENANT_SLUG).strip()
+    tenant = s.execute(
+        select(Tenant).where(Tenant.slug == wanted)
+    ).scalar_one_or_none()
+    if tenant is None:
+        console.print(
+            f"[red]No tenant with slug {wanted!r}.[/red] "
+            f"List tenants with: dosm tenant list"
+        )
+        raise typer.Exit(1)
+    return tenant.id
+
+
+def _resolve_tenant_scope(s, slug: str | None) -> int | None:
+    """Like ``_resolve_tenant`` but ``--tenant all`` yields None (every tenant,
+    the platform all-tenants read view). Used by list/read commands that may
+    legitimately span tenants."""
+    if slug is not None and slug.strip().lower() == "all":
+        return None
+    return _resolve_tenant(s, slug)
+
+
+def _slugify_tenant(name: str) -> str:
+    import re
+
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
+    return slug or "tenant"
+
+
+# Reusable Typer option for the active tenant on resource commands.
+_TENANT_OPT = typer.Option(
+    None, "--tenant", help="Tenant slug (default: the Default tenant)."
+)
+_TENANT_SCOPE_OPT = typer.Option(
+    None,
+    "--tenant",
+    help="Tenant slug, or 'all' for every tenant (default: the Default tenant).",
+)
 
 
 # ---- top-level ------------------------------------------------------------
@@ -124,6 +187,74 @@ def db_init() -> None:
     console.print(f"[green]Schema ready[/green] at {cfg.db_path}")
 
 
+# ---- tenant ---------------------------------------------------------------
+
+
+@tenant_app.command("list")
+def tenant_list() -> None:
+    """List all tenants (workspaces)."""
+    _load()
+    with session_scope() as s:
+        rows = [
+            (t.id, t.name, t.slug, "yes" if t.is_active else "no",
+             t.created_at.isoformat(timespec="seconds"))
+            for t in s.execute(select(Tenant).order_by(Tenant.name)).scalars().all()
+        ]
+    table = Table("ID", "Name", "Slug", "Active", "Created")
+    for tid, name, slug, active, created in rows:
+        table.add_row(str(tid), name, slug, active, created)
+    console.print(table)
+
+
+@tenant_app.command("create")
+def tenant_create(
+    name: str = typer.Argument(..., help="Tenant display name."),
+    slug: str | None = typer.Option(None, "--slug", help="URL slug (auto-derived if omitted)."),
+    description: str | None = typer.Option(None, "--description"),
+) -> None:
+    """Create a new tenant. Audit-logged."""
+    _load()
+    final_slug = (slug or _slugify_tenant(name)).strip()
+    with session_scope() as s:
+        if s.execute(select(Tenant).where(Tenant.slug == final_slug)).scalar_one_or_none():
+            console.print(f"[red]A tenant with slug {final_slug!r} already exists.[/red]")
+            raise typer.Exit(1)
+        if s.execute(select(Tenant).where(Tenant.name == name)).scalar_one_or_none():
+            console.print(f"[red]A tenant named {name!r} already exists.[/red]")
+            raise typer.Exit(1)
+        tenant = Tenant(name=name, slug=final_slug, description=description or None)
+        s.add(tenant)
+        s.flush()
+        s.add(AuditLog(tenant_id=tenant.id, actor_id=None, action="tenant.create",
+                       target=f"tenant:{tenant.id}", details=f"cli name={name} slug={final_slug}"))
+    console.print(f"[green]Created tenant[/green] {name!r} (slug={final_slug!r})")
+
+
+@tenant_app.command("rename")
+def tenant_rename(
+    slug: str = typer.Argument(..., help="Slug of the tenant to rename."),
+    new_name: str = typer.Argument(..., help="New display name."),
+) -> None:
+    """Rename a tenant (slug is immutable). Audit-logged."""
+    _load()
+    with session_scope() as s:
+        tenant = s.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none()
+        if tenant is None:
+            console.print(f"[red]No tenant with slug {slug!r}.[/red]")
+            raise typer.Exit(1)
+        clash = s.execute(
+            select(Tenant).where(Tenant.name == new_name, Tenant.id != tenant.id)
+        ).scalar_one_or_none()
+        if clash is not None:
+            console.print(f"[red]Another tenant is already named {new_name!r}.[/red]")
+            raise typer.Exit(1)
+        old = tenant.name
+        tenant.name = new_name
+        s.add(AuditLog(tenant_id=tenant.id, actor_id=None, action="tenant.rename",
+                       target=f"tenant:{tenant.id}", details=f"cli {old} -> {new_name}"))
+    console.print(f"[green]Renamed tenant[/green] {slug}: {old} -> {new_name}")
+
+
 # ---- user -----------------------------------------------------------------
 
 
@@ -134,10 +265,23 @@ def user_create(
     password: str | None = typer.Option(
         None, "--password", help="Password (will prompt if omitted).", show_default=False
     ),
+    tenant: str | None = typer.Option(
+        None, "--tenant", help="Tenant slug the user belongs to (default: the Default tenant)."
+    ),
+    platform_admin: bool = typer.Option(
+        False, "--platform-admin",
+        help="Create a tenant-less platform admin (role=platform_admin, no tenant).",
+    ),
 ) -> None:
-    """Create a local user. First user created should be admin."""
+    """Create a local user. First user created should be admin.
+
+    Regular users belong to one tenant (``--tenant``, defaulting to Default).
+    ``--platform-admin`` creates a tenant-less user who can act across tenants.
+    """
     _load()
-    if role not in ("admin", "operator", "viewer"):
+    if platform_admin:
+        role = "platform_admin"
+    elif role not in ("admin", "operator", "viewer"):
         console.print(f"[red]Invalid role {role!r}. Use admin | operator | viewer.[/red]")
         raise typer.Exit(1)
     if password is None:
@@ -147,21 +291,36 @@ def user_create(
         if existing is not None:
             console.print(f"[red]User {username!r} already exists.[/red]")
             raise typer.Exit(1)
-        s.add(User(username=username, password_hash=hash_password(password), role=role))
-    console.print(f"[green]Created user[/green] {username} (role={role})")
+        if platform_admin:
+            tenant_id: int | None = None
+        else:
+            tenant_id = _resolve_tenant(s, tenant)
+        s.add(User(
+            username=username,
+            password_hash=hash_password(password),
+            role=role,
+            tenant_id=tenant_id,
+        ))
+    where = "platform-wide (no tenant)" if platform_admin else f"tenant={tenant or DEFAULT_TENANT_SLUG}"
+    console.print(f"[green]Created user[/green] {username} (role={role}, {where})")
 
 
 @user_app.command("list")
 def user_list() -> None:
     _load()
     with session_scope() as s:
+        tenant_slugs = {
+            t.id: t.slug for t in s.execute(select(Tenant)).scalars().all()
+        }
         rows = [
-            (u.id, u.username, u.role, u.is_active, u.created_at)
+            (u.id, u.username, u.role,
+             tenant_slugs.get(u.tenant_id, "-") if u.tenant_id is not None else "(platform)",
+             u.is_active, u.created_at)
             for u in s.execute(select(User).order_by(User.username)).scalars().all()
         ]
-    table = Table("ID", "Username", "Role", "Active", "Created")
-    for uid, uname, role, active, created in rows:
-        table.add_row(str(uid), uname, role, "yes" if active else "no", created.isoformat(timespec="seconds"))
+    table = Table("ID", "Username", "Role", "Tenant", "Active", "Created")
+    for uid, uname, role, tslug, active, created in rows:
+        table.add_row(str(uid), uname, role, tslug, "yes" if active else "no", created.isoformat(timespec="seconds"))
     console.print(table)
 
 
@@ -321,23 +480,30 @@ def credential_add(
     kind: str = typer.Option(..., "--kind", help="ssh_password | ssh_key | rdp_password | api_token"),
     username: str | None = typer.Option(None, "--username"),
     secret_ref: str = typer.Option(..., "--secret-ref", help="Path in the secrets backend."),
+    tenant: str | None = _TENANT_OPT,
 ) -> None:
     _load()
     with session_scope() as s:
-        if s.execute(select(Credential).where(Credential.name == name)).scalar_one_or_none():
-            console.print(f"[red]Credential {name!r} already exists.[/red]")
+        tid = _resolve_tenant(s, tenant)
+        if s.execute(
+            select(Credential).where(Credential.name == name, Credential.tenant_id == tid)
+        ).scalar_one_or_none():
+            console.print(f"[red]Credential {name!r} already exists in this tenant.[/red]")
             raise typer.Exit(1)
-        s.add(Credential(name=name, kind=kind, username=username, secret_ref=secret_ref))
+        s.add(Credential(tenant_id=tid, name=name, kind=kind, username=username, secret_ref=secret_ref))
     console.print(f"[green]Created credential[/green] {name}")
 
 
 @cred_app.command("list")
-def credential_list() -> None:
+def credential_list(tenant: str | None = _TENANT_SCOPE_OPT) -> None:
     _load()
+    from dosm.hosts import repo
+
     with session_scope() as s:
+        tid = _resolve_tenant_scope(s, tenant)
         rows = [
             (c.id, c.name, c.kind, c.username, c.secret_ref)
-            for c in s.execute(select(Credential).order_by(Credential.name)).scalars().all()
+            for c in repo.list_credentials(s, tid)
         ]
     table = Table("ID", "Name", "Kind", "Username", "Secret ref")
     for cid, name, kind, username, secret_ref in rows:
@@ -348,9 +514,13 @@ def credential_list() -> None:
 # ---- hosts ----------------------------------------------------------------
 
 
-def _get_host_by_name(s, name: str) -> Host:
-    """Resolve a host by its unique inventory name, or exit with an error."""
-    host = s.execute(select(Host).where(Host.name == name)).scalar_one_or_none()
+def _get_host_by_name(s, name: str, tid: int | None = None) -> Host:
+    """Resolve a host by its inventory name (unique per tenant), or exit with
+    an error. Scoped to tenant ``tid`` when given (None = any tenant)."""
+    stmt = select(Host).where(Host.name == name)
+    if tid is not None:
+        stmt = stmt.where(Host.tenant_id == tid)
+    host = s.execute(stmt).scalar_one_or_none()
     if host is None:
         console.print(f"[red]No host named {name!r}.[/red]")
         raise typer.Exit(1)
@@ -358,12 +528,13 @@ def _get_host_by_name(s, name: str) -> Host:
 
 
 @hosts_app.command("list")
-def hosts_list() -> None:
+def hosts_list(tenant: str | None = _TENANT_SCOPE_OPT) -> None:
     """List host inventory entries."""
     _load()
     from dosm.hosts import repo
 
     with session_scope() as s:
+        tid = _resolve_tenant_scope(s, tenant)
         rows = [
             (
                 h.id,
@@ -375,7 +546,7 @@ def hosts_list() -> None:
                 "yes" if h.is_jumpbox else "",
                 h.jump_host.name if h.jump_host else "",
             )
-            for h in repo.list_hosts(s)
+            for h in repo.list_hosts(s, tid=tid)
         ]
     table = Table("ID", "Name", "Hostname", "Port", "Proto", "Credential", "Jumpbox", "Jump via")
     for hid, name, hostname, port, proto, cred, jb, via in rows:
@@ -384,11 +555,15 @@ def hosts_list() -> None:
 
 
 @hosts_app.command("show")
-def hosts_show(name: str = typer.Argument(..., help="Host name.")) -> None:
+def hosts_show(
+    name: str = typer.Argument(..., help="Host name."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
+) -> None:
     """Show full details for one host."""
     _load()
     with session_scope() as s:
-        h = _get_host_by_name(s, name)
+        tid = _resolve_tenant_scope(s, tenant)
+        h = _get_host_by_name(s, name, tid)
         console.print(f"[bold]{h.name}[/bold] (id={h.id})")
         console.print(f"  hostname  : {h.hostname}")
         console.print(f"  port      : {h.port}")
@@ -407,6 +582,7 @@ def hosts_show(name: str = typer.Argument(..., help="Host name.")) -> None:
 def hosts_set_hostname(
     name: str = typer.Argument(..., help="Host name."),
     hostname: str = typer.Argument(..., help="New address: hostname, IP, or FQDN."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Update a host's address (e.g. after a DHCP/IP change). Audit-logged."""
     _load()
@@ -415,7 +591,8 @@ def hosts_set_hostname(
         console.print("[red]Hostname cannot be empty.[/red]")
         raise typer.Exit(1)
     with session_scope() as s:
-        h = _get_host_by_name(s, name)
+        tid = _resolve_tenant_scope(s, tenant)
+        h = _get_host_by_name(s, name, tid)
         old = h.hostname
         if old == new:
             console.print(f"[yellow]No change[/yellow] - {name} already points at {new}.")
@@ -423,19 +600,21 @@ def hosts_set_hostname(
         h.hostname = new
         s.add(
             AuditLog(
+                tenant_id=h.tenant_id,
                 actor_id=None,
                 action="host.update",
                 target=f"host:{h.id}",
                 details=f"cli set-hostname {old} -> {new}",
             )
         )
-    console.print(f"[green]Updated[/green] {name}: {old} → {new}")
+    console.print(f"[green]Updated[/green] {name}: {old} -> {new}")
 
 
 @hosts_app.command("set-port")
 def hosts_set_port(
     name: str = typer.Argument(..., help="Host name."),
     port: int = typer.Argument(..., help="New connection port (1-65535)."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Update a host's connection port. Audit-logged."""
     _load()
@@ -443,7 +622,8 @@ def hosts_set_port(
         console.print("[red]Port must be between 1 and 65535.[/red]")
         raise typer.Exit(1)
     with session_scope() as s:
-        h = _get_host_by_name(s, name)
+        tid = _resolve_tenant_scope(s, tenant)
+        h = _get_host_by_name(s, name, tid)
         old = h.port
         if old == port:
             console.print(f"[yellow]No change[/yellow] - {name} already uses port {port}.")
@@ -451,13 +631,14 @@ def hosts_set_port(
         h.port = port
         s.add(
             AuditLog(
+                tenant_id=h.tenant_id,
                 actor_id=None,
                 action="host.update",
                 target=f"host:{h.id}",
                 details=f"cli set-port {old} -> {port}",
             )
         )
-    console.print(f"[green]Updated[/green] {name}: port {old} → {port}")
+    console.print(f"[green]Updated[/green] {name}: port {old} -> {port}")
 
 
 # ---- docs -----------------------------------------------------------------
@@ -686,6 +867,187 @@ def folder_delete(slug: str = typer.Argument(...)) -> None:
     console.print(f"[green]Deleted[/green] folder {slug!r}")
 
 
+# ---- applications (host organisation tree) --------------------------------
+
+
+def _resolve_org_unit(s, ref: str, tid: int | None):
+    """Resolve an org unit by integer id or by ``App/Env/Unit`` path within
+    tenant ``tid`` (None = any tenant)."""
+    from dosm.applications import repo as org_repo
+
+    ref = (ref or "").strip()
+    if ref.isdigit():
+        return org_repo.get_unit(s, int(ref), tid)
+    return org_repo.get_by_path(s, ref, tid)
+
+
+@applications_app.command("tree")
+def application_tree(tenant: str | None = _TENANT_SCOPE_OPT) -> None:
+    """Print the application -> environment -> unit tree with host counts."""
+    _load()
+    from dosm.applications import repo as org_repo
+
+    with session_scope() as s:
+        tid = _resolve_tenant_scope(s, tenant)
+        tree = org_repo.build_tree(s, tid)
+        if not tree:
+            console.print("[yellow]No applications defined yet.[/yellow] "
+                          "Add one with: dosm application add NAME")
+            return
+
+        def emit(node: dict, depth: int) -> None:
+            pad = "  " * depth
+            u = node["unit"]
+            console.print(
+                f"{pad}[bold]{u.name}[/bold] "
+                f"[dim]({u.tier}, id={u.id})[/dim] "
+                f"- {node['total']} host{'' if node['total'] == 1 else 's'}"
+            )
+            for child in node["children"]:
+                emit(child, depth + 1)
+
+        for app_node in tree:
+            emit(app_node, 0)
+
+
+@applications_app.command("add")
+def application_add(
+    name: str = typer.Argument(..., help="Name of the new node."),
+    tier: str | None = typer.Option(
+        None, "--tier", help="application | environment | unit. Inferred from --parent if omitted."
+    ),
+    parent: str | None = typer.Option(
+        None, "--parent", help="Parent node, by id or 'App/Env' path. Omit for an application."
+    ),
+    description: str | None = typer.Option(None, "--description"),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Add an application, environment, or unit. Audit-logged."""
+    _load()
+    from dosm.applications import repo as org_repo
+
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+        parent_id: int | None = None
+        parent_unit = None
+        if parent:
+            parent_unit = _resolve_org_unit(s, parent, tid)
+            if parent_unit is None:
+                console.print(f"[red]Parent not found:[/red] {parent!r}")
+                raise typer.Exit(1)
+            parent_id = parent_unit.id
+        # Infer tier from the parent when not given explicitly.
+        if tier is None:
+            if parent_unit is None:
+                tier = "application"
+            else:
+                tier = org_repo.CHILD_TIER.get(parent_unit.tier)
+                if tier is None:
+                    console.print(f"[red]Cannot add a child under a {parent_unit.tier}.[/red]")
+                    raise typer.Exit(1)
+        try:
+            u = org_repo.create_unit(
+                s, tenant_id=tid, name=name, tier=tier, parent_id=parent_id, description=description
+            )
+        except org_repo.OrgValidationError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        s.add(AuditLog(tenant_id=tid, actor_id=None, action="orgunit.create", target=f"orgunit:{u.id}",
+                       details=f"cli tier={u.tier} name={u.name} parent={u.parent_id}"))
+        console.print(f"[green]Created[/green] {u.tier} {u.name!r} (id={u.id})")
+
+
+@applications_app.command("rename")
+def application_rename(
+    ref: str = typer.Argument(..., help="Node id or 'App/Env/Unit' path."),
+    name: str = typer.Argument(..., help="New name."),
+    description: str | None = typer.Option(None, "--description"),
+    tenant: str | None = _TENANT_SCOPE_OPT,
+) -> None:
+    """Rename a node (and optionally set its description). Audit-logged."""
+    _load()
+    from dosm.applications import repo as org_repo
+
+    with session_scope() as s:
+        tid = _resolve_tenant_scope(s, tenant)
+        u = _resolve_org_unit(s, ref, tid)
+        if u is None:
+            console.print(f"[red]Not found:[/red] {ref!r}")
+            raise typer.Exit(1)
+        try:
+            org_repo.update_unit(s, u, name=name, description=description)
+        except org_repo.OrgValidationError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        s.add(AuditLog(tenant_id=u.tenant_id, actor_id=None, action="orgunit.update", target=f"orgunit:{u.id}",
+                       details=f"cli name={u.name}"))
+        console.print(f"[green]Renamed[/green] -> {u.name!r} (id={u.id})")
+
+
+@applications_app.command("rm")
+def application_rm(
+    ref: str = typer.Argument(..., help="Node id or 'App/Env/Unit' path."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
+) -> None:
+    """Delete a node and its subtree. Hosts become unassigned. Audit-logged."""
+    _load()
+    from dosm.applications import repo as org_repo
+
+    with session_scope() as s:
+        tid = _resolve_tenant_scope(s, tenant)
+        u = _resolve_org_unit(s, ref, tid)
+        if u is None:
+            console.print(f"[red]Not found:[/red] {ref!r}")
+            raise typer.Exit(1)
+        descendants = len(org_repo.subtree_ids(s, u)) - 1
+        label = f"{u.tier} {u.name!r}"
+        unit_tid = u.tenant_id
+        if not yes:
+            extra = f" and {descendants} descendant node(s)" if descendants else ""
+            if not typer.confirm(f"Delete {label}{extra}? Hosts will be unassigned."):
+                raise typer.Exit(0)
+        uid = u.id
+        org_repo.delete_unit(s, u)
+        s.add(AuditLog(tenant_id=unit_tid, actor_id=None, action="orgunit.delete", target=f"orgunit:{uid}",
+                       details=f"cli {label} cascade={descendants}"))
+        console.print(f"[green]Deleted[/green] {label}")
+
+
+@applications_app.command("assign")
+def application_assign(
+    host: str = typer.Argument(..., help="Host name."),
+    to: str | None = typer.Option(
+        None, "--to", help="Org node id or 'App/Env/Unit' path. Omit or 'none' to unassign."
+    ),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Assign (or unassign) a host's place in the organisation tree. Audit-logged."""
+    _load()
+    from dosm.applications import repo as org_repo
+
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+        h = _get_host_by_name(s, host, tid)
+        target_id: int | None = None
+        label = "unassigned"
+        if to and to.strip().lower() != "none":
+            u = _resolve_org_unit(s, to, tid)
+            if u is None:
+                console.print(f"[red]Org node not found:[/red] {to!r}")
+                raise typer.Exit(1)
+            target_id = u.id
+            label = u.path_str
+        try:
+            org_repo.assign_host(s, h, target_id)
+        except org_repo.OrgValidationError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        s.add(AuditLog(tenant_id=h.tenant_id, actor_id=None, action="host.update", target=f"host:{h.id}",
+                       details=f"cli org-assign -> {label}"))
+        console.print(f"[green]Assigned[/green] {h.name} -> {label}")
+
+
 # ---- pipelines ------------------------------------------------------------
 
 
@@ -708,10 +1070,10 @@ def pipelines_poll() -> None:
     )
 
 
-def _resolve_pipeline_or_exit(s, pipeline: str):
+def _resolve_pipeline_or_exit(s, pipeline: str, tid: int | None):
     from dosm.pipelines import repo as prepo
 
-    p = prepo.get_pipeline_by_name(s, pipeline)
+    p = prepo.get_pipeline_by_name(s, pipeline, tid)
     if p is None:
         console.print(f"[red]No pipeline named {pipeline!r}[/red]")
         raise typer.Exit(1)
@@ -735,13 +1097,17 @@ def _resolve_payload_or_exit(s, pipeline_id: int, name: str):
 
 
 @payload_app.command("list")
-def payload_list(pipeline: str = typer.Argument(..., help="Pipeline name.")) -> None:
+def payload_list(
+    pipeline: str = typer.Argument(..., help="Pipeline name."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
+) -> None:
     """List saved payloads for a pipeline."""
     _load()
     from dosm.pipelines import repo as prepo
 
     with session_scope() as s:
-        p = _resolve_pipeline_or_exit(s, pipeline)
+        tid = _resolve_tenant_scope(s, tenant)
+        p = _resolve_pipeline_or_exit(s, pipeline, tid)
         rows = [(pl.name, pl.visibility, pl.description or "") for pl in prepo.list_payloads(s, p.id)]
     table = Table("Name", "Visibility", "Description")
     for name, vis, desc in rows:
@@ -751,12 +1117,15 @@ def payload_list(pipeline: str = typer.Argument(..., help="Pipeline name.")) -> 
 
 @payload_app.command("show")
 def payload_show(
-    pipeline: str = typer.Argument(...), name: str = typer.Argument(...)
+    pipeline: str = typer.Argument(...),
+    name: str = typer.Argument(...),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Print a payload's stored input values as JSON."""
     _load()
     with session_scope() as s:
-        p = _resolve_pipeline_or_exit(s, pipeline)
+        tid = _resolve_tenant_scope(s, tenant)
+        p = _resolve_pipeline_or_exit(s, pipeline, tid)
         pl = _resolve_payload_or_exit(s, p.id, name)
         console.print_json(pl.values_json or "{}")
 
@@ -768,6 +1137,7 @@ def payload_add(
     values_json: str = typer.Option("{}", "--json", help='Input values as a JSON object, e.g. \'{"env":"prod"}\''),
     description: str | None = typer.Option(None, "--description"),
     private: bool = typer.Option(False, "--private", help="Keep this payload to yourself."),
+    tenant: str | None = _TENANT_OPT,
 ) -> None:
     """Create a saved payload from a JSON object of input values."""
     _load()
@@ -783,7 +1153,8 @@ def payload_add(
         raise typer.Exit(1)
 
     with session_scope() as s:
-        p = _resolve_pipeline_or_exit(s, pipeline)
+        tid = _resolve_tenant(s, tenant)
+        p = _resolve_pipeline_or_exit(s, pipeline, tid)
         schema = normalize_schema(json.loads(p.inputs_schema)) if p.inputs_schema else []
         problems = validate_payload_values(schema, values) if schema else []
         if problems:
@@ -799,7 +1170,7 @@ def payload_add(
         except (prepo.PayloadNameConflict, ValueError) as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1)
-        s.add(AuditLog(action="payload.create", target=f"pipeline:{p.id}",
+        s.add(AuditLog(tenant_id=p.tenant_id, action="payload.create", target=f"pipeline:{p.id}",
                        details=f"payload={pl.id} name={pl.name!r} (via CLI)"))
     console.print(f"[green]Created payload[/green] {name!r} on {pipeline!r}")
 
@@ -809,13 +1180,15 @@ def payload_rename(
     pipeline: str = typer.Argument(...),
     name: str = typer.Argument(..., help="Current name."),
     new_name: str = typer.Argument(..., help="New name."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Rename a payload."""
     _load()
     from dosm.pipelines import repo as prepo
 
     with session_scope() as s:
-        p = _resolve_pipeline_or_exit(s, pipeline)
+        tid = _resolve_tenant_scope(s, tenant)
+        p = _resolve_pipeline_or_exit(s, pipeline, tid)
         pl = _resolve_payload_or_exit(s, p.id, name)
         try:
             prepo.update_payload(s, pl, name=new_name)
@@ -827,14 +1200,17 @@ def payload_rename(
 
 @payload_app.command("copy")
 def payload_copy(
-    pipeline: str = typer.Argument(...), name: str = typer.Argument(...)
+    pipeline: str = typer.Argument(...),
+    name: str = typer.Argument(...),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Duplicate a payload under a derived name."""
     _load()
     from dosm.pipelines import repo as prepo
 
     with session_scope() as s:
-        p = _resolve_pipeline_or_exit(s, pipeline)
+        tid = _resolve_tenant_scope(s, tenant)
+        p = _resolve_pipeline_or_exit(s, pipeline, tid)
         pl = _resolve_payload_or_exit(s, p.id, name)
         new = prepo.copy_payload(s, pl)
         console.print(f"[green]Copied[/green] to {new.name!r}")
@@ -842,14 +1218,17 @@ def payload_copy(
 
 @payload_app.command("rm")
 def payload_rm(
-    pipeline: str = typer.Argument(...), name: str = typer.Argument(...)
+    pipeline: str = typer.Argument(...),
+    name: str = typer.Argument(...),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Delete a payload."""
     _load()
     from dosm.pipelines import repo as prepo
 
     with session_scope() as s:
-        p = _resolve_pipeline_or_exit(s, pipeline)
+        tid = _resolve_tenant_scope(s, tenant)
+        p = _resolve_pipeline_or_exit(s, pipeline, tid)
         pl = _resolve_payload_or_exit(s, p.id, name)
         prepo.delete_payload(s, pl)
     console.print(f"[green]Deleted payload[/green] {name!r}")
@@ -879,17 +1258,24 @@ def org_test_ad() -> None:
 @org_app.command("sync")
 def org_sync(
     slug: str = typer.Argument(..., help="Department slug (URL fragment)."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Run a one-shot sync of a single department from AD."""
     cfg = load_config()
     init_engine(cfg)
     from sqlalchemy import select as _select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.directory.sync import sync_department
     from dosm.models import Department
 
     with session_scope() as db:
-        dept = db.execute(_select(Department).where(Department.slug == slug)).scalar_one_or_none()
+        tid = _resolve_tenant_scope(db, tenant)
+        _stmt = _select(Department).where(Department.slug == slug)
+        _c = tenant_clause(Department, tid)
+        if _c is not None:
+            _stmt = _stmt.where(_c)
+        dept = db.execute(_stmt).scalar_one_or_none()
         if dept is None:
             console.print(f"[red]Department {slug!r} not found.[/red]")
             raise typer.Exit(code=1)
@@ -905,16 +1291,25 @@ def org_sync(
 
 
 @org_app.command("members")
-def org_members(slug: str = typer.Argument(..., help="Department slug.")) -> None:
+def org_members(
+    slug: str = typer.Argument(..., help="Department slug."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
+) -> None:
     """Print the cached member list for a department."""
     cfg = load_config()
     init_engine(cfg)
     from sqlalchemy import select as _select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.models import Department, DepartmentMember
 
     with session_scope() as db:
-        dept = db.execute(_select(Department).where(Department.slug == slug)).scalar_one_or_none()
+        tid = _resolve_tenant_scope(db, tenant)
+        _stmt = _select(Department).where(Department.slug == slug)
+        _c = tenant_clause(Department, tid)
+        if _c is not None:
+            _stmt = _stmt.where(_c)
+        dept = db.execute(_stmt).scalar_one_or_none()
         if dept is None:
             console.print(f"[red]Department {slug!r} not found.[/red]")
             raise typer.Exit(code=1)
@@ -944,16 +1339,22 @@ def org_members(slug: str = typer.Argument(..., help="Department slug.")) -> Non
 
 
 @org_app.command("tree")
-def org_tree() -> None:
+def org_tree(tenant: str | None = _TENANT_SCOPE_OPT) -> None:
     """Print an ASCII tree of the org chart from cached data."""
     cfg = load_config()
     init_engine(cfg)
     from sqlalchemy import select as _select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.models import Department
 
     with session_scope() as db:
-        depts = list(db.execute(_select(Department).order_by(Department.name)).scalars())
+        tid = _resolve_tenant_scope(db, tenant)
+        _stmt = _select(Department).order_by(Department.name)
+        _c = tenant_clause(Department, tid)
+        if _c is not None:
+            _stmt = _stmt.where(_c)
+        depts = list(db.execute(_stmt).scalars())
     by_id = {d.id: d for d in depts}
     children: dict[int | None, list[Department]] = {}
     for d in depts:
@@ -977,18 +1378,23 @@ def org_tree() -> None:
 
 
 @org_app.command("find")
-def org_find(query: str = typer.Argument(..., help="Substring to match name/email/title.")) -> None:
+def org_find(
+    query: str = typer.Argument(..., help="Substring to match name/email/title."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
+) -> None:
     """Search cached people across all departments."""
     cfg = load_config()
     init_engine(cfg)
     from sqlalchemy import or_
     from sqlalchemy import select as _select
 
+    from dosm.auth.tenancy import tenant_clause
     from dosm.models import Department, DepartmentMember
 
     like = f"%{query}%"
     with session_scope() as db:
-        rows = db.execute(
+        tid = _resolve_tenant_scope(db, tenant)
+        _stmt = (
             _select(DepartmentMember, Department)
             .join(Department, DepartmentMember.department_id == Department.id)
             .where(
@@ -1000,7 +1406,11 @@ def org_find(query: str = typer.Argument(..., help="Substring to match name/emai
             )
             .order_by(DepartmentMember.display_name)
             .limit(50)
-        ).all()
+        )
+        _c = tenant_clause(Department, tid)
+        if _c is not None:
+            _stmt = _stmt.where(_c)
+        rows = db.execute(_stmt).all()
     if not rows:
         console.print(f"No people match {query!r}.")
         return
@@ -1016,12 +1426,16 @@ def org_find(query: str = typer.Argument(..., help="Substring to match name/emai
 
 
 # ---- ftp / file transfer --------------------------------------------------
-def _resolve_ft_host(s, name: str):
-    """Resolve a host by name and assert file transfer is configured on it."""
+def _resolve_ft_host(s, name: str, tid: int | None = None):
+    """Resolve a host by name (scoped to tenant ``tid`` when given) and assert
+    file transfer is configured on it."""
     from dosm.ftp.service import host_has_file_transfer
     from dosm.models import Host
 
-    host = s.execute(select(Host).where(Host.name == name)).scalar_one_or_none()
+    stmt = select(Host).where(Host.name == name)
+    if tid is not None:
+        stmt = stmt.where(Host.tenant_id == tid)
+    host = s.execute(stmt).scalar_one_or_none()
     if host is None:
         console.print(f"[red]No host named {name!r}.[/red]")
         raise typer.Exit(1)
@@ -1038,6 +1452,7 @@ def _resolve_ft_host(s, name: str):
 def ftp_ls(
     host: str = typer.Argument(..., help="Inventory host name (ftp/ftps/sftp)."),
     path: str = typer.Argument("", help="Directory, relative to the login home."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """List a remote directory."""
     import asyncio
@@ -1048,7 +1463,8 @@ def ftp_ls(
     cfg = load_config()
     init_engine(cfg)
     with session_scope() as s:
-        h = _resolve_ft_host(s, host)
+        tid = _resolve_tenant_scope(s, tenant)
+        h = _resolve_ft_host(s, host, tid)
         backend = get_file_backend(cfg, s, h)
         try:
             entries = asyncio.run(backend.list_dir(path))
@@ -1067,6 +1483,7 @@ def ftp_get(
     host: str = typer.Argument(..., help="Inventory host name."),
     remote: str = typer.Argument(..., help="Remote file path (home-relative)."),
     out: Path = typer.Option(None, "--out", "-o", help="Local destination (default: basename)."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Download a remote file."""
     import asyncio
@@ -1078,7 +1495,8 @@ def ftp_get(
     cfg = load_config()
     init_engine(cfg)
     with session_scope() as s:
-        h = _resolve_ft_host(s, host)
+        tid = _resolve_tenant_scope(s, tenant)
+        h = _resolve_ft_host(s, host, tid)
         backend = get_file_backend(cfg, s, h)
         try:
             with open(dest, "wb") as fh:
@@ -1094,6 +1512,7 @@ def ftp_put(
     host: str = typer.Argument(..., help="Inventory host name."),
     local: Path = typer.Argument(..., exists=True, dir_okay=False, help="Local file to upload."),
     dest: str = typer.Option("", "--dest", "-d", help="Remote directory (home-relative)."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Upload a local file."""
     import asyncio
@@ -1105,7 +1524,8 @@ def ftp_put(
     cfg = load_config()
     init_engine(cfg)
     with session_scope() as s:
-        h = _resolve_ft_host(s, host)
+        tid = _resolve_tenant_scope(s, tenant)
+        h = _resolve_ft_host(s, host, tid)
         backend = get_file_backend(cfg, s, h)
         try:
             with open(local, "rb") as fh:
@@ -1121,6 +1541,7 @@ def ftp_rm(
     host: str = typer.Argument(..., help="Inventory host name."),
     path: str = typer.Argument(..., help="Remote path to remove (home-relative)."),
     is_dir: bool = typer.Option(False, "--dir", help="Remove an (empty) directory instead of a file."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
 ) -> None:
     """Delete a remote file, or an empty directory with --dir."""
     import asyncio
@@ -1131,7 +1552,8 @@ def ftp_rm(
     cfg = load_config()
     init_engine(cfg)
     with session_scope() as s:
-        h = _resolve_ft_host(s, host)
+        tid = _resolve_tenant_scope(s, tenant)
+        h = _resolve_ft_host(s, host, tid)
         backend = get_file_backend(cfg, s, h)
         try:
             asyncio.run(backend.rmdir(path) if is_dir else backend.delete(path))
@@ -1148,8 +1570,12 @@ def ftp_cp(
     dst_host: str = typer.Argument(..., help="Destination host name."),
     dest: str = typer.Option("", "--dest", "-d", help="Destination directory (home-relative)."),
     move: bool = typer.Option(False, "--move", "-m", help="Delete the source after copy (move)."),
+    tenant: str | None = _TENANT_OPT,
 ) -> None:
-    """Copy (or --move) a file from one host to another, server-side (jump-aware)."""
+    """Copy (or --move) a file from one host to another, server-side (jump-aware).
+
+    Both hosts must live in the same tenant (default: the Default tenant).
+    """
     import asyncio
 
     from dosm.ftp.base import FileTransferError
@@ -1158,8 +1584,9 @@ def ftp_cp(
     cfg = load_config()
     init_engine(cfg)
     with session_scope() as s:
-        sh = _resolve_ft_host(s, src_host)
-        dh = _resolve_ft_host(s, dst_host)
+        tid = _resolve_tenant(s, tenant)
+        sh = _resolve_ft_host(s, src_host, tid)
+        dh = _resolve_ft_host(s, dst_host, tid)
         basename = src_path.rsplit("/", 1)[-1]
         dst_path = f"{dest.strip('/')}/{basename}" if dest.strip("/") else basename
         try:

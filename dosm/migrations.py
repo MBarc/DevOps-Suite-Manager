@@ -134,10 +134,138 @@ def _add_column_if_missing(engine: Engine, table: str, column: str, ddl: str) ->
     return True
 
 
+# Operational tables that gain a (NOT NULL) ``tenant_id`` and/or a per-tenant
+# UNIQUE constraint. SQLite cannot ALTER those in place, so on upgrade we drop
+# and let ``Base.metadata.create_all`` rebuild them empty (data loss accepted -
+# the same clean-replace strategy as ``departments.v2_clean_replace``). Listed
+# child-first so foreign-key references are gone before their parents drop.
+_MULTITENANT_DROP_ORDER = [
+    # children
+    "department_members",
+    "doc_chunks",
+    "chat_messages",
+    "plan_cards",
+    "pipeline_runs",
+    "pipeline_payloads",
+    "monitoring_matches",
+    "network_scan_results",
+    "host_tags",
+    # parents
+    "hosts",
+    "credentials",
+    "cert_sources",
+    "org_units",
+    "departments",
+    "applications",
+    "documents",
+    "conversations",
+    "pipelines",
+    "monitoring_sources",
+    "recording_sessions",
+    "network_scans",
+    "tags",
+]
+
+
+def _ensure_default_tenant(engine: Engine) -> int:
+    """Return the id of the Default tenant, creating it if absent. Holds all
+    pre-multi-tenancy data and is the fallback assignment for migrated users."""
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT id FROM tenants WHERE slug = 'default'")
+        ).first()
+        if row is not None:
+            return int(row[0])
+        now_s = datetime.now(UTC).isoformat()
+        res = conn.execute(
+            text(
+                "INSERT INTO tenants (name, slug, description, is_active, created_at)"
+                " VALUES ('Default', 'default',"
+                " 'Default tenant (holds pre-multi-tenancy data)', 1, :ts)"
+            ),
+            {"ts": now_s},
+        )
+        return int(res.lastrowid)
+
+
+def _migrate_multitenant(engine: Engine) -> list[str]:
+    """Phase 24a - introduce multi-tenancy.
+
+    Idempotent. On a fresh install ``create_all`` already builds every table
+    with ``tenant_id`` + per-tenant UNIQUE constraints, so this only ensures the
+    Default tenant exists and seeds the local DOSM Server host. On upgrade from a
+    single-tenant DB it: (1) ensures the Default tenant, (2) adds ``tenant_id`` /
+    ``role_locked`` to ``users`` and promotes existing admins to the tenant-less
+    ``platform_admin`` role, (3) adds the nullable ``audit_log.tenant_id``, and
+    (4) drops the operational tables whose schema changed so the caller's
+    ``create_all`` rebuilds them tenant-scoped (data loss accepted)."""
+    from dosm.models import Base
+
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "tenants" not in tables:  # pragma: no cover - create_all runs first
+        return []
+
+    applied: list[str] = []
+    default_tid = _ensure_default_tenant(engine)
+
+    # users: add tenant scope + role lock, then backfill.
+    users_changed = False
+    if _add_column_if_missing(
+        engine, "users", "tenant_id",
+        "tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE",
+    ):
+        users_changed = True
+    if _add_column_if_missing(
+        engine, "users", "role_locked", "role_locked BOOLEAN NOT NULL DEFAULT 0"
+    ):
+        users_changed = True
+    if users_changed:
+        with engine.begin() as conn:
+            # Pre-multi-tenant admins were effectively platform-wide -> promote
+            # them to the tenant-less platform_admin role.
+            conn.execute(text(
+                "UPDATE users SET role = 'platform_admin', tenant_id = NULL"
+                " WHERE role = 'admin'"
+            ))
+            # Everyone else lands in the Default tenant.
+            conn.execute(
+                text(
+                    "UPDATE users SET tenant_id = :t"
+                    " WHERE tenant_id IS NULL AND role != 'platform_admin'"
+                ),
+                {"t": default_tid},
+            )
+        applied.append("users.multitenant")
+
+    # audit_log: nullable tenant scope (no rebuild - addable in place).
+    if _add_column_if_missing(
+        engine, "audit_log", "tenant_id",
+        "tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL",
+    ):
+        applied.append("audit_log.tenant_id")
+
+    # Rebuild operational tables that gained tenant_id / per-tenant UNIQUE.
+    # Detect the old schema by a representative table missing tenant_id.
+    if "hosts" in tables and not _has_column(engine, "hosts", "tenant_id"):
+        with engine.begin() as conn:
+            for tbl in _MULTITENANT_DROP_ORDER:
+                conn.execute(text(f"DROP TABLE IF EXISTS {tbl}"))
+        # Recreate the dropped tables (and any others) with the current schema.
+        Base.metadata.create_all(engine)
+        applied.append("multitenant.rebuild_operational_tables")
+
+    return applied
+
+
 def run_migrations(engine: Engine) -> list[str]:
     """Apply all known column additions. Returns the list of migrations
     actually applied (empty if everything was already current)."""
     applied: list[str] = []
+    # Phase 24a - multi-tenancy. Runs first so the operational tables are
+    # rebuilt tenant-scoped before the legacy column-adds + seeds below (which
+    # then become no-ops on the freshly-created schema).
+    applied.extend(_migrate_multitenant(engine))
     # Phase 9 - jump host chains
     if _add_column_if_missing(
         engine,
@@ -196,6 +324,18 @@ def run_migrations(engine: Engine) -> list[str]:
         "ft_credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL",
     ):
         applied.append("hosts.ft_credential_id")
+    # Host organisation: 3-tier application -> environment -> unit tree. The
+    # ``org_units`` table is created by create_all (new table); this adds the
+    # back-reference column to the existing ``hosts`` table. SQLite does not
+    # enforce the FK on an added column - the ORM relationship + repo provide
+    # the association and ON DELETE SET NULL semantics at create_all time.
+    if _add_column_if_missing(
+        engine,
+        "hosts",
+        "org_unit_id",
+        "org_unit_id INTEGER REFERENCES org_units(id) ON DELETE SET NULL",
+    ):
+        applied.append("hosts.org_unit_id")
     # Phase 15 - Documentation vault: application taxonomy on documents
     # Note: SQLite ALTER TABLE ADD COLUMN does not enforce FK constraints;
     # the ORM relationship provides the association at the Python level.
@@ -295,23 +435,38 @@ def run_migrations(engine: Engine) -> list[str]:
             )).rowcount
         if ft:
             applied.append("network_ports.ft_defaults")
-    # Seed the DOSM Server host (local execution - no SSH/WinRM needed).
-    if "hosts" in insp.get_table_names():
+    # Seed the DOSM Server host (local execution - no SSH/WinRM needed), one per
+    # tenant. Each tenant gets its own local-execution host so tenant-scoped
+    # pipelines/terminals can target "their" DOSM Server.
+    if "hosts" in insp.get_table_names() and "tenants" in insp.get_table_names():
         with engine.begin() as conn:
-            exists = conn.execute(
-                text("SELECT COUNT(*) FROM hosts WHERE protocol = 'local'")
-            ).scalar()
-            if not exists:
-                now_s = datetime.now(UTC).isoformat()
-                conn.execute(
+            now_s = datetime.now(UTC).isoformat()
+            tenant_ids = [
+                int(r[0]) for r in conn.execute(text("SELECT id FROM tenants")).all()
+            ]
+            seeded = 0
+            for tid in tenant_ids:
+                exists = conn.execute(
                     text(
-                        "INSERT OR IGNORE INTO hosts"
-                        " (name, hostname, port, protocol, is_jumpbox, created_at, updated_at)"
-                        " VALUES ('DOSM Server', '127.0.0.1', 0, 'local', 0, :ts, :ts)"
+                        "SELECT COUNT(*) FROM hosts"
+                        " WHERE protocol = 'local' AND tenant_id = :t"
                     ),
-                    {"ts": now_s},
-                )
-                applied.append("hosts.dosm_server_local")
+                    {"t": tid},
+                ).scalar()
+                if not exists:
+                    conn.execute(
+                        text(
+                            "INSERT INTO hosts"
+                            " (name, tenant_id, hostname, port, protocol, is_jumpbox,"
+                            "  created_at, updated_at)"
+                            " VALUES ('DOSM Server', :t, '127.0.0.1', 0, 'local', 0,"
+                            "  :ts, :ts)"
+                        ),
+                        {"t": tid, "ts": now_s},
+                    )
+                    seeded += 1
+            if seeded:
+                applied.append(f"hosts.dosm_server_local_{seeded}")
     # RBAC - per-credential ownership + visibility. Existing rows default to
     # ``shared`` with no owner, preserving the pre-RBAC behaviour where every
     # credential was visible to all. ``private`` credentials are visible only to

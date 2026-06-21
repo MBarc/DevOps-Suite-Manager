@@ -25,8 +25,12 @@ class FakeAdapter:
 
 
 def _make_source(session_factory, name="dt"):
+    from sqlalchemy import text
+
     with session_factory() as s:
-        src = MonitoringSource(name=name, tool="dynatrace", url="https://dt", enabled=True)
+        tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+        src = MonitoringSource(name=name, tool="dynatrace", url="https://dt", enabled=True,
+                               tenant_id=tid)
         s.add(src)
         s.commit()
         return src.id

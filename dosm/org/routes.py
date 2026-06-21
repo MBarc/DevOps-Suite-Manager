@@ -22,6 +22,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_admin, require_user
+from dosm.auth.tenancy import active_tenant_id, require_active_tenant, tenant_clause
 from dosm.config import update_config_yaml
 from dosm.db import get_session
 from dosm.directory import (
@@ -46,21 +47,37 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
-def _find_unique_slug(db: Session, base: str, exclude_id: int | None = None) -> str:
+def _find_unique_slug(db: Session, base: str, tid: int,
+                      exclude_id: int | None = None) -> str:
     slug = base
     n = 2
     while True:
-        existing = db.execute(
-            select(Department).where(Department.slug == slug)
-        ).scalar_one_or_none()
+        stmt = select(Department).where(Department.slug == slug)
+        clause = tenant_clause(Department, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        existing = db.execute(stmt).scalar_one_or_none()
         if existing is None or (exclude_id is not None and existing.id == exclude_id):
             return slug
         slug = f"{base}-{n}"
         n += 1
 
 
-def _list_all(db: Session) -> list[Department]:
-    return list(db.execute(select(Department).order_by(Department.name)).scalars())
+def _get_dept(db: Session, slug: str, tid: int | None) -> Department | None:
+    """Resolve a department by slug within tenant ``tid`` (None = all-tenants)."""
+    stmt = select(Department).where(Department.slug == slug)
+    clause = tenant_clause(Department, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def _list_all(db: Session, tid: int | None) -> list[Department]:
+    stmt = select(Department).order_by(Department.name)
+    clause = tenant_clause(Department, tid)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    return list(db.execute(stmt).scalars())
 
 
 def _is_configured(cfg) -> bool:
@@ -136,8 +153,9 @@ def _delete_doc(cfg, dept: Department) -> None:
 async def org_tree(
     user: User = Depends(require_user),
     db: Session = Depends(get_session),
+    tid: int | None = Depends(active_tenant_id),
 ) -> JSONResponse:
-    depts = _list_all(db)
+    depts = _list_all(db, tid)
     nodes: dict[int, dict] = {
         d.id: {
             "id": d.id,
@@ -153,10 +171,16 @@ async def org_tree(
     if depts:
         from sqlalchemy import func
 
-        rows = db.execute(
+        count_stmt = (
             select(DepartmentMember.department_id, func.count(DepartmentMember.id))
             .group_by(DepartmentMember.department_id)
-        ).all()
+        )
+        clause = tenant_clause(Department, tid)
+        if clause is not None:
+            count_stmt = count_stmt.join(
+                Department, DepartmentMember.department_id == Department.id
+            ).where(clause)
+        rows = db.execute(count_stmt).all()
         for did, cnt in rows:
             if did in nodes:
                 nodes[did]["members"] = int(cnt)
@@ -185,17 +209,22 @@ async def org_list(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
     jumpbox = _jumpbox_host(db, cfg)
-    depts = _list_all(db)
+    depts = _list_all(db, tid)
     # Members joined with their dept, alphabetical by person name. The page
     # filters client-side so a typed query never round-trips.
-    member_rows = db.execute(
+    member_stmt = (
         select(DepartmentMember, Department)
         .join(Department, DepartmentMember.department_id == Department.id)
         .order_by(DepartmentMember.display_name)
-    ).all()
+    )
+    member_clause = tenant_clause(Department, tid)
+    if member_clause is not None:
+        member_stmt = member_stmt.where(member_clause)
+    member_rows = db.execute(member_stmt).all()
     return _templates(request).TemplateResponse(
         request,
         "org/list.html",
@@ -219,9 +248,10 @@ async def org_configure(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
-    candidates = list_jump_candidates(db)
+    candidates = list_jump_candidates(db, tid)
     return _templates(request).TemplateResponse(
         request,
         "org/configure.html",
@@ -245,6 +275,7 @@ async def org_configure_save(
     use_mock: str | None = Form(None),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
     mock_on = bool(use_mock)
@@ -254,7 +285,7 @@ async def org_configure_save(
     # Real-jumpbox path: validate the host exists and has a credential.
     if not mock_on and new_id is not None:
         host = db.get(Host, new_id)
-        if host is None:
+        if host is None or (tid is not None and host.tenant_id != tid):
             raise HTTPException(400, f"host id {new_id} not found")
         if host.credential is None:
             return _templates(request).TemplateResponse(
@@ -262,7 +293,7 @@ async def org_configure_save(
                 "org/configure.html",
                 {
                     "user": user,
-                    "candidates": list_jump_candidates(db),
+                    "candidates": list_jump_candidates(db, tid),
                     "selected_id": new_id,
                     "current": _jumpbox_host(db, cfg),
                     "use_mock": mock_on,
@@ -290,6 +321,7 @@ async def org_configure_save(
     cfg.directory.ad_jumpbox_host_id = new_id
     db.add(
         AuditLog(
+            tenant_id=tid,
             actor_id=user.id,
             action="org.config.update",
             target="directory",
@@ -305,6 +337,7 @@ async def org_configure_test(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
     if not _is_configured(cfg):
@@ -313,7 +346,7 @@ async def org_configure_test(
             "org/configure.html",
             {
                 "user": user,
-                "candidates": list_jump_candidates(db),
+                "candidates": list_jump_candidates(db, tid),
                 "selected_id": None,
                 "current": None,
                 "use_mock": False,
@@ -339,7 +372,7 @@ async def org_configure_test(
         "org/configure.html",
         {
             "user": user,
-            "candidates": list_jump_candidates(db),
+            "candidates": list_jump_candidates(db, tid),
             "selected_id": cfg.directory.ad_jumpbox_host_id,
             "current": _jumpbox_host(db, cfg),
             "use_mock": cfg.directory.adapter == "mock",
@@ -392,6 +425,7 @@ async def org_create(
     description: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int = Depends(require_active_tenant),
 ):
     cfg = request.app.state.config
     if not _is_configured(cfg):
@@ -450,8 +484,9 @@ async def org_create(
             status_code=502,
         )
 
-    slug = _find_unique_slug(db, _slugify(name) or "department")
+    slug = _find_unique_slug(db, _slugify(name) or "department", tid)
     dept = Department(
+        tenant_id=tid,
         name=name,
         slug=slug,
         description=description.strip() or None,
@@ -466,7 +501,7 @@ async def org_create(
     )
     db.add(dept)
     db.flush()
-    db.add(AuditLog(actor_id=user.id, action="org.create", target=f"dept:{slug}"))
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="org.create", target=f"dept:{slug}"))
     db.commit()
     # Initial member sync immediately after create. If this fails, the dept
     # row stays - user can retry from the detail page.
@@ -492,10 +527,9 @@ async def org_detail(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    dept = db.execute(
-        select(Department).where(Department.slug == slug)
-    ).scalar_one_or_none()
+    dept = _get_dept(db, slug, tid)
     if dept is None:
         raise HTTPException(404)
     members = list(
@@ -525,11 +559,10 @@ async def org_sync(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
-    dept = db.execute(
-        select(Department).where(Department.slug == slug)
-    ).scalar_one_or_none()
+    dept = _get_dept(db, slug, tid)
     if dept is None:
         raise HTTPException(404)
     if not _is_configured(cfg):
@@ -563,10 +596,9 @@ async def org_edit(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
-    dept = db.execute(
-        select(Department).where(Department.slug == slug)
-    ).scalar_one_or_none()
+    dept = _get_dept(db, slug, tid)
     if dept is None:
         raise HTTPException(404)
     return _templates(request).TemplateResponse(
@@ -586,11 +618,10 @@ async def org_update(
     description: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
-    dept = db.execute(
-        select(Department).where(Department.slug == slug)
-    ).scalar_one_or_none()
+    dept = _get_dept(db, slug, tid)
     if dept is None:
         raise HTTPException(404)
 
@@ -663,7 +694,7 @@ async def org_update(
         # Slug stays - it's stable across renames, like Folder.
     dept.description = description.strip() or None
 
-    db.add(AuditLog(actor_id=user.id, action="org.update", target=f"dept:{dept.slug}"))
+    db.add(AuditLog(tenant_id=dept.tenant_id, actor_id=user.id, action="org.update", target=f"dept:{dept.slug}"))
     db.commit()
     _sync_doc(cfg, dept, list(dept.members))
     reindex_async(cfg, force=False)
@@ -681,18 +712,18 @@ async def org_delete(
     request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
-    dept = db.execute(
-        select(Department).where(Department.slug == slug)
-    ).scalar_one_or_none()
+    dept = _get_dept(db, slug, tid)
     if dept is None:
         raise HTTPException(404)
+    audit_tid = dept.tenant_id
     _delete_doc(cfg, dept)
     # Children's parent_id will SET NULL via FK; they just become roots until
     # their own next sync re-derives parentage.
     db.delete(dept)
-    db.add(AuditLog(actor_id=user.id, action="org.delete", target=f"dept:{slug}"))
+    db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="org.delete", target=f"dept:{slug}"))
     db.commit()
     reindex_async(cfg, force=False)
     return RedirectResponse("/org", status_code=303)
@@ -709,12 +740,13 @@ async def org_people(
     q: str = "",
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     q = q.strip()
     results: list[tuple[DepartmentMember, Department]] = []
     if q:
         like = f"%{q}%"
-        rows = db.execute(
+        stmt = (
             select(DepartmentMember, Department)
             .join(Department, DepartmentMember.department_id == Department.id)
             .where(
@@ -726,7 +758,11 @@ async def org_people(
             )
             .order_by(DepartmentMember.display_name)
             .limit(100)
-        ).all()
+        )
+        clause = tenant_clause(Department, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        rows = db.execute(stmt).all()
         results = [(m, d) for m, d in rows]
     return _templates(request).TemplateResponse(
         request,
