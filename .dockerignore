@@ -13,7 +13,9 @@ dist/
 .ruff_cache/
 .mypy_cache/
 dosm-home/
+dosm-home-dev/
 .dosm-home/
+.dosm-home*/
 .env
 .env.*
 guacamole/

@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231e1e2e'/><text x='3' y='24' font-family='monospace' font-size='18' font-weight='700' fill='%236366f1'>&gt;_</text></svg>" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v={{ request.app.state.asset_version if request and request.app.state.asset_version is defined else '1' }}" />
   {% block head_extra %}{% endblock %}
 </head>
 <body>

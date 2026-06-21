@@ -8,6 +8,10 @@
   </div>
   <div class="actions">
     {% if user and user.role != 'viewer' %}<a class="btn" href="/hosts/new">+ Add host</a>{% endif %}
+    <div class="ex-viewtoggle" role="tablist" aria-label="View mode">
+      <a href="/hosts?view=explorer">Explorer</a>
+      <a class="active" href="/hosts?view=table" aria-selected="true">Table</a>
+    </div>
   </div>
 </header>
 
@@ -53,6 +57,7 @@
       <li data-field="cred"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Credential</li>
       <li data-field="jump"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Jump Host</li>
       <li data-field="tags"  style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Tag</li>
+      <li data-field="org"   style="padding:6px 14px; cursor:pointer; font-size:13px; color:var(--fg)">Application</li>
     </ul>
     <input id="host-search" type="text" placeholder="Search hosts…" autocomplete="off"
            style="flex:1; padding:6px 32px 6px 10px; font-size:13px; border:none;
@@ -62,6 +67,31 @@
                    color:var(--fg-muted); cursor:pointer; font-size:16px; line-height:1; padding:0">×</button>
   </div>
 </div>
+
+{% if org_filter_options %}
+<div style="margin-bottom:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+  <label for="org-filter" style="font-size:12px; color:var(--fg-muted)">Application</label>
+  <select id="org-filter" style="font-size:13px; padding:5px 8px; max-width:380px">
+    <option value="">All applications</option>
+    {% for o in org_filter_options %}
+    <option value="{{ o.id }}" {% if org_unit_id == o.id %}selected{% endif %}>{{ o.label }}</option>
+    {% endfor %}
+  </select>
+  {% if selected_org_unit %}
+  <a class="btn btn-ghost btn-sm" href="{{ '/hosts?kind=' + kind if kind else '/hosts' }}">Clear filter</a>
+  {% endif %}
+  <a class="btn btn-ghost btn-sm" href="/applications" style="margin-left:auto">Manage applications</a>
+</div>
+<script>
+  document.getElementById('org-filter')?.addEventListener('change', function () {
+    var params = new URLSearchParams();
+    {% if kind %}params.set('kind', '{{ kind }}');{% endif %}
+    if (this.value) params.set('org_unit_id', this.value);
+    var qs = params.toString();
+    window.location = '/hosts' + (qs ? '?' + qs : '');
+  });
+</script>
+{% endif %}
 
 <section class="card" style="padding:0; overflow:hidden">
   {% if hosts %}
@@ -85,7 +115,8 @@
           data-proto="{{ h.protocol | lower }}"
           data-cred="{{ (h.credential.name if h.credential else '') | lower }}"
           data-jump="{{ (h.jump_host.name if h.jump_host else 'direct') | lower }}"
-          data-tags="{{ h.tags | map(attribute='name') | join(' ') | lower }}">
+          data-tags="{{ h.tags | map(attribute='name') | join(' ') | lower }}"
+          data-org="{{ (h.org_unit.path_str if h.org_unit else '') | lower }}">
         <td style="padding:10px 16px">
           <div style="display:flex; align-items:center; gap:8px">
             <a href="/hosts/{{ h.id }}" style="font-weight:500; color:var(--fg-strong); text-decoration:none">{{ h.name }}</a>
@@ -94,6 +125,11 @@
             {% endif %}
           </div>
           <div style="font-size:11px; color:var(--fg-muted); margin-top:2px; font-family:monospace">{{ h.hostname }}:{{ h.port }}</div>
+          {% if h.org_unit %}
+          <div style="font-size:11px; color:var(--fg-muted); margin-top:3px">
+            <a href="/hosts?org_unit_id={{ h.org_unit.id }}" style="color:var(--fg-muted); text-decoration:none">▤ {{ h.org_unit.path_str }}</a>
+          </div>
+          {% endif %}
         </td>
         <td style="padding:10px 14px">
           <span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600">
@@ -131,6 +167,8 @@
         <td colspan="6" style="padding:0; background:var(--surface-raised,rgba(255,255,255,.04)); border-bottom:2px solid var(--accent,#6366f1)">
           <form method="post" action="/hosts/{{ h.id }}/edit" style="padding:16px 20px">
             <input type="hidden" name="back" value="list" />
+            <!-- Preserve the org assignment (edited via the full host form, not inline). -->
+            <input type="hidden" name="org_unit_id" value="{{ h.org_unit_id or '' }}" />
 
             <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:12px; margin-bottom:12px; align-items:end">
               <div>
@@ -309,7 +347,7 @@
     });
   }
 
-  var DATA_ATTRS = ['data-name','data-ip','data-proto','data-cred','data-jump','data-tags'];
+  var DATA_ATTRS = ['data-name','data-ip','data-proto','data-cred','data-jump','data-tags','data-org'];
 
   function applyFilter(q) {
     var table = document.getElementById('host-table');

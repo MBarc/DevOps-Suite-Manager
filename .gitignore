@@ -22,6 +22,7 @@ env/
 .dosm-home-dev/
 .dosm-home*/
 dosm-home/
+dosm-home-dev/
 
 # Runtime files produced by start scripts
 .dosm.pid

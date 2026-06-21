@@ -611,3 +611,196 @@ code {
   .sidebar-nav a.active::before { display: none; }
   main.main { padding: var(--sp-4); }
 }
+
+/* ============================================================
+   Host Explorer (file-system style tree + detail) - Phase 23
+   ============================================================ */
+.explorer-toolbar {
+  display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-3);
+}
+.ex-actions-row { display: flex; justify-content: flex-end; align-items: center; }
+/* Full-width search bar that aligns with the explorer box below it. Styled to
+   match the table view's field-selector search control. */
+.ex-searchwrap {
+  position: relative; display: flex; align-items: center; width: 100%;
+  border: 1px solid var(--divider); border-radius: 8px;
+  background: var(--surface-raised, rgba(255,255,255,.05)); overflow: visible;
+}
+.ex-filter-btn {
+  display: flex; align-items: center; gap: 4px; align-self: stretch;
+  box-sizing: border-box; padding: 0 10px 0 12px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; border: none;
+  border-right: 1px solid var(--divider); border-radius: 8px 0 0 8px;
+  /* Permanent background so the field selector is always a distinct, full-height
+     flush segment - not only when hovered. */
+  background: var(--bg-elev-3); color: var(--fg-muted); cursor: pointer; box-shadow: none;
+}
+.ex-filter-btn:hover { background: var(--bg-elev-4); color: var(--fg); }
+.ex-filter-menu {
+  display: none; position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px;
+  background: var(--bg-elev-3); border: 1px solid var(--divider); border-radius: 6px;
+  list-style: none; margin: 0; padding: 4px 0; z-index: 300; box-shadow: var(--sh-2);
+}
+.ex-filter-menu li { padding: 6px 14px; cursor: pointer; font-size: 13px; color: var(--fg); }
+.ex-filter-menu li:hover { background: var(--accent); color: var(--accent-fg); }
+/* Selector is intentionally specific (.ex-searchwrap input.ex-search-input)
+   to outrank the global `input[type=search]` rule, which otherwise forces a
+   background, 1px border, and rounded corners onto the field. We want it flat,
+   transparent, and flush inside the bar. */
+.ex-searchwrap input.ex-search-input {
+  flex: 1; min-width: 0; padding: 8px 32px 8px 10px; font-size: 13px;
+  background: transparent; border: none; border-radius: 0; outline: none;
+  color: var(--fg); box-shadow: none;
+  -webkit-appearance: none; appearance: none;
+}
+.ex-searchwrap input.ex-search-input:focus { border: none; box-shadow: none; }
+.ex-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.ex-search-clear {
+  display: none; position: absolute; right: 8px; background: none; border: none;
+  color: var(--fg-muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0;
+  box-shadow: none;
+}
+.ex-search-clear:hover { background: none; color: var(--fg); }
+.ex-viewtoggle {
+  display: inline-flex; border: 1px solid var(--border);
+  border-radius: var(--r-sm); overflow: hidden;
+}
+.ex-viewtoggle a {
+  padding: 5px 12px; font-size: 12px; font-weight: 500;
+  color: var(--fg-muted); text-decoration: none;
+}
+.ex-viewtoggle a + a { border-left: 1px solid var(--border); }
+.ex-viewtoggle a.active { background: var(--bg-elev-3); color: var(--fg-strong); }
+.ex-viewtoggle a:hover:not(.active) { background: var(--bg-elev-2); color: var(--fg); }
+
+.explorer-body {
+  display: grid; grid-template-columns: 280px 1fr; gap: var(--sp-4);
+  align-items: stretch;
+}
+.ex-tree, .ex-detail {
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); overflow: auto;
+  height: calc(100vh - 168px); min-height: 420px;
+}
+.ex-tree { padding: var(--sp-2); }
+.ex-detail { padding: var(--sp-4); }
+
+.tree-root, .tree-children { list-style: none; margin: 0; padding: 0; }
+.tree-children { padding-left: 14px; }
+.tree-node.collapsed > .tree-children { display: none; }
+.tree-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border-radius: var(--r-sm);
+  cursor: pointer; color: var(--fg); font-size: 13px; user-select: none;
+}
+.tree-row:hover { background: var(--bg-elev-3); }
+.tree-row:focus-visible { outline: none; box-shadow: var(--ring); }
+.tree-node.selected > .tree-row { background: var(--accent); color: var(--accent-fg); }
+.tree-node.selected > .tree-row .tree-count { background: rgba(11,13,18,0.18); color: var(--accent-fg); }
+.tree-node.selected > .tree-row .tree-ico { color: var(--accent-fg); }
+.tree-caret {
+  width: 16px; height: 16px; flex: none; border: none; background: none;
+  color: var(--fg-muted); cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.tree-caret::before { content: '▸'; font-size: 10px; transition: transform .12s ease; }
+.tree-node:not(.collapsed) > .tree-row .tree-caret::before { transform: rotate(90deg); }
+.tree-caret-sp { width: 16px; flex: none; display: inline-block; }
+.tree-ico { width: 15px; height: 15px; flex: none; color: var(--fg-muted); }
+.tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-count {
+  font-size: 11px; color: var(--fg-dim); background: var(--bg-elev-4);
+  border-radius: var(--r-pill); padding: 0 7px; line-height: 18px;
+}
+.tree-menu {
+  opacity: 0; background: none; border: none; color: var(--fg-muted);
+  cursor: pointer; font-size: 16px; line-height: 1; padding: 1px 5px;
+  flex: none; border-radius: var(--r-xs);
+}
+.tree-row:hover .tree-menu, .tree-node.selected > .tree-row .tree-menu { opacity: .9; }
+.tree-menu:hover { color: var(--accent); background: var(--bg-elev-4); }
+.tree-node.selected > .tree-row .tree-menu { color: var(--accent-fg); }
+
+/* Tier badge so the application -> environment -> unit levels are unmistakable */
+.tier-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: .04em;
+  padding: 1px 5px; border-radius: var(--r-xs); flex: none;
+}
+.tier-application { background: rgba(116,168,255,0.16); color: var(--accent); }
+.tier-environment { background: rgba(95,209,154,0.16); color: var(--success); }
+.tier-unit { background: rgba(241,194,106,0.16); color: var(--warn); }
+.tree-node.selected > .tree-row .tier-badge { background: rgba(11,13,18,0.20); color: var(--accent-fg); }
+.tree-special + .tree-node { margin-top: 2px; }
+.tree-hint { padding: var(--sp-3); font-size: 12px; color: var(--fg-dim); }
+
+.ex-bc {
+  font-size: 13px; color: var(--fg-muted); margin-bottom: var(--sp-4);
+  display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+}
+.ex-bc b { color: var(--fg-strong); font-weight: 600; }
+.ex-bc-count { color: var(--fg-dim); }
+.ex-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: var(--sp-3);
+}
+.hcard {
+  background: var(--bg-elev-1); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.hcard:hover { border-color: var(--accent-2); box-shadow: var(--sh-2); }
+.hcard-top { display: flex; align-items: center; gap: 8px; }
+.hcard-name {
+  font-weight: 600; color: var(--fg-strong); text-decoration: none;
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hcard-name:hover { color: var(--accent); }
+.hcard-sub { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted); }
+.hcard-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--fg-dim); }
+.hcard-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.proto-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.proto-ssh { background: var(--success); }
+.proto-rdp { background: var(--accent); }
+.proto-vnc { background: #b78cf0; }
+.proto-local { background: var(--fg-dim); }
+.hbadge { font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px; border-radius: var(--r-xs); flex: none; }
+.hbadge.jump { background: var(--warn); color: #1a1206; }
+.hbadge.proto { background: var(--bg-elev-4); color: var(--fg-muted); }
+.ex-empty { color: var(--fg-dim); padding: var(--sp-10) var(--sp-4); text-align: center; }
+
+/* Drag & drop: host card -> folder */
+.hcard[draggable="true"] { cursor: grab; }
+.hcard[draggable="true"]:active { cursor: grabbing; }
+.hcard.dragging { opacity: .45; }
+.tree-row.drop-target {
+  outline: 2px dashed var(--accent); outline-offset: -2px;
+  background: rgba(116,168,255,0.14);
+}
+.tree-row.drop-done { background: var(--success); color: var(--accent-fg); transition: background .2s; }
+.tree-row.drop-done .tree-count, .tree-row.drop-done .tier-badge { color: var(--accent-fg); }
+
+.ctx-menu {
+  position: fixed; z-index: 1000; min-width: 184px;
+  background: var(--bg-elev-3); border: 1px solid var(--border);
+  border-radius: var(--r-sm); box-shadow: var(--sh-2); padding: 4px;
+}
+.ctx-menu[hidden] { display: none; }
+.ctx-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  text-align: left; background: none; border: none; color: var(--fg);
+  font-size: 13px; padding: 7px 10px; border-radius: var(--r-xs); cursor: pointer;
+}
+.ctx-menu button:hover { background: var(--accent); color: var(--accent-fg); }
+.ctx-menu button.danger { color: var(--danger); }
+.ctx-menu button.danger:hover { background: rgba(255,122,138,0.15); color: var(--danger); }
+.ctx-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.ctx-menu .ctx-head {
+  font-size: 11px; color: var(--fg-dim); padding: 5px 10px 3px;
+  text-transform: uppercase; letter-spacing: .03em;
+}
+
+@media (max-width: 860px) {
+  .explorer-body { grid-template-columns: 1fr; }
+  .ex-tree, .ex-detail { height: auto; min-height: 0; }
+  .ex-tree { max-height: 320px; }
+}

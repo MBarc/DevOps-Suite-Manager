@@ -42,6 +42,15 @@
         <span class="muted">direct (no jump host)</span>
       {% endif %}
     </dd>
+    <dt>Application</dt>
+    <dd>
+      {% if host.org_unit %}
+        <a href="/hosts?org_unit_id={{ host.org_unit.id }}">{{ host.org_unit.path_str }}</a>
+        <span class="muted">({{ host.org_unit.tier }})</span>
+      {% else %}
+        <em class="muted">unassigned</em>
+      {% endif %}
+    </dd>
     <dt>Tags</dt>
     <dd>
       {% if host.tags %}

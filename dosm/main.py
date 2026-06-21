@@ -18,6 +18,7 @@ from dosm.auth.deps import (
     not_authenticated_exception_handler,
     require_user,
 )
+from dosm.applications import router as applications_router
 from dosm.auth.routes import router as auth_router
 from dosm.auth.session import install_session_middleware
 from dosm.certs import certs_router
@@ -113,6 +114,14 @@ def create_app(config: Config | None = None) -> FastAPI:
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    # Cache-bust the stylesheet: templates append ?v=<asset_version> to /static
+    # links so a rebuilt app.css is fetched instead of a stale browser copy.
+    # Derived from app.css mtime, so it changes on every deploy/rebuild.
+    try:
+        app.state.asset_version = str(int((STATIC_DIR / "app.css").stat().st_mtime))
+    except OSError:
+        app.state.asset_version = __version__
+
     install_session_middleware(app, cfg)
     app.add_exception_handler(_NotAuthenticated, not_authenticated_exception_handler)
 
@@ -123,11 +132,18 @@ def create_app(config: Config | None = None) -> FastAPI:
         if ct.startswith("text/html"):
             response.headers["Cache-Control"] = "no-store, must-revalidate"
             response.headers["Pragma"] = "no-cache"
+        elif request.url.path.startswith("/static/"):
+            # Force the browser to revalidate CSS/JS every load (ETag still
+            # yields a fast 304 when unchanged). Stops stale stylesheets from
+            # surviving a deploy even when the ?v cache-bust is bypassed by the
+            # back/forward cache.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     app.include_router(auth_router)
     app.include_router(credentials_router)
     app.include_router(hosts_router)
+    app.include_router(applications_router)
     # Always mount /hosts/{id}/connect; the route itself handles the
     # guacamole.enabled=false case with a friendly error page.
     app.include_router(guacamole_router)

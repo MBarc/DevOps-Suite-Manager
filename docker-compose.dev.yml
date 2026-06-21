@@ -1,0 +1,26 @@
+# docker-compose.dev.yml - isolated development overlay
+#
+# Runs a second DOSM stack ("dosm-dev" project) from the local source tree
+# against an isolated copy of the home dir (./dosm-home-dev), so feature work
+# never touches the real ./dosm-home inventory, secrets, or chats.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml -p dosm-dev up -d --build
+#
+# Alternate ports keep it from colliding with the main stack:
+#   DOSM        -> http://localhost:8766
+#   Guacamole   -> http://localhost:8889/guacamole
+#   Ollama      -> http://localhost:11436
+# Set them via DOSM_PORT / GUACAMOLE_PORT / OLLAMA_PORT (the base file reads
+# these). Volumes (guac-db, ollama-data) are project-scoped, so the dev stack
+# gets its own fresh ones rather than sharing the main stack's data.
+
+services:
+  dosm:
+    volumes:
+      - ./dosm-home-dev:/dosm-home
+    environment:
+      GUACAMOLE_PUBLIC_URL: http://localhost:8889/guacamole
+
+  guacamole:
+    volumes:
+      - ./dosm-home-dev/data/guacamole_recordings:/recordings

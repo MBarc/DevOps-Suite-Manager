@@ -75,6 +75,22 @@
       <span class="field-hint">If set, sessions reach this host through that jumpbox. Only hosts flagged as jumpboxes are listed.</span>
     </label>
     <fieldset style="border:1px solid var(--border); border-radius:6px; padding:12px; min-width:0; margin:0;">
+      <legend style="font-size:12px; color:var(--fg-muted); padding:0 6px;">Organisation (optional)</legend>
+      <input type="hidden" name="org_unit_id" id="org-unit-id" value="{{ host.org_unit_id if host and host.org_unit_id else '' }}">
+      <div class="row">
+        <label style="flex:1">Application
+          <select id="org-app"><option value="">(none)</option></select>
+        </label>
+        <label style="flex:1">Environment
+          <select id="org-env" disabled><option value="">(none)</option></select>
+        </label>
+        <label style="flex:1">Unit
+          <select id="org-unit-sel" disabled><option value="">(none)</option></select>
+        </label>
+      </div>
+      <span class="field-hint">Group by application &rarr; environment &rarr; an optional unit (e.g. region). Manage folders by right-clicking the tree on the <a href="/hosts">Hosts</a> page.</span>
+    </fieldset>
+    <fieldset style="border:1px solid var(--border); border-radius:6px; padding:12px; min-width:0; margin:0;">
       <legend style="font-size:12px; color:var(--fg-muted); padding:0 6px;">File transfer (optional)</legend>
       <label>Method
         <select name="ft_method" id="ft-method-select">
@@ -162,6 +178,69 @@
 
     hostnameInput.addEventListener('blur', () => resolve(hostnameInput.value, ipInput, 'ip'));
     ipInput.addEventListener('blur', () => resolve(ipInput.value, hostnameInput, 'hostname'));
+  })();
+
+  // Organisation cascade: application -> environment -> unit. A flat list of
+  // org units is filtered client-side; the hidden field carries the *deepest*
+  // selected node id (the host's placement).
+  (function () {
+    const units = {{ org_units|tojson }};
+    const initial = {{ (host.org_unit_id if host and host.org_unit_id else preset_org_unit_id)|tojson }};
+    const hidden = document.getElementById('org-unit-id');
+    const appSel = document.getElementById('org-app');
+    const envSel = document.getElementById('org-env');
+    const unitSel = document.getElementById('org-unit-sel');
+    if (!hidden || !appSel) return;
+    const byId = {};
+    units.forEach(u => { byId[u.id] = u; });
+    const childrenOf = pid => units.filter(u => u.parent_id === pid)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const apps = units.filter(u => u.tier === 'application')
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    function fill(sel, items, selectedId) {
+      sel.innerHTML = '<option value="">(none)</option>';
+      items.forEach(it => {
+        const o = document.createElement('option');
+        o.value = it.id; o.textContent = it.name;
+        if (String(it.id) === String(selectedId)) o.selected = true;
+        sel.appendChild(o);
+      });
+    }
+    function updateHidden() {
+      hidden.value = unitSel.value || envSel.value || appSel.value || '';
+    }
+    appSel.addEventListener('change', () => {
+      const appId = appSel.value ? Number(appSel.value) : null;
+      const envs = appId ? childrenOf(appId) : [];
+      fill(envSel, envs, null); envSel.disabled = envs.length === 0;
+      fill(unitSel, [], null); unitSel.disabled = true;
+      updateHidden();
+    });
+    envSel.addEventListener('change', () => {
+      const envId = envSel.value ? Number(envSel.value) : null;
+      const us = envId ? childrenOf(envId) : [];
+      fill(unitSel, us, null); unitSel.disabled = us.length === 0;
+      updateHidden();
+    });
+    unitSel.addEventListener('change', updateHidden);
+
+    fill(appSel, apps, null);
+    if (initial != null && byId[initial]) {
+      const path = [];
+      let cur = byId[initial];
+      while (cur) { path.unshift(cur); cur = cur.parent_id != null ? byId[cur.parent_id] : null; }
+      const appId = path[0] ? path[0].id : null;
+      appSel.value = appId != null ? String(appId) : '';
+      const envs = appId ? childrenOf(appId) : [];
+      fill(envSel, envs, path[1] ? path[1].id : null);
+      envSel.disabled = envs.length === 0;
+      const envId = path[1] ? path[1].id : null;
+      const us = envId ? childrenOf(envId) : [];
+      fill(unitSel, us, path[2] ? path[2].id : null);
+      unitSel.disabled = us.length === 0;
+    }
+    updateHidden();
   })();
 
   (function () {

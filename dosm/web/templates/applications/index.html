@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Applications | DOSM{% endblock %}
+{% set can_edit = user is defined and user and user.role in ('operator', 'admin') %}
+{% block content %}
+<style>
+  .org-tier { margin-top: var(--sp-3); }
+  .org-node {
+    display: flex; align-items: center; gap: var(--sp-2);
+    flex-wrap: wrap;
+  }
+  .org-node .org-name { font-weight: 600; }
+  .org-env { border-left: 2px solid var(--border, #3f3f46); padding-left: var(--sp-3); margin-left: var(--sp-1); }
+  .org-env + .org-env { margin-top: var(--sp-3); }
+  .org-unit { padding-left: var(--sp-3); margin-top: var(--sp-1); }
+  .org-count {
+    font-size: 12px; color: var(--fg-muted, #71717a);
+    background: var(--surface-raised, rgba(255,255,255,.05));
+    border: 1px solid var(--border, #3f3f46);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  .org-actions { margin-left: auto; display: flex; gap: var(--sp-1); align-items: center; }
+  details.org-add > summary, details.org-edit > summary {
+    cursor: pointer; font-size: 12px; color: var(--accent, #6366f1);
+    list-style: none; user-select: none;
+  }
+  details.org-edit > summary { color: var(--fg-muted, #71717a); }
+  details > summary::-webkit-details-marker { display: none; }
+  .org-form { display: flex; gap: var(--sp-2); align-items: end; flex-wrap: wrap; margin-top: var(--sp-2); }
+  .org-form .field { margin: 0; }
+  .org-form input[type=text] { min-width: 160px; }
+  .org-danger { color: var(--red, #ef4444); }
+</style>
+
+<header class="page-header">
+  <div>
+    <h1>Applications</h1>
+    <div class="subtitle">Organise hosts by application &rarr; environment &rarr; unit</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/hosts">All hosts</a>
+  </div>
+</header>
+
+{% if error %}
+<div class="error" style="margin-bottom: var(--sp-3)">{{ error }}</div>
+{% endif %}
+
+{% if can_edit %}
+<section class="card">
+  <h2>New application</h2>
+  <form method="post" action="/applications/units" class="org-form">
+    <input type="hidden" name="tier" value="application">
+    <label class="field">Name<input type="text" name="name" required placeholder="Payments"></label>
+    <label class="field" style="flex:1">Description<input type="text" name="description" placeholder="optional"></label>
+    <div><button type="submit">Create</button></div>
+  </form>
+</section>
+{% endif %}
+
+{% if not tree %}
+<section class="card">
+  <div class="empty-state">
+    No applications yet.
+    {% if can_edit %}Create one above to start grouping hosts.{% else %}Ask an operator to create one.{% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% for app in tree %}
+<section class="card">
+  <div class="org-node">
+    <span class="org-name"><a href="/hosts?org_unit_id={{ app.unit.id }}">{{ app.unit.name }}</a></span>
+    <span class="org-count" title="hosts in this application (all environments)">{{ app.total }} host{{ '' if app.total == 1 else 's' }}</span>
+    {% if can_edit %}
+    <div class="org-actions">
+      <details class="org-edit">
+        <summary>Edit</summary>
+        <form method="post" action="/applications/units/{{ app.unit.id }}/edit" class="org-form">
+          <label class="field">Name<input type="text" name="name" required value="{{ app.unit.name }}"></label>
+          <label class="field" style="flex:1">Description<input type="text" name="description" value="{{ app.unit.description or '' }}"></label>
+          <div><button type="submit" class="btn-sm">Save</button></div>
+        </form>
+      </details>
+      <form method="post" action="/applications/units/{{ app.unit.id }}/delete" class="inline"
+            onsubmit="return confirm('Delete application {{ app.unit.name|e }} and all its environments/units? Hosts stay but become unassigned.')">
+        <button type="submit" class="btn btn-ghost btn-sm org-danger">Delete</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% if app.unit.description %}<p class="muted" style="margin:var(--sp-1) 0 0">{{ app.unit.description }}</p>{% endif %}
+
+  <div class="org-tier">
+    {% for env in app.children %}
+    <div class="org-env">
+      <div class="org-node">
+        <span class="org-name"><a href="/hosts?org_unit_id={{ env.unit.id }}">{{ env.unit.name }}</a></span>
+        <span class="org-count">{{ env.total }} host{{ '' if env.total == 1 else 's' }}</span>
+        {% if can_edit %}
+        <div class="org-actions">
+          <details class="org-edit">
+            <summary>Edit</summary>
+            <form method="post" action="/applications/units/{{ env.unit.id }}/edit" class="org-form">
+              <label class="field">Name<input type="text" name="name" required value="{{ env.unit.name }}"></label>
+              <label class="field" style="flex:1">Description<input type="text" name="description" value="{{ env.unit.description or '' }}"></label>
+              <div><button type="submit" class="btn-sm">Save</button></div>
+            </form>
+          </details>
+          <form method="post" action="/applications/units/{{ env.unit.id }}/delete" class="inline"
+                onsubmit="return confirm('Delete environment {{ env.unit.name|e }} and its units? Hosts become unassigned.')">
+            <button type="submit" class="btn btn-ghost btn-sm org-danger">Delete</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+
+      {% for u in env.children %}
+      <div class="org-unit org-node">
+        <span><a href="/hosts?org_unit_id={{ u.unit.id }}">{{ u.unit.name }}</a></span>
+        <span class="org-count">{{ u.total }} host{{ '' if u.total == 1 else 's' }}</span>
+        {% if can_edit %}
+        <div class="org-actions">
+          <details class="org-edit">
+            <summary>Edit</summary>
+            <form method="post" action="/applications/units/{{ u.unit.id }}/edit" class="org-form">
+              <label class="field">Name<input type="text" name="name" required value="{{ u.unit.name }}"></label>
+              <label class="field" style="flex:1">Description<input type="text" name="description" value="{{ u.unit.description or '' }}"></label>
+              <div><button type="submit" class="btn-sm">Save</button></div>
+            </form>
+          </details>
+          <form method="post" action="/applications/units/{{ u.unit.id }}/delete" class="inline"
+                onsubmit="return confirm('Delete unit {{ u.unit.name|e }}? Hosts become unassigned.')">
+            <button type="submit" class="btn btn-ghost btn-sm org-danger">Delete</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      {% if can_edit %}
+      <details class="org-add" style="margin-top: var(--sp-2); padding-left: var(--sp-3)">
+        <summary>+ Add unit</summary>
+        <form method="post" action="/applications/units" class="org-form">
+          <input type="hidden" name="tier" value="unit">
+          <input type="hidden" name="parent_id" value="{{ env.unit.id }}">
+          <label class="field">Name<input type="text" name="name" required placeholder="US / EU / AU"></label>
+          <label class="field" style="flex:1">Description<input type="text" name="description" placeholder="optional"></label>
+          <div><button type="submit" class="btn-sm">Add</button></div>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    {% if can_edit %}
+    <details class="org-add" style="margin-top: var(--sp-3)">
+      <summary>+ Add environment</summary>
+      <form method="post" action="/applications/units" class="org-form">
+        <input type="hidden" name="tier" value="environment">
+        <input type="hidden" name="parent_id" value="{{ app.unit.id }}">
+        <label class="field">Name<input type="text" name="name" required placeholder="dev / test / prod / dr"></label>
+        <label class="field" style="flex:1">Description<input type="text" name="description" placeholder="optional"></label>
+        <div><button type="submit" class="btn-sm">Add</button></div>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+
+{% endblock %}
