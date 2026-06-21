@@ -90,6 +90,48 @@ def _action_color(action: str) -> str:
     return "blue"
 
 
+def _nav_tenant(request):
+    """Jinja global: tenant context for the sidebar switcher/badge.
+
+    Returns None for anonymous requests. For a platform admin it returns the
+    list of active tenants + the currently selected active tenant (the
+    switcher); for a regular user it returns their own tenant's name (a badge).
+    One short DB read per page render.
+    """
+    from sqlalchemy import select
+
+    from dosm.auth.deps import user_has_role
+    from dosm.auth.tenancy import ACTIVE_TENANT_SESSION_KEY
+    from dosm.db import session_scope
+    from dosm.models import Tenant, User
+
+    try:
+        uid = request.session.get("user_id")
+    except Exception:
+        return None
+    if not uid:
+        return None
+    with session_scope() as s:
+        user = s.get(User, uid)
+        if user is None or not user.is_active:
+            return None
+        if user_has_role(user, "platform_admin"):
+            tenants = [
+                {"id": t.id, "name": t.name}
+                for t in s.execute(
+                    select(Tenant).where(Tenant.is_active.is_(True)).order_by(Tenant.name)
+                ).scalars()
+            ]
+            raw = request.session.get(ACTIVE_TENANT_SESSION_KEY)
+            active_id = int(raw) if raw is not None else None
+            return {"platform": True, "tenants": tenants, "active_id": active_id}
+        name = None
+        if user.tenant_id is not None:
+            t = s.get(Tenant, user.tenant_id)
+            name = t.name if t is not None else None
+        return {"platform": False, "current_name": name}
+
+
 def create_app(config: Config | None = None) -> FastAPI:
     cfg = config or load_config()
     init_engine(cfg)
@@ -113,6 +155,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.config = cfg
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates.env.globals["nav_tenant"] = _nav_tenant
     app.state.templates = templates
 
     if STATIC_DIR.exists():

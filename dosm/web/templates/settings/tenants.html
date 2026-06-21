@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Settings | Tenants | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><h1>Tenants</h1></div>
+</header>
+
+{% include "settings/_tabs.html" %}
+
+{% if request.query_params.get('saved') %}
+<section class="card" style="border-left:3px solid var(--success); padding-top:var(--sp-3); padding-bottom:var(--sp-3)">
+  <span class="badge badge-green"><span class="dot ok"></span> Saved</span>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Tenants</h2>
+  <p class="muted" style="font-size:13px; margin-bottom:12px">
+    Each tenant is a fully isolated workspace. Use the switcher in the sidebar to
+    act within a tenant; with no tenant selected you get a read-only view across
+    all tenants.
+  </p>
+  <table class="data" style="margin-bottom:16px">
+    <thead><tr><th>Tenant</th><th>Slug</th><th style="width:90px">Users</th><th style="width:90px">Hosts</th><th style="width:90px">Status</th><th style="width:220px"></th></tr></thead>
+    <tbody>
+    {% for t in tenants %}
+      <tr>
+        <td style="font-weight:500; color:var(--fg-strong)">
+          <form method="post" action="/settings/tenants/{{ t.id }}/rename" class="row" style="gap:6px; align-items:center">
+            <input type="text" name="name" value="{{ t.name }}" style="width:160px" />
+            <button type="submit" class="btn btn-subtle btn-sm">Rename</button>
+          </form>
+        </td>
+        <td><code>{{ t.slug }}</code></td>
+        <td>{{ counts[t.id].users }}</td>
+        <td>{{ counts[t.id].hosts }}</td>
+        <td>
+          {% if t.is_active %}<span class="badge badge-green">active</span>
+          {% else %}<span class="badge badge-amber">inactive</span>{% endif %}
+        </td>
+        <td style="text-align:right">
+          <form method="post" action="/settings/tenants/{{ t.id }}/toggle" class="inline">
+            <button type="submit" class="btn btn-ghost btn-sm">{{ 'Deactivate' if t.is_active else 'Activate' }}</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted" style="padding:14px">No tenants yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3 style="font-size:14px; margin:0 0 8px">Create a tenant</h3>
+  <form method="post" action="/settings/tenants" class="row" style="gap:8px; align-items:flex-end; flex-wrap:wrap">
+    <label style="flex:1; min-width:200px">
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Name</span>
+      <input type="text" name="name" required placeholder="e.g. Payments Team" style="width:100%; box-sizing:border-box" />
+    </label>
+    <label>
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Slug (optional)</span>
+      <input type="text" name="slug" placeholder="auto from name" />
+    </label>
+    <label style="flex:1; min-width:200px">
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Description</span>
+      <input type="text" name="description" style="width:100%; box-sizing:border-box" />
+    </label>
+    <button type="submit" class="btn">Create</button>
+  </form>
+</section>
+{% endblock %}

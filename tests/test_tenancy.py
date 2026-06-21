@@ -170,3 +170,77 @@ def test_platform_admin_cannot_create_without_active_tenant(root):
     r = root.post("/hosts/new", data={"name": "nowhere", "hostname": "1.1.1.1"},
                   follow_redirects=False)
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Phase 24c - tenant CRUD, active-tenant switcher, member management
+# ---------------------------------------------------------------------------
+
+def test_platform_admin_switcher_scopes_view_and_create(alice, bob, root, two_tenants):
+    _create_host(alice, "alpha-box")
+    _create_host(bob, "beta-box")
+
+    # Switch the platform admin into tenant B (Acme).
+    r = root.post("/settings/active-tenant", data={"tenant_id": two_tenants["b"]},
+                  follow_redirects=False)
+    assert r.status_code == 303
+    page = root.get("/hosts?view=table").text
+    assert "beta-box" in page
+    assert "alpha-box" not in page
+
+    # With a tenant active, the platform admin can now create into it.
+    hid = _create_host(root, "gamma-box")
+    assert hid is not None
+
+    # Back to the all-tenants view: create is blocked again.
+    root.post("/settings/active-tenant", data={"tenant_id": "all"}, follow_redirects=False)
+    r = root.post("/hosts/new", data={"name": "nope", "hostname": "1.1.1.1"},
+                  follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_platform_admin_creates_tenant(root, session_factory):
+    r = root.post("/settings/tenants", data={"name": "NewCo", "slug": "newco"},
+                  follow_redirects=False)
+    assert r.status_code == 303
+    with session_factory() as s:
+        assert s.execute(
+            select(Tenant).where(Tenant.slug == "newco")
+        ).scalar_one_or_none() is not None
+        s.execute(text("DELETE FROM tenants WHERE slug='newco'"))
+        s.commit()
+
+
+def test_tenant_admin_cannot_manage_tenants(alice):
+    assert alice.get("/settings/tenants", follow_redirects=False).status_code == 403
+    assert alice.post("/settings/active-tenant", data={"tenant_id": "all"},
+                      follow_redirects=False).status_code == 403
+
+
+def test_platform_admin_sets_member_role_and_lock(root, two_tenants, session_factory):
+    with session_factory() as s:
+        u = User(username="charlie", password_hash=hash_password("pw"), role="viewer",
+                 tenant_id=two_tenants["a"], is_active=True)
+        s.add(u)
+        s.commit()
+        uid = u.id
+    r = root.post(f"/settings/members/{uid}/role",
+                  data={"role": "operator", "locked": "on"}, follow_redirects=False)
+    assert r.status_code == 303
+    with session_factory() as s:
+        u = s.get(User, uid)
+        assert u.role == "operator"
+        assert u.role_locked is True
+
+
+def test_tenant_admin_cannot_touch_other_tenants_member(alice, two_tenants, session_factory):
+    with session_factory() as s:
+        u = User(username="dave", password_hash=hash_password("pw"), role="viewer",
+                 tenant_id=two_tenants["b"], is_active=True)
+        s.add(u)
+        s.commit()
+        uid = u.id
+    # Alice (tenant A admin) cannot change a tenant B user.
+    r = alice.post(f"/settings/members/{uid}/role",
+                   data={"role": "operator"}, follow_redirects=False)
+    assert r.status_code == 404

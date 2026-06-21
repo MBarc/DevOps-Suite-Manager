@@ -1,0 +1,13 @@
+{% set p = request.url.path %}
+{% macro _tab(href, label, active) %}
+  <a href="{{ href }}" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:{{ 'var(--fg-strong)' if active else 'var(--fg-muted)' }}; border-bottom:2px solid {{ 'var(--accent,#6366f1)' if active else 'transparent' }}; margin-bottom:-1px">{{ label }}</a>
+{% endmacro %}
+<div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider); flex-wrap:wrap">
+  {{ _tab('/settings', 'Terminal launchers', p == '/settings') }}
+  {{ _tab('/settings/integrations', 'Integrations', p.startswith('/settings/integrations')) }}
+  {{ _tab('/settings/rbac', 'Access control', p.startswith('/settings/rbac')) }}
+  {{ _tab('/settings/members', 'Members', p.startswith('/settings/members')) }}
+  {% if user is defined and user and user.role == 'platform_admin' %}
+    {{ _tab('/settings/tenants', 'Tenants', p.startswith('/settings/tenants')) }}
+  {% endif %}
+</div>

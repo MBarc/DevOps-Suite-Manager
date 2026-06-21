@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Applications | DOSM{% endblock %}
-{% set can_edit = user is defined and user and user.role in ('operator', 'admin') %}
+{% set can_edit = user is defined and user and user.role in ('operator', 'admin', 'platform_admin') %}
 {% block content %}
 <style>
   .org-tier { margin-top: var(--sp-3); }

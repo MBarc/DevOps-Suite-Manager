@@ -27,13 +27,13 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="0.9"/><circle cx="7" cy="17" r="0.9"/></svg>
         Hosts
       </a>
-      {% if user is defined and user and user.role == 'admin' %}
+      {% if user is defined and user and user.role in ('admin', 'platform_admin') %}
       <a href="/files" class="{% if path.startswith('/files') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 11h18"/></svg>
         File Transfer
       </a>
       {% endif %}
-      {% if request.app.state.config.terminals.enabled and user is defined and user and user.role == 'admin' %}
+      {% if request.app.state.config.terminals.enabled and user is defined and user and user.role in ('admin', 'platform_admin') %}
       <a href="/terminals" class="{% if path.startswith('/terminals') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
         Terminals
@@ -79,10 +79,16 @@
       </a>
 
       <div class="sidebar-section-label">Platform</div>
-      {% if user is defined and user and user.role == 'admin' %}
+      {% if user is defined and user and user.role in ('admin', 'platform_admin') %}
       <a href="/settings" class="{% if path.startswith('/settings') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
         Settings
+      </a>
+      {% endif %}
+      {% if user is defined and user and user.role == 'platform_admin' %}
+      <a href="/settings/tenants" class="{% if path.startswith('/settings/tenants') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V8l9-5 9 5v13"/><path d="M9 21v-6h6v6"/><path d="M3 21h18"/></svg>
+        Tenants
       </a>
       {% endif %}
       <a href="/health" class="{% if path == '/health' %}active{% endif %}">
@@ -92,6 +98,29 @@
     </nav>
 
     {% if user is defined and user %}
+    {% set nt = nav_tenant(request) %}
+    {% if nt %}
+    <div class="tenant-switch" title="Active tenant scope">
+      {% if nt.platform %}
+      <form method="post" action="/settings/active-tenant" class="inline" style="width:100%">
+        <select name="tenant_id" onchange="this.form.submit()" aria-label="Active tenant"
+                style="width:100%; box-sizing:border-box; font-size:12px; padding:5px 8px;
+                       background:var(--surface,#18181b); color:var(--text,#e4e4e7);
+                       border:1px solid var(--border,#3f3f46); border-radius:6px">
+          <option value="all" {% if not nt.active_id %}selected{% endif %}>&#127760; All tenants (read-only)</option>
+          {% for t in nt.tenants %}
+            <option value="{{ t.id }}" {% if t.id == nt.active_id %}selected{% endif %}>&#127970; {{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% else %}
+      <div class="tenant-badge" style="font-size:11px; color:var(--fg-muted,#a1a1aa); padding:4px 8px;
+           border:1px solid var(--border,#3f3f46); border-radius:6px; text-align:center">
+        &#127970; {{ nt.current_name or 'No tenant' }}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
     <div class="user-chip">
       <div class="avatar">{{ (user.username[:2]) | upper }}</div>
       <div class="who">

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Settings | Members | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><h1>Members</h1></div>
+</header>
+
+{% include "settings/_tabs.html" %}
+
+{% if request.query_params.get('saved') %}
+<section class="card" style="border-left:3px solid var(--success); padding-top:var(--sp-3); padding-bottom:var(--sp-3)">
+  <span class="badge badge-green"><span class="dot ok"></span> Saved</span>
+  <span class="muted" style="margin-left:var(--sp-2)">Role changes apply immediately; locked roles ignore Okta group changes.</span>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Users</h2>
+  <p class="muted" style="font-size:13px; margin-bottom:12px">
+    Set each user's role. <strong>Lock</strong> pins the role so a future Okta sign-in won't
+    overwrite it from the user's group claims (the per-user override).
+    {% if is_platform_admin %}As platform admin you manage every tenant's users and can move a user
+    between tenants or grant <code>platform_admin</code> (which makes them tenant-less).{% else %}
+    You manage users in your own tenant.{% endif %}
+  </p>
+  <table class="data">
+    <thead><tr>
+      <th>User</th>
+      {% if is_platform_admin %}<th style="width:180px">Tenant</th>{% endif %}
+      <th style="width:150px">Role</th>
+      <th style="width:80px">Lock</th>
+      <th style="width:90px"></th>
+    </tr></thead>
+    <tbody>
+    {% for m in members %}
+      <tr>
+        <form method="post" action="/settings/members/{{ m.id }}/role">
+        <td style="font-weight:500; color:var(--fg-strong)">
+          {{ m.username }}
+          {% if m.auth_provider == 'okta' %}<span class="badge badge-blue" style="margin-left:6px">Okta</span>{% endif %}
+        </td>
+        {% if is_platform_admin %}
+        <td>
+          <select name="tenant_id">
+            <option value="">(none / platform)</option>
+            {% for t in tenants %}
+              <option value="{{ t.id }}" {% if t.id == m.tenant_id %}selected{% endif %}>{{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        {% endif %}
+        <td>
+          <select name="role">
+            {% for role in roles %}
+              <option value="{{ role }}" {% if role == m.role %}selected{% endif %}>{{ role }}</option>
+            {% endfor %}
+            {% if is_platform_admin %}
+              <option value="platform_admin" {% if m.role == 'platform_admin' %}selected{% endif %}>platform_admin</option>
+            {% endif %}
+          </select>
+        </td>
+        <td style="text-align:center">
+          <input type="checkbox" name="locked" {% if m.role_locked %}checked{% endif %} title="Pin this role" />
+        </td>
+        <td style="text-align:right">
+          <button type="submit" class="btn btn-subtle btn-sm">Save</button>
+        </td>
+        </form>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted" style="padding:14px">No users.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

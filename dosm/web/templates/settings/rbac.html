@@ -7,11 +7,7 @@
   </div>
 </header>
 
-<div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider)">
-  <a href="/settings" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-muted); border-bottom:2px solid transparent; margin-bottom:-1px">Terminal launchers</a>
-  <a href="/settings/integrations" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-muted); border-bottom:2px solid transparent; margin-bottom:-1px">Integrations</a>
-  <a href="/settings/rbac" style="padding:8px 14px; font-size:13px; font-weight:500; text-decoration:none; color:var(--fg-strong); border-bottom:2px solid var(--accent,#6366f1); margin-bottom:-1px">Access control</a>
-</div>
+{% include "settings/_tabs.html" %}
 
 {% if request.query_params.get('saved') %}
 <section class="card" style="border-left:3px solid var(--success); padding-top:var(--sp-3); padding-bottom:var(--sp-3)">

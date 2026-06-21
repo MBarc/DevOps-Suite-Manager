@@ -4,6 +4,7 @@ import asyncio
 import csv
 import io
 import json
+import re
 from functools import partial
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -18,7 +19,7 @@ from dosm.auth.deps import (
     require_admin,
     require_platform_admin,
 )
-from dosm.auth.tenancy import active_tenant_id
+from dosm.auth.tenancy import ACTIVE_TENANT_SESSION_KEY, active_tenant_id
 from dosm.config import update_config_yaml
 from dosm.db import get_session
 from dosm.models import AuditLog, Tenant, User
@@ -309,3 +310,192 @@ async def rbac_export_csv(
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="dosm-rbac-groups.csv"'},
     )
+
+
+# -- Tenants (platform admin) + active-tenant switcher ----------------------
+
+
+def _slugify(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
+    return s or "tenant"
+
+
+@router.post("/active-tenant", include_in_schema=False)
+async def set_active_tenant(
+    request: Request,
+    tenant_id: str = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_platform_admin),
+):
+    """Platform admin switches the active tenant they operate within. ``all``
+    clears it (the read-only all-tenants overview)."""
+    if tenant_id == "all" or not tenant_id:
+        request.session.pop(ACTIVE_TENANT_SESSION_KEY, None)
+    else:
+        tid = int(tenant_id)
+        if db.get(Tenant, tid) is None:
+            raise HTTPException(404, "no such tenant")
+        request.session[ACTIVE_TENANT_SESSION_KEY] = tid
+    # Return to wherever the switch was made.
+    back = request.headers.get("referer") or "/"
+    return RedirectResponse(back, status_code=303)
+
+
+@router.get("/tenants", response_class=HTMLResponse, include_in_schema=False)
+async def tenants_page(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_platform_admin),
+):
+    tenants = list(db.execute(select(Tenant).order_by(Tenant.name)).scalars())
+    # Member + host counts per tenant for the overview.
+    from dosm.models import Host
+    counts = {}
+    for t in tenants:
+        users = db.execute(
+            select(User).where(User.tenant_id == t.id)
+        ).scalars().all()
+        n_hosts = db.execute(
+            select(Host.id).where(Host.tenant_id == t.id)
+        ).scalars().all()
+        counts[t.id] = {"users": len(users), "hosts": len(n_hosts)}
+    return _templates(request).TemplateResponse(
+        request, "settings/tenants.html",
+        {"user": user, "tenants": tenants, "counts": counts},
+    )
+
+
+@router.post("/tenants", include_in_schema=False)
+async def tenant_create(
+    request: Request,
+    name: str = Form(...),
+    slug: str = Form(""),
+    description: str = Form(""),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_platform_admin),
+):
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    slug = _slugify(slug or name)
+    if db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none() is not None:
+        raise HTTPException(400, f"a tenant with slug {slug!r} already exists")
+    tenant = Tenant(name=name, slug=slug, description=description.strip() or None)
+    db.add(tenant)
+    db.flush()
+    db.add(AuditLog(tenant_id=tenant.id, actor_id=user.id, action="tenant.create",
+                    target=f"tenant:{tenant.id}", details=f"name={name!r} slug={slug}"))
+    db.commit()
+    return RedirectResponse("/settings/tenants?saved=1", status_code=303)
+
+
+@router.post("/tenants/{tenant_id}/rename", include_in_schema=False)
+async def tenant_rename(
+    tenant_id: int,
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_platform_admin),
+):
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(404)
+    old = tenant.name
+    tenant.name = name.strip() or tenant.name
+    db.add(AuditLog(tenant_id=tenant.id, actor_id=user.id, action="tenant.update",
+                    target=f"tenant:{tenant.id}", details=f"name {old!r} -> {tenant.name!r}"))
+    db.commit()
+    return RedirectResponse("/settings/tenants?saved=1", status_code=303)
+
+
+@router.post("/tenants/{tenant_id}/toggle", include_in_schema=False)
+async def tenant_toggle(
+    tenant_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_platform_admin),
+):
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(404)
+    tenant.is_active = not tenant.is_active
+    db.add(AuditLog(tenant_id=tenant.id, actor_id=user.id, action="tenant.update",
+                    target=f"tenant:{tenant.id}", details=f"is_active={tenant.is_active}"))
+    db.commit()
+    return RedirectResponse("/settings/tenants?saved=1", status_code=303)
+
+
+# -- Members (per-tenant users + per-user role pin/lock) --------------------
+
+
+@router.get("/members", response_class=HTMLResponse, include_in_schema=False)
+async def members_page(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
+    """List users a tenant admin (their tenant) or platform admin (all) can
+    manage, with inline role + lock controls. The per-user override surfaces
+    here: pinning a role stops Okta group claims from changing it."""
+    platform = is_platform_admin(user)
+    stmt = select(User).order_by(User.username)
+    if not platform:
+        stmt = stmt.where(User.tenant_id == tid)
+    users = list(db.execute(stmt).scalars())
+    tenant_names = _tenant_names(db)
+    tenants = [{"id": t.id, "name": t.name}
+               for t in db.execute(select(Tenant).order_by(Tenant.name)).scalars()]
+    return _templates(request).TemplateResponse(
+        request, "settings/members.html",
+        {"user": user, "members": users, "roles": list(ROLES),
+         "is_platform_admin": platform, "tenant_names": tenant_names,
+         "tenants": tenants},
+    )
+
+
+@router.post("/members/{user_id}/role", include_in_schema=False)
+async def member_set_role(
+    user_id: int,
+    request: Request,
+    role: str = Form(...),
+    locked: str | None = Form(None),
+    tenant_id: str | None = Form(None),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
+    """Set a user's role + lock (and tenant, platform admin only). A tenant
+    admin may only manage users in their own tenant and may not grant
+    platform_admin."""
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404)
+    platform = is_platform_admin(user)
+    if not platform:
+        # Tenant admin: confined to their own tenant + tenant roles only.
+        if tid is None or target.tenant_id != tid:
+            raise HTTPException(404)
+        if role not in ROLES:
+            raise HTTPException(400, f"invalid role {role!r}")
+    else:
+        # Platform admin: may also grant platform_admin and reassign tenant.
+        if role not in ROLE_RANK:
+            raise HTTPException(400, f"invalid role {role!r}")
+        if role == "platform_admin":
+            target.tenant_id = None
+        elif tenant_id:
+            new_tid = int(tenant_id)
+            if db.get(Tenant, new_tid) is None:
+                raise HTTPException(404, "no such tenant")
+            target.tenant_id = new_tid
+    old = target.role
+    target.role = role
+    target.role_locked = locked is not None
+    db.add(AuditLog(
+        tenant_id=target.tenant_id, actor_id=user.id, action="user.set_role",
+        target=f"user:{target.id}",
+        details=f"{old} -> {role} locked={target.role_locked}",
+    ))
+    db.commit()
+    return RedirectResponse("/settings/members?saved=1", status_code=303)
