@@ -233,6 +233,58 @@ def test_platform_admin_sets_member_role_and_lock(root, two_tenants, session_fac
         assert u.role_locked is True
 
 
+def test_inactive_tenant_blocks_login_and_access(app, two_tenants, session_factory):
+    # A user in tenant B (Acme) that we then deactivate.
+    _make_user(session_factory, "evan", "admin", two_tenants["b"])
+    client = _login(app, "evan")  # works while active
+    assert client.get("/hosts", follow_redirects=False).status_code == 200
+
+    # Deactivate the tenant.
+    with session_factory() as s:
+        t = s.get(Tenant, two_tenants["b"])
+        t.is_active = False
+        s.commit()
+
+    # The existing session is cut off on the next request (redirect to login).
+    assert client.get("/hosts", follow_redirects=False).status_code == 303
+    # And a fresh login is refused with a clear message.
+    fresh = TestClient(app, raise_server_exceptions=True)
+    r = fresh.post("/login", data={"username": "evan", "password": "testpass", "next": "/"},
+                   follow_redirects=False)
+    assert r.status_code == 403
+    assert "workspace is inactive" in r.text
+
+    # Reactivate so other tests aren't affected (acme is torn down by the fixture).
+    with session_factory() as s:
+        s.get(Tenant, two_tenants["b"]).is_active = True
+        s.commit()
+
+
+def test_tenantless_non_platform_user_denied(app, session_factory, two_tenants):
+    # A non-platform user with NO tenant must be denied, never treated as
+    # "all tenants" (the fail-safe against a cross-tenant leak). Such a user
+    # can't even sign in.
+    _make_user(session_factory, "frank", "admin", None)
+    client = TestClient(app, raise_server_exceptions=True)
+    r = client.post("/login", data={"username": "frank", "password": "testpass", "next": "/"},
+                    follow_redirects=False)
+    assert r.status_code == 403
+    assert "workspace is inactive" in r.text
+
+
+def test_member_role_requires_tenant_for_non_platform_role(root, session_factory):
+    # Demoting a platform admin to a tenant role without a tenant is rejected.
+    with session_factory() as s:
+        u = User(username="grace", password_hash=hash_password("pw"),
+                 role="platform_admin", tenant_id=None, is_active=True)
+        s.add(u)
+        s.commit()
+        uid = u.id
+    r = root.post(f"/settings/members/{uid}/role",
+                  data={"role": "admin"}, follow_redirects=False)  # no tenant_id
+    assert r.status_code == 400
+
+
 def test_secret_ref_is_tenant_namespaced():
     # Phase 24d: credential names are unique only per tenant, so the auto secret
     # path is namespaced by tenant slug - two tenants' "prod-db" don't collide.

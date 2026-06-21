@@ -489,6 +489,10 @@ async def member_set_role(
             if db.get(Tenant, new_tid) is None:
                 raise HTTPException(404, "no such tenant")
             target.tenant_id = new_tid
+        # A tenant-scoped role must end up with a tenant, or the user would be
+        # locked out (and could otherwise fall through tenant scoping).
+        if role != "platform_admin" and target.tenant_id is None:
+            raise HTTPException(400, "assign a tenant for a non-platform role")
     old = target.role
     target.role = role
     target.role_locked = locked is not None

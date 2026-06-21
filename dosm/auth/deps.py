@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from dosm.db import get_session
-from dosm.models import User
+from dosm.models import Tenant, User
 
 
 def get_current_user(
@@ -18,6 +18,17 @@ def get_current_user(
     user = db.get(User, uid)
     if user is None or not user.is_active:
         return None
+    # Multi-tenancy fail-safe: a tenant-scoped user MUST belong to an active
+    # tenant. Platform admins are tenant-less and exempt. Denying access here
+    # (rather than letting a NULL tenant fall through) prevents a misconfigured
+    # account from being treated as "all tenants" - and enforces tenant
+    # deactivation on the next request, not just at login.
+    if user.role != "platform_admin":
+        if user.tenant_id is None:
+            return None
+        tenant = db.get(Tenant, user.tenant_id)
+        if tenant is None or not tenant.is_active:
+            return None
     return user
 
 

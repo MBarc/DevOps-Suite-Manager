@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from dosm.auth import okta as okta_oidc
 from dosm.auth.passwords import verify_password
 from dosm.db import get_session
-from dosm.models import AuditLog, User
+from dosm.models import AuditLog, Tenant, User
 from dosm.secrets import SecretNotFound, get_backend
 
 router = APIRouter()
@@ -55,6 +55,22 @@ async def login_submit(
             },
             status_code=401,
         )
+    # A tenant-scoped user can't sign in if their tenant is inactive/missing
+    # (platform admins are tenant-less and exempt).
+    if user.role != "platform_admin":
+        tenant = db.get(Tenant, user.tenant_id) if user.tenant_id is not None else None
+        if tenant is None or not tenant.is_active:
+            return _templates(request).TemplateResponse(
+                request,
+                "auth/login.html",
+                {
+                    "error": "Your workspace is inactive. Contact an administrator.",
+                    "next": next,
+                    "username": username,
+                    "okta_enabled": request.app.state.config.okta.enabled,
+                },
+                status_code=403,
+            )
     request.session["user_id"] = user.id
     db.add(
         AuditLog(
