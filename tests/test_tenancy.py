@@ -233,6 +233,17 @@ def test_platform_admin_sets_member_role_and_lock(root, two_tenants, session_fac
         assert u.role_locked is True
 
 
+def test_secret_ref_is_tenant_namespaced():
+    # Phase 24d: credential names are unique only per tenant, so the auto secret
+    # path is namespaced by tenant slug - two tenants' "prod-db" don't collide.
+    from dosm.credentials.routes import _auto_secret_ref
+    a = _auto_secret_ref("Prod DB", "payments")
+    b = _auto_secret_ref("Prod DB", "billing")
+    assert a == "t/payments/credentials/prod-db"
+    assert b == "t/billing/credentials/prod-db"
+    assert a != b
+
+
 def test_tenant_admin_cannot_touch_other_tenants_member(alice, two_tenants, session_factory):
     with session_factory() as s:
         u = User(username="dave", password_hash=hash_password("pw"), role="viewer",

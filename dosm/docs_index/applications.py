@@ -4,7 +4,15 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dosm.models import Folder
+from dosm.models import Folder, Tenant
+
+
+def _default_tenant_id(db: Session) -> int:
+    """Resolve the Default tenant id. System-managed doc folders (the CLI
+    reference folder, frontmatter-derived folders from the indexer) live in the
+    Default tenant - the docs filesystem is shared in the current multi-tenancy
+    phase."""
+    return int(db.execute(select(Tenant.id).where(Tenant.slug == "default")).scalar_one())
 
 
 def list_folders(db: Session) -> list[Folder]:
@@ -22,9 +30,15 @@ def get_folder_by_slug(db: Session, slug: str) -> Folder | None:
 
 
 def create_folder(
-    db: Session, *, name: str, slug: str, description: str | None
+    db: Session, *, name: str, slug: str, description: str | None,
+    tenant_id: int | None = None,
 ) -> Folder:
-    folder = Folder(name=name.strip(), slug=slug.strip(), description=description or None)
+    """Create a doc taxonomy folder. ``tenant_id`` defaults to the Default
+    tenant for system/CLI callers; web callers pass the acting tenant."""
+    if tenant_id is None:
+        tenant_id = _default_tenant_id(db)
+    folder = Folder(name=name.strip(), slug=slug.strip(),
+                    description=description or None, tenant_id=tenant_id)
     db.add(folder)
     db.flush()
     return folder
