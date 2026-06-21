@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from dosm.auth.deps import ROLE_RANK
 from dosm.config import OktaConfig, RbacConfig
-from dosm.models import User
+from dosm.models import GroupMapping, Tenant, User
 
 # SSO users never log in with a password; this sentinel hash can't be produced
 # by bcrypt, so verify_password() against it always fails. Keeps the column
@@ -63,6 +63,58 @@ def map_groups_to_role(groups, rbac: RbacConfig) -> str | None:
     return rbac.default_role if rbac.default_role in ROLE_RANK else None
 
 
+def pick_grant(
+    groups,
+    mappings,
+    *,
+    default_tenant_id: int | None,
+    default_role: str,
+) -> tuple[int, str] | None:
+    """Pure: pick the (tenant_id, role) grant for a user's group memberships.
+
+    ``mappings`` is an iterable of ``(group_name, tenant_id, role)`` tuples (the
+    rows of the ``group_mappings`` table). The highest-ranked role across all
+    matched groups wins, and that row's tenant is the grant. A user in **no**
+    mapped group falls back to ``default_role`` in the Default tenant - unless
+    ``default_role`` is not a real role (``"none"``/unset), in which case this
+    returns ``None`` meaning *access denied*. That is the secure default:
+    membership in a mapped group is required to sign in.
+    """
+    member = set(groups or [])
+    best: tuple[int, str] | None = None
+    best_rank = -1
+    for group_name, tenant_id, role in mappings:
+        if group_name not in member:
+            continue
+        rank = ROLE_RANK.get(role, -1)
+        if rank > best_rank:
+            best, best_rank = (tenant_id, role), rank
+    if best is not None:
+        return best
+    if default_role in ROLE_RANK and default_tenant_id is not None:
+        return default_tenant_id, default_role
+    return None
+
+
+def resolve_grant(db: Session, groups, rbac: RbacConfig) -> tuple[int, str] | None:
+    """DB-backed grant resolution: load ``group_mappings`` + the Default tenant
+    id and delegate to :func:`pick_grant`. Returns ``(tenant_id, role)`` or
+    ``None`` (deny). The Default tenant is the home of the ``default_role``
+    fallback."""
+    rows = db.execute(
+        select(GroupMapping.group_name, GroupMapping.tenant_id, GroupMapping.role)
+    ).all()
+    default_tid = db.execute(
+        select(Tenant.id).where(Tenant.slug == "default")
+    ).scalar_one_or_none()
+    return pick_grant(
+        groups,
+        [(g, t, r) for g, t, r in rows],
+        default_tenant_id=default_tid,
+        default_role=rbac.default_role,
+    )
+
+
 def extract_identity(claims: dict, groups_claim: str) -> dict:
     """Pull the fields DOSM cares about out of validated ID-token claims."""
     return {
@@ -96,12 +148,15 @@ def provision_user(
     username: str,
     email: str | None,
     display_name: str | None,
+    tenant_id: int,
     role: str,
 ) -> tuple[User, str | None]:
     """JIT-create or update the local mirror of an Okta user. Returns the user
-    and the *previous* role (or None if newly created) so the caller can audit a
-    role change. The role is recomputed from the claim on every login, so AD
-    group changes take effect at next sign-in."""
+    and the *previous* role (or None if newly created / unchanged) so the caller
+    can audit a role change. Role + tenant are recomputed from the group claim
+    on every login - EXCEPT when ``User.role_locked`` is set, in which case an
+    admin has manually pinned this user's role/tenant and the group-derived
+    values are ignored."""
     user = db.execute(select(User).where(User.okta_sub == okta_sub)).scalar_one_or_none()
     prev_role: str | None = None
     if user is None:
@@ -109,15 +164,18 @@ def provision_user(
             username=_unique_username(db, username, okta_sub),
             password_hash=SENTINEL_PASSWORD_HASH,
             role=role,
+            tenant_id=tenant_id,
             auth_provider="okta",
             okta_sub=okta_sub,
             is_active=True,
         )
         db.add(user)
     else:
-        prev_role = user.role
-        user.role = role
         user.auth_provider = "okta"
+        if not user.role_locked:
+            prev_role = user.role
+            user.role = role
+            user.tenant_id = tenant_id
     user.email = email
     user.display_name = display_name
     user.last_login = datetime.now(UTC)

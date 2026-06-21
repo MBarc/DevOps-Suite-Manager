@@ -21,11 +21,14 @@
 {% endif %}
 
 <section class="card">
-  <h2>AD / Okta group → DOSM role</h2>
+  <h2>AD / Okta group → tenant + DOSM role</h2>
   <p class="muted" style="font-size:13px; margin-bottom:4px">
-    Each group name (exactly as it appears in the Okta <code>groups</code> claim) maps to a
-    DOSM role. When a user belongs to several mapped groups, the <strong>highest</strong> role wins.
-    A user in no mapped group gets the default role below. Role is recomputed at each sign-in.
+    Each group name (exactly as it appears in the Okta <code>groups</code> claim) grants a
+    DOSM role <strong>within a tenant</strong>. When a user belongs to several mapped groups, the
+    <strong>highest</strong> role wins and places them in that group's tenant. A user in no mapped
+    group gets the default role below (Default tenant). Grant is recomputed at each sign-in unless a
+    user's role is pinned.
+    {% if is_platform_admin %}As platform admin you see every tenant's mappings.{% endif %}
   </p>
   {% if not okta_enabled %}
     <div class="badge badge-amber" style="margin:8px 0">
@@ -39,14 +42,16 @@
   </div>
 
   <table class="data" style="margin-bottom:16px">
-    <thead><tr><th>Group</th><th style="width:160px">Role</th><th style="width:90px"></th></tr></thead>
+    <thead><tr><th>Group</th>{% if is_platform_admin %}<th style="width:160px">Tenant</th>{% endif %}<th style="width:160px">Role</th><th style="width:90px"></th></tr></thead>
     <tbody>
     {% for r in rows %}
       <tr>
         <td style="font-weight:500; color:var(--fg-strong)">{{ r.group }}</td>
+        {% if is_platform_admin %}<td><span class="badge badge-blue">{{ r.tenant }}</span></td>{% endif %}
         <td>
           <form method="post" action="/settings/rbac/mapping" class="row" style="gap:6px; align-items:center">
             <input type="hidden" name="group" value="{{ r.group }}" />
+            <input type="hidden" name="tenant_id" value="{{ r.tenant_id }}" />
             <select name="role" onchange="this.form.submit()">
               {% for role in roles %}
                 <option value="{{ role }}" {% if role == r.role %}selected{% endif %}>{{ role }}</option>
@@ -58,12 +63,13 @@
           <form method="post" action="/settings/rbac/mapping/delete" class="inline"
                 onsubmit="return confirm('Remove mapping for {{ r.group }}?');">
             <input type="hidden" name="group" value="{{ r.group }}" />
+            <input type="hidden" name="tenant_id" value="{{ r.tenant_id }}" />
             <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Remove</button>
           </form>
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="3" class="muted" style="padding:14px">No group mappings yet - add one below.</td></tr>
+      <tr><td colspan="4" class="muted" style="padding:14px">No group mappings yet - add one below.</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -74,6 +80,14 @@
       <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">AD / Okta group name</span>
       <input type="text" name="group" required placeholder="e.g. DOSM-Operators" style="width:100%; box-sizing:border-box" />
     </label>
+    {% if is_platform_admin %}
+    <label>
+      <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Tenant</span>
+      <select name="tenant_id" required>
+        {% for t in tenants %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
     <label>
       <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Role</span>
       <select name="role">

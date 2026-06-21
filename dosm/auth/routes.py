@@ -176,11 +176,11 @@ async def okta_callback(
     identity = okta_oidc.extract_identity(claims, okta.groups_claim)
     if not identity["sub"]:
         raise HTTPException(401, "ID token missing subject")
-    role = okta_oidc.map_groups_to_role(identity["groups"], cfg.rbac)
+    grant = okta_oidc.resolve_grant(db, identity["groups"], cfg.rbac)
 
     # Deny anyone who isn't a member of a group granted a DOSM role. We do NOT
     # provision a user row in this case - group membership is required for access.
-    if role is None:
+    if grant is None:
         db.add(
             AuditLog(
                 actor_id=None,
@@ -204,12 +204,14 @@ async def okta_callback(
             status_code=403,
         )
 
+    tenant_id, role = grant
     user, prev_role = okta_oidc.provision_user(
         db,
         okta_sub=identity["sub"],
         username=identity["username"],
         email=identity["email"],
         display_name=identity["display_name"],
+        tenant_id=tenant_id,
         role=role,
     )
     if not user.is_active:
@@ -218,20 +220,26 @@ async def okta_callback(
     request.session["user_id"] = user.id
     db.add(
         AuditLog(
+            tenant_id=user.tenant_id,
             actor_id=user.id,
             action="auth.login.okta",
             target=f"user:{user.id}",
-            details=f"role={role} groups={len(identity['groups'])}",
+            details=(
+                f"role={user.role} tenant={user.tenant_id} "
+                f"groups={len(identity['groups'])}"
+                + (" (locked)" if user.role_locked else "")
+            ),
             ip=request.client.host if request.client else None,
         )
     )
-    if prev_role is not None and prev_role != role:
+    if prev_role is not None and prev_role != user.role:
         db.add(
             AuditLog(
+                tenant_id=user.tenant_id,
                 actor_id=user.id,
                 action="rbac.role_assigned",
                 target=f"user:{user.id}",
-                details=f"{prev_role} -> {role} (from Okta groups)",
+                details=f"{prev_role} -> {user.role} (from Okta groups)",
             )
         )
     db.commit()

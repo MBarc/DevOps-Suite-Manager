@@ -49,6 +49,29 @@ class Tenant(Base):
 DEFAULT_TENANT_SLUG = "default"
 
 
+class GroupMapping(Base):
+    """An AD/Okta group name -> (tenant, role) grant.
+
+    Replaces the single-tenant ``config.yaml`` ``rbac.group_role_map``. On SSO
+    login a user's group claims are matched here; the highest-ranked role across
+    all matched rows wins, and that row's ``tenant_id`` is the tenant the user is
+    placed in. Membership in *some* mapped group is required to sign in (deny by
+    default), so this table is the gate to DOSM access."""
+
+    __tablename__ = "group_mappings"
+    __table_args__ = (
+        UniqueConstraint("group_name", "tenant_id", name="uq_group_mapping_group_tenant"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 # ---- Users / auth ---------------------------------------------------------
 
 
@@ -836,6 +859,7 @@ __all__ = [
     "Base",
     "Tenant",
     "DEFAULT_TENANT_SLUG",
+    "GroupMapping",
     "User",
     "Department",
     "DepartmentMember",

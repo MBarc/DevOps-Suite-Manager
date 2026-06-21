@@ -97,6 +97,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     # older DOSM_HOME upgrades without requiring a manual `dosm db init`.
     from dosm.db import create_all
     create_all(cfg)
+    # One-time: migrate the legacy config.yaml group->role map into the
+    # tenant-aware group_mappings table (Default tenant). No-op once seeded.
+    from dosm.auth.rbac import seed_group_mappings_from_config
+    seed_group_mappings_from_config(cfg)
 
     app = FastAPI(
         title="DOSM",

@@ -9,13 +9,25 @@ from authlib.jose import JsonWebKey, jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from sqlalchemy import text
+
 from dosm.auth import okta as okta_oidc
 from dosm.config import RbacConfig
-from dosm.models import User
+from dosm.models import GroupMapping, User
 from dosm.secrets import get_backend
 
 ISSUER = "https://issuer.example.com"
 CLIENT_ID = "client123"
+
+
+def _seed_mappings(session_factory, group_map) -> int:
+    """Insert group -> role rows under the Default tenant; return its id."""
+    with session_factory() as s:
+        tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+        for g, r in group_map.items():
+            s.add(GroupMapping(group_name=g, tenant_id=int(tid), role=r))
+        s.commit()
+        return int(tid)
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +64,28 @@ def test_map_groups_default_none_is_the_model_default():
     # Out of the box, RbacConfig denies unmapped users (group membership required).
     assert RbacConfig().default_role == "none"
     assert okta_oidc.map_groups_to_role(["whatever"], RbacConfig()) is None
+
+
+def test_pick_grant_highest_role_and_tenant():
+    # (group, tenant_id, role) rows. Highest role wins and carries its tenant.
+    mappings = [("Ops", 5, "operator"), ("Admins", 7, "admin"), ("Read", 5, "viewer")]
+    assert okta_oidc.pick_grant(["Ops", "Admins"], mappings,
+                                default_tenant_id=1, default_role="none") == (7, "admin")
+    assert okta_oidc.pick_grant(["Ops", "Read"], mappings,
+                                default_tenant_id=1, default_role="none") == (5, "operator")
+
+
+def test_pick_grant_default_and_deny():
+    mappings = [("Admins", 7, "admin")]
+    # Unmapped user falls back to default_role in the Default tenant...
+    assert okta_oidc.pick_grant(["nope"], mappings,
+                                default_tenant_id=1, default_role="viewer") == (1, "viewer")
+    # ...unless default is deny.
+    assert okta_oidc.pick_grant(["nope"], mappings,
+                                default_tenant_id=1, default_role="none") is None
+    # No Default tenant resolved -> deny.
+    assert okta_oidc.pick_grant([], mappings,
+                                default_tenant_id=None, default_role="viewer") is None
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +195,7 @@ def test_okta_callback_provisions_user(
 ):
     get_backend(test_config).set_str("okta/client_secret", "shh")
     _patch_network(monkeypatch, signing_key, jwks_public, groups=["DOSM-Admins"])
+    tid = _seed_mappings(session_factory, {"DOSM-Admins": "admin"})
 
     with _okta_enabled(test_config, {"DOSM-Admins": "admin"}):
         client = TestClient(app, raise_server_exceptions=True)
@@ -176,6 +211,7 @@ def test_okta_callback_provisions_user(
     with session_factory() as s:
         u = s.execute(select(User).where(User.okta_sub == "okta-sub-1")).scalar_one()
         assert u.role == "admin"
+        assert u.tenant_id == tid  # placed in the group's tenant
         assert u.auth_provider == "okta"
         assert u.email == "ssouser@example.com"
 
@@ -187,6 +223,7 @@ def test_okta_callback_denies_user_in_no_mapped_group(
     # The user's groups don't intersect the mapping, and default is deny.
     _patch_network(monkeypatch, signing_key, jwks_public,
                    groups=["Some-Other-Group"], sub="denied-sub-1")
+    _seed_mappings(session_factory, {"DOSM-Admins": "admin"})
 
     with _okta_enabled(test_config, {"DOSM-Admins": "admin"}, default_role="none"):
         client = TestClient(app, raise_server_exceptions=True)
@@ -206,6 +243,7 @@ def test_okta_role_recomputed_on_each_login(
     app, test_config, session_factory, monkeypatch, signing_key, jwks_public
 ):
     get_backend(test_config).set_str("okta/client_secret", "shh")
+    _seed_mappings(session_factory, {"DOSM-Viewers": "viewer", "DOSM-Admins": "admin"})
 
     # First login: member of a viewer-mapped group only.
     _patch_network(monkeypatch, signing_key, jwks_public, groups=["DOSM-Viewers"])
@@ -224,6 +262,36 @@ def test_okta_role_recomputed_on_each_login(
         c2.get("/auth/okta/callback?code=abc&state=fixedval", follow_redirects=False)
     with session_factory() as s:
         assert s.execute(select(User).where(User.okta_sub == "okta-sub-1")).scalar_one().role == "admin"
+
+
+def test_okta_role_locked_survives_group_change(
+    app, test_config, session_factory, monkeypatch, signing_key, jwks_public
+):
+    """A user whose role is pinned (role_locked) keeps it across SSO logins even
+    when their group claims would grant a different role."""
+    get_backend(test_config).set_str("okta/client_secret", "shh")
+    _seed_mappings(session_factory, {"DOSM-Viewers": "viewer", "DOSM-Admins": "admin"})
+
+    # First login as admin.
+    _patch_network(monkeypatch, signing_key, jwks_public, groups=["DOSM-Admins"], sub="lock-sub")
+    with _okta_enabled(test_config, {"DOSM-Viewers": "viewer", "DOSM-Admins": "admin"}):
+        c = TestClient(app, raise_server_exceptions=True)
+        c.get("/auth/okta/login", follow_redirects=False)
+        c.get("/auth/okta/callback?code=abc&state=fixedval", follow_redirects=False)
+    # Pin the role.
+    with session_factory() as s:
+        u = s.execute(select(User).where(User.okta_sub == "lock-sub")).scalar_one()
+        u.role_locked = True
+        s.commit()
+
+    # Second login with only the viewer group: would downgrade, but it's locked.
+    _patch_network(monkeypatch, signing_key, jwks_public, groups=["DOSM-Viewers"], sub="lock-sub")
+    with _okta_enabled(test_config, {"DOSM-Viewers": "viewer", "DOSM-Admins": "admin"}):
+        c2 = TestClient(app, raise_server_exceptions=True)
+        c2.get("/auth/okta/login", follow_redirects=False)
+        c2.get("/auth/okta/callback?code=abc&state=fixedval", follow_redirects=False)
+    with session_factory() as s:
+        assert s.execute(select(User).where(User.okta_sub == "lock-sub")).scalar_one().role == "admin"
 
 
 def test_local_login_works_when_okta_enabled(app, test_config):

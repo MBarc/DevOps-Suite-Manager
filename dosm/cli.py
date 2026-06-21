@@ -328,8 +328,16 @@ def user_list() -> None:
 def user_set_role(
     username: str = typer.Argument(...),
     role: str = typer.Argument(..., help="admin | operator | viewer"),
+    lock: bool | None = typer.Option(
+        None, "--lock/--unlock",
+        help="Pin this role so Okta group changes won't overwrite it (per-user override).",
+    ),
 ) -> None:
-    """Change a user's role. The only path to change a role after creation."""
+    """Change a user's role. The only path to change a role after creation.
+
+    ``--lock`` pins the role: subsequent SSO logins keep it regardless of the
+    user's group claims (the per-user permission override). ``--unlock`` lets
+    group-derived roles take over again at next login."""
     _load()
     if role not in ("admin", "operator", "viewer"):
         console.print(f"[red]Invalid role {role!r}. Use admin | operator | viewer.[/red]")
@@ -341,15 +349,20 @@ def user_set_role(
             raise typer.Exit(1)
         old = u.role
         u.role = role
+        if lock is not None:
+            u.role_locked = lock
         s.add(
             AuditLog(
+                tenant_id=u.tenant_id,
                 actor_id=u.id,
                 action="user.set_role",
                 target=f"user:{u.id}",
-                details=f"{old} -> {role} (via CLI)",
+                details=f"{old} -> {role}"
+                + ("" if lock is None else f" lock={lock}") + " (via CLI)",
             )
         )
-    console.print(f"[green]Role updated[/green] {username}: {old} -> {role}")
+    lock_note = "" if lock is None else f" (locked={lock})"
+    console.print(f"[green]Role updated[/green] {username}: {old} -> {role}{lock_note}")
 
 
 @user_app.command("passwd")
@@ -412,18 +425,26 @@ def okta_test() -> None:
 
 @rbac_app.command("show-mapping")
 def rbac_show_mapping() -> None:
-    """Print the AD/Okta group -> DOSM role mapping."""
+    """Print the AD/Okta group -> (tenant, role) mapping from the DB."""
+    _load()
+    from dosm.models import GroupMapping, Tenant
     cfg = load_config()
-    rbac = cfg.rbac
-    table = Table("Group (from Okta claim)", "DOSM role")
-    for group, role in sorted(rbac.group_role_map.items()):
-        table.add_row(group, role)
-    if not rbac.group_role_map:
-        console.print("[yellow]No group_role_map configured.[/yellow]")
+    with session_scope() as s:
+        names = {t.id: t.name for t in s.execute(select(Tenant)).scalars()}
+        rows = list(s.execute(
+            select(GroupMapping).order_by(GroupMapping.group_name)
+        ).scalars())
+        table = Table("Group (from Okta claim)", "Tenant", "DOSM role")
+        for m in rows:
+            table.add_row(m.group_name, names.get(m.tenant_id, "?"), m.role)
+    if not rows:
+        console.print("[yellow]No group mappings configured.[/yellow]")
     else:
         console.print(table)
-    if rbac.default_role in ("admin", "operator", "viewer"):
-        console.print(f"Unmapped users get: [cyan]{rbac.default_role}[/cyan]")
+    if cfg.rbac.default_role in ("admin", "operator", "viewer"):
+        console.print(
+            f"Unmapped users get: [cyan]{cfg.rbac.default_role}[/cyan] (Default tenant)"
+        )
     else:
         console.print("Unmapped users get: [red]no access[/red] (group membership required)")
 

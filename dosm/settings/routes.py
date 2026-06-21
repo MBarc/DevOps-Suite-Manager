@@ -8,18 +8,42 @@ from functools import partial
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import ROLE_RANK, require_admin
+from dosm.auth import rbac as rbac_store
+from dosm.auth.deps import (
+    ROLE_RANK,
+    is_platform_admin,
+    require_admin,
+    require_platform_admin,
+)
+from dosm.auth.tenancy import active_tenant_id
 from dosm.config import update_config_yaml
 from dosm.db import get_session
-from dosm.models import AuditLog, User
+from dosm.models import AuditLog, Tenant, User
 from dosm.settings.cli_catalog import detect_all
 
 router = APIRouter(prefix="/settings")
 
-# Valid DOSM roles, lowest-to-highest, for the RBAC mapping editor.
-ROLES = tuple(sorted(ROLE_RANK, key=lambda r: ROLE_RANK[r]))
+# Valid *tenant* DOSM roles for the RBAC mapping editor (a group grant never
+# assigns platform_admin - that role is tenant-less and set explicitly).
+ROLES = tuple(r for r in sorted(ROLE_RANK, key=lambda r: ROLE_RANK[r]) if r != "platform_admin")
+
+
+def _resolve_mapping_tenant(db: Session, user: User, tenant_id_form: str | None) -> int:
+    """Tenant a group-mapping edit targets. A tenant admin can only touch their
+    own tenant; a platform admin must name the tenant via the form."""
+    if is_platform_admin(user):
+        if not tenant_id_form:
+            raise HTTPException(400, "select a tenant for this mapping")
+        tid = int(tenant_id_form)
+        if db.get(Tenant, tid) is None:
+            raise HTTPException(404, "no such tenant")
+        return tid
+    if user.tenant_id is None:
+        raise HTTPException(403, "your account is not assigned to a tenant")
+    return user.tenant_id
 
 
 def _templates(request: Request):
@@ -148,18 +172,37 @@ async def integrations_save(
 # ── Access control (RBAC) - AD/Okta group → DOSM role mapping ──────────────
 
 
+def _tenant_names(db: Session) -> dict[int, str]:
+    return {t.id: t.name for t in db.execute(select(Tenant)).scalars()}
+
+
+def _rbac_rows(db: Session, tid: int | None) -> list[dict]:
+    names = _tenant_names(db)
+    return [
+        {"group": m.group_name, "role": m.role, "tenant_id": m.tenant_id,
+         "tenant": names.get(m.tenant_id, "?")}
+        for m in rbac_store.list_mappings(db, tid)
+    ]
+
+
 @router.get("/rbac", response_class=HTMLResponse, include_in_schema=False)
-async def rbac_page(request: Request, user: User = Depends(require_admin)):
+async def rbac_page(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
     cfg = request.app.state.config
-    rows = sorted(
-        ({"group": g, "role": r} for g, r in cfg.rbac.group_role_map.items()),
-        key=lambda x: x["group"].lower(),
-    )
+    platform = is_platform_admin(user)
+    rows = _rbac_rows(db, tid)
+    tenants = [{"id": t.id, "name": t.name}
+               for t in db.execute(select(Tenant).order_by(Tenant.name)).scalars()]
     return _templates(request).TemplateResponse(
         request,
         "settings/rbac.html",
         {"user": user, "rows": rows, "default_role": cfg.rbac.default_role,
-         "roles": list(ROLES), "okta_enabled": cfg.okta.enabled},
+         "roles": list(ROLES), "okta_enabled": cfg.okta.enabled,
+         "is_platform_admin": platform, "tenants": tenants},
     )
 
 
@@ -168,26 +211,25 @@ async def rbac_mapping_save(
     request: Request,
     group: str = Form(...),
     role: str = Form(...),
+    tenant_id: str | None = Form(None),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    """Upsert one group → role assignment (add a new group or change an
-    existing group's role - keyed on the exact group name)."""
-    cfg = request.app.state.config
+    """Upsert one group -> role assignment within a tenant (add a new group or
+    change an existing group's role - keyed on group name + tenant)."""
     group = group.strip()
     if not group:
         raise HTTPException(400, "group name is required")
-    if role not in ROLE_RANK:
+    if role not in ROLES:
         raise HTTPException(400, f"invalid role {role!r}")
-    new_map = dict(cfg.rbac.group_role_map)
-    existed = group in new_map
-    new_map[group] = role
-    _save_rbac(cfg, group_role_map=new_map)
+    tid = _resolve_mapping_tenant(db, user, tenant_id)
+    updated = rbac_store.upsert_mapping(db, group, tid, role)
     db.add(AuditLog(
+        tenant_id=tid,
         actor_id=user.id,
-        action="settings.rbac.mapping.update" if existed else "settings.rbac.mapping.add",
+        action="settings.rbac.mapping.update" if updated else "settings.rbac.mapping.add",
         target="rbac",
-        details=f"group={group!r} role={role}",
+        details=f"group={group!r} role={role} tenant={tid}",
     ))
     db.commit()
     return RedirectResponse("/settings/rbac?saved=1", status_code=303)
@@ -197,16 +239,15 @@ async def rbac_mapping_save(
 async def rbac_mapping_delete(
     request: Request,
     group: str = Form(...),
+    tenant_id: str | None = Form(None),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    cfg = request.app.state.config
-    new_map = dict(cfg.rbac.group_role_map)
-    if new_map.pop(group, None) is None:
+    tid = _resolve_mapping_tenant(db, user, tenant_id)
+    if not rbac_store.delete_mapping(db, group, tid):
         raise HTTPException(404, "no such group mapping")
-    _save_rbac(cfg, group_role_map=new_map)
-    db.add(AuditLog(actor_id=user.id, action="settings.rbac.mapping.delete",
-                    target="rbac", details=f"group={group!r}"))
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="settings.rbac.mapping.delete",
+                    target="rbac", details=f"group={group!r} tenant={tid}"))
     db.commit()
     return RedirectResponse("/settings/rbac?saved=1", status_code=303)
 
@@ -216,8 +257,10 @@ async def rbac_default_save(
     request: Request,
     default_role: str = Form(...),
     db: Session = Depends(get_session),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_platform_admin),
 ):
+    """The unmapped-user fallback is a *global* policy (it grants into the
+    Default tenant), so only a platform admin may change it."""
     cfg = request.app.state.config
     # "none" denies access to users in no mapped group (group membership required).
     if default_role not in ROLE_RANK and default_role != "none":
@@ -229,17 +272,15 @@ async def rbac_default_save(
     return RedirectResponse("/settings/rbac?saved=1", status_code=303)
 
 
-def _rbac_rows(cfg) -> list[dict]:
-    return sorted(
-        ({"group": g, "role": r} for g, r in cfg.rbac.group_role_map.items()),
-        key=lambda x: x["group"].lower(),
-    )
-
-
 @router.get("/rbac/export.json", include_in_schema=False)
-async def rbac_export_json(request: Request, user: User = Depends(require_admin)):
+async def rbac_export_json(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
     cfg = request.app.state.config
-    payload = {"default_role": cfg.rbac.default_role, "groups": _rbac_rows(cfg)}
+    payload = {"default_role": cfg.rbac.default_role, "groups": _rbac_rows(db, tid)}
     body = json.dumps(payload, indent=2)
     return Response(
         content=body,
@@ -249,15 +290,20 @@ async def rbac_export_json(request: Request, user: User = Depends(require_admin)
 
 
 @router.get("/rbac/export.csv", include_in_schema=False)
-async def rbac_export_csv(request: Request, user: User = Depends(require_admin)):
+async def rbac_export_csv(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
     cfg = request.app.state.config
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["group", "role"])
-    for row in _rbac_rows(cfg):
-        writer.writerow([row["group"], row["role"]])
+    writer.writerow(["group", "tenant", "role"])
+    for row in _rbac_rows(db, tid):
+        writer.writerow([row["group"], row["tenant"], row["role"]])
     # Trailing row documents the fallback role for groups not listed above.
-    writer.writerow(["(default - unmapped groups)", cfg.rbac.default_role])
+    writer.writerow(["(default - unmapped groups)", "Default", cfg.rbac.default_role])
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",

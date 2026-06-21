@@ -1,4 +1,6 @@
-"""Settings → Access control: the AD/Okta group → role mapping editor + export."""
+"""Settings -> Access control: the AD/Okta group -> (tenant, role) mapping
+editor + export. Phase 24b moved the mapping from config.yaml into the
+tenant-scoped group_mappings table."""
 from __future__ import annotations
 
 import csv
@@ -7,102 +9,135 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select, text
 
 from dosm.auth.passwords import hash_password
-from dosm.models import User
+from dosm.models import GroupMapping, User
 
 
 @pytest.fixture(autouse=True)
 def _reset_rbac(test_config):
-    """Keep each test isolated - the app's cfg.rbac is shared (session-scoped)."""
-    saved = (dict(test_config.rbac.group_role_map), test_config.rbac.default_role)
-    test_config.rbac.group_role_map = {}
+    """Keep each test isolated - the app's cfg.rbac.default_role is shared
+    (session-scoped). Group mappings now live in the DB (wiped by clean_tables)."""
+    saved = test_config.rbac.default_role
     test_config.rbac.default_role = "viewer"
     yield
-    test_config.rbac.group_role_map, test_config.rbac.default_role = saved
+    test_config.rbac.default_role = saved
 
 
-def _operator_client(app, session_factory):
+def _default_tid(s) -> int:
+    return s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
+
+
+def _seed_mapping(session_factory, group: str, role: str) -> None:
     with session_factory() as s:
-        from sqlalchemy import select, text
-        if s.execute(select(User).where(User.username == "rbacop")).scalar_one_or_none() is None:
-            tid = s.execute(text("SELECT id FROM tenants WHERE slug='default'")).scalar_one()
-            s.add(User(username="rbacop", password_hash=hash_password("pw"), role="operator",
+        s.add(GroupMapping(group_name=group, tenant_id=_default_tid(s), role=role))
+        s.commit()
+
+
+def _mappings(session_factory) -> dict[str, str]:
+    with session_factory() as s:
+        return {m.group_name: m.role
+                for m in s.execute(select(GroupMapping)).scalars()}
+
+
+def _user_client(app, session_factory, username: str, role: str, *, tenant: bool = True):
+    with session_factory() as s:
+        if s.execute(select(User).where(User.username == username)).scalar_one_or_none() is None:
+            tid = _default_tid(s) if tenant else None
+            s.add(User(username=username, password_hash=hash_password("pw"), role=role,
                        tenant_id=tid, is_active=True))
             s.commit()
     c = TestClient(app, raise_server_exceptions=True)
-    c.post("/login", data={"username": "rbacop", "password": "pw", "next": "/"}, follow_redirects=False)
+    c.post("/login", data={"username": username, "password": "pw", "next": "/"},
+           follow_redirects=False)
     return c
 
 
-def test_add_update_delete_mapping(auth_client, test_config):
-    # add
+def _operator_client(app, session_factory):
+    return _user_client(app, session_factory, "rbacop", "operator")
+
+
+def _platform_admin_client(app, session_factory):
+    return _user_client(app, session_factory, "rbacplatform", "platform_admin", tenant=False)
+
+
+def test_add_update_delete_mapping(auth_client, session_factory):
+    # add (tenant admin -> their Default tenant, no tenant_id needed)
     r = auth_client.post("/settings/rbac/mapping",
                          data={"group": "DOSM-Admins", "role": "admin"}, follow_redirects=False)
     assert r.status_code == 303
-    assert test_config.rbac.group_role_map == {"DOSM-Admins": "admin"}
+    assert _mappings(session_factory) == {"DOSM-Admins": "admin"}
 
     # update the same group's role (upsert)
     auth_client.post("/settings/rbac/mapping",
                      data={"group": "DOSM-Admins", "role": "operator"}, follow_redirects=False)
-    assert test_config.rbac.group_role_map["DOSM-Admins"] == "operator"
+    assert _mappings(session_factory)["DOSM-Admins"] == "operator"
 
     # delete
     r = auth_client.post("/settings/rbac/mapping/delete",
                          data={"group": "DOSM-Admins"}, follow_redirects=False)
     assert r.status_code == 303
-    assert test_config.rbac.group_role_map == {}
+    assert _mappings(session_factory) == {}
 
 
 def test_invalid_role_rejected(auth_client):
-    r = auth_client.post("/settings/rbac/mapping",
-                         data={"group": "G", "role": "superuser"}, follow_redirects=False)
-    assert r.status_code == 400
+    # superuser is not a role; platform_admin is not assignable via a group grant
+    for bad in ("superuser", "platform_admin"):
+        r = auth_client.post("/settings/rbac/mapping",
+                             data={"group": "G", "role": bad}, follow_redirects=False)
+        assert r.status_code == 400
 
 
-def test_default_role_save(auth_client, test_config):
+def test_default_role_requires_platform_admin(auth_client, app, session_factory, test_config):
+    # A tenant admin cannot change the global unmapped-user default.
     r = auth_client.post("/settings/rbac/default",
                          data={"default_role": "operator"}, follow_redirects=False)
+    assert r.status_code == 403
+    # A platform admin can.
+    pa = _platform_admin_client(app, session_factory)
+    r = pa.post("/settings/rbac/default",
+                data={"default_role": "operator"}, follow_redirects=False)
     assert r.status_code == 303
     assert test_config.rbac.default_role == "operator"
 
 
-def test_default_role_none_allowed(auth_client, test_config):
-    # "none" = deny unmapped users (require group membership); must be accepted.
-    r = auth_client.post("/settings/rbac/default",
-                         data={"default_role": "none"}, follow_redirects=False)
+def test_default_role_none_allowed(app, session_factory, test_config):
+    pa = _platform_admin_client(app, session_factory)
+    r = pa.post("/settings/rbac/default",
+                data={"default_role": "none"}, follow_redirects=False)
     assert r.status_code == 303
     assert test_config.rbac.default_role == "none"
 
 
-def test_page_renders_and_lists_mappings(auth_client, test_config):
-    test_config.rbac.group_role_map = {"DOSM-Ops": "operator"}
+def test_page_renders_and_lists_mappings(auth_client, session_factory):
+    _seed_mapping(session_factory, "DOSM-Ops", "operator")
     page = auth_client.get("/settings/rbac")
     assert page.status_code == 200
     assert "DOSM-Ops" in page.text
 
 
-def test_export_json(auth_client, test_config):
-    test_config.rbac.group_role_map = {"DOSM-Admins": "admin", "DOSM-Ops": "operator"}
-    test_config.rbac.default_role = "viewer"
+def test_export_json(auth_client, session_factory):
+    _seed_mapping(session_factory, "DOSM-Admins", "admin")
+    _seed_mapping(session_factory, "DOSM-Ops", "operator")
     r = auth_client.get("/settings/rbac/export.json")
     assert r.status_code == 200
     assert "attachment" in r.headers["content-disposition"]
     data = json.loads(r.text)
     assert data["default_role"] == "viewer"
-    assert {"group": "DOSM-Admins", "role": "admin"} in data["groups"]
+    groups = [{"group": g["group"], "role": g["role"]} for g in data["groups"]]
+    assert {"group": "DOSM-Admins", "role": "admin"} in groups
     assert len(data["groups"]) == 2
 
 
-def test_export_csv(auth_client, test_config):
-    test_config.rbac.group_role_map = {"DOSM-Admins": "admin"}
-    test_config.rbac.default_role = "viewer"
+def test_export_csv(auth_client, session_factory):
+    _seed_mapping(session_factory, "DOSM-Admins", "admin")
     r = auth_client.get("/settings/rbac/export.csv")
     assert r.status_code == 200
     rows = list(csv.reader(io.StringIO(r.text)))
-    assert rows[0] == ["group", "role"]
-    assert ["DOSM-Admins", "admin"] in rows
-    assert any(row[1] == "viewer" and "default" in row[0] for row in rows)
+    assert rows[0] == ["group", "tenant", "role"]
+    assert any(row[0] == "DOSM-Admins" and row[2] == "admin" for row in rows)
+    assert any("default" in row[0] for row in rows)
 
 
 def test_rbac_settings_admin_only(app, session_factory):
