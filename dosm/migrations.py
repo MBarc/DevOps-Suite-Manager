@@ -266,6 +266,21 @@ def run_migrations(engine: Engine) -> list[str]:
     # rebuilt tenant-scoped before the legacy column-adds + seeds below (which
     # then become no-ops on the freshly-created schema).
     applied.extend(_migrate_multitenant(engine))
+    # Phase 24b+: group_mappings.tenant_id becomes nullable so a group can grant
+    # the tenant-less platform_admin role. SQLite can't relax NOT NULL in place;
+    # rebuild the table (mappings are re-addable / re-seeded from config).
+    _insp = inspect(engine)
+    if "group_mappings" in _insp.get_table_names():
+        tid_col = next(
+            (c for c in _insp.get_columns("group_mappings") if c["name"] == "tenant_id"),
+            None,
+        )
+        if tid_col is not None and not tid_col["nullable"]:
+            from dosm.models import Base
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE group_mappings"))
+            Base.metadata.create_all(engine)
+            applied.append("group_mappings.tenant_id_nullable")
     # Phase 9 - jump host chains
     if _add_column_if_missing(
         engine,
@@ -485,6 +500,22 @@ def run_migrations(engine: Engine) -> list[str]:
         "visibility VARCHAR(16) NOT NULL DEFAULT 'shared'",
     ):
         applied.append("credentials.visibility")
+    # Pipelines RBAC - per-pipeline ownership + visibility (mirrors credentials).
+    # Existing rows default to ``shared`` with no owner (visible to the tenant).
+    if _add_column_if_missing(
+        engine,
+        "pipelines",
+        "owner_id",
+        "owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    ):
+        applied.append("pipelines.owner_id")
+    if _add_column_if_missing(
+        engine,
+        "pipelines",
+        "visibility",
+        "visibility VARCHAR(16) NOT NULL DEFAULT 'shared'",
+    ):
+        applied.append("pipelines.visibility")
     # RBAC - per-user UI preferences (private to each user).
     if _add_column_if_missing(
         engine,

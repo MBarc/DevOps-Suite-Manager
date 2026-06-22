@@ -34,7 +34,7 @@
     <label>Visibility
       <select name="visibility">
         {% set vis = payload.visibility if payload else (visibility or 'shared') %}
-        <option value="shared" {% if vis == 'shared' %}selected{% endif %}>Share with everyone</option>
+        <option value="shared" {% if vis == 'shared' %}selected{% endif %}>Share with tenant</option>
         <option value="private" {% if vis == 'private' %}selected{% endif %}>Keep to myself</option>
       </select>
       <span class="field-hint">Private payloads are visible only to you and admins.</span>

@@ -148,7 +148,7 @@ def provision_user(
     username: str,
     email: str | None,
     display_name: str | None,
-    tenant_id: int,
+    tenant_id: int | None,
     role: str,
 ) -> tuple[User, str | None]:
     """JIT-create or update the local mirror of an Okta user. Returns the user

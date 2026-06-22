@@ -88,6 +88,13 @@ def test_pick_grant_default_and_deny():
                                 default_tenant_id=None, default_role="viewer") is None
 
 
+def test_pick_grant_platform_admin_is_tenantless_and_wins():
+    # A platform_admin grant has no tenant (None) and outranks tenant roles.
+    mappings = [("Ops", 5, "operator"), ("Plat", None, "platform_admin")]
+    assert okta_oidc.pick_grant(["Ops", "Plat"], mappings,
+                                default_tenant_id=1, default_role="none") == (None, "platform_admin")
+
+
 # ---------------------------------------------------------------------------
 # Token signing fixtures
 # ---------------------------------------------------------------------------
@@ -292,6 +299,27 @@ def test_okta_role_locked_survives_group_change(
         c2.get("/auth/okta/callback?code=abc&state=fixedval", follow_redirects=False)
     with session_factory() as s:
         assert s.execute(select(User).where(User.okta_sub == "lock-sub")).scalar_one().role == "admin"
+
+
+def test_okta_group_grants_platform_admin(
+    app, test_config, session_factory, monkeypatch, signing_key, jwks_public
+):
+    """A tenant-less group->platform_admin grant provisions a cross-tenant
+    superuser (role platform_admin, tenant_id None)."""
+    get_backend(test_config).set_str("okta/client_secret", "shh")
+    with session_factory() as s:
+        s.add(GroupMapping(group_name="DOSM-Platform", tenant_id=None, role="platform_admin"))
+        s.commit()
+    _patch_network(monkeypatch, signing_key, jwks_public, groups=["DOSM-Platform"], sub="pa-sub")
+    with _okta_enabled(test_config, {}, default_role="none"):
+        c = TestClient(app, raise_server_exceptions=True)
+        c.get("/auth/okta/login", follow_redirects=False)
+        r = c.get("/auth/okta/callback?code=abc&state=fixedval", follow_redirects=False)
+        assert r.status_code == 303, r.text
+    with session_factory() as s:
+        u = s.execute(select(User).where(User.okta_sub == "pa-sub")).scalar_one()
+        assert u.role == "platform_admin"
+        assert u.tenant_id is None
 
 
 def test_local_login_works_when_okta_enabled(app, test_config):

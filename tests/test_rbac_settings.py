@@ -74,19 +74,26 @@ def test_add_update_delete_mapping(auth_client, session_factory):
                      data={"group": "DOSM-Admins", "role": "operator"}, follow_redirects=False)
     assert _mappings(session_factory)["DOSM-Admins"] == "operator"
 
-    # delete
+    # delete (by mapping id)
+    with session_factory() as s:
+        mid = s.execute(
+            select(GroupMapping).where(GroupMapping.group_name == "DOSM-Admins")
+        ).scalar_one().id
     r = auth_client.post("/settings/rbac/mapping/delete",
-                         data={"group": "DOSM-Admins"}, follow_redirects=False)
+                         data={"mapping_id": mid}, follow_redirects=False)
     assert r.status_code == 303
     assert _mappings(session_factory) == {}
 
 
 def test_invalid_role_rejected(auth_client):
-    # superuser is not a role; platform_admin is not assignable via a group grant
-    for bad in ("superuser", "platform_admin"):
-        r = auth_client.post("/settings/rbac/mapping",
-                             data={"group": "G", "role": bad}, follow_redirects=False)
-        assert r.status_code == 400
+    # superuser is not a role at all -> 400
+    r = auth_client.post("/settings/rbac/mapping",
+                         data={"group": "G", "role": "superuser"}, follow_redirects=False)
+    assert r.status_code == 400
+    # platform_admin IS a role, but a tenant admin may not grant it -> 403
+    r = auth_client.post("/settings/rbac/mapping",
+                         data={"group": "G", "role": "platform_admin"}, follow_redirects=False)
+    assert r.status_code == 403
 
 
 def test_default_role_requires_platform_admin(auth_client, app, session_factory, test_config):
@@ -138,6 +145,20 @@ def test_export_csv(auth_client, session_factory):
     assert rows[0] == ["group", "tenant", "role"]
     assert any(row[0] == "DOSM-Admins" and row[2] == "admin" for row in rows)
     assert any("default" in row[0] for row in rows)
+
+
+def test_platform_admin_can_grant_platform_admin(app, session_factory):
+    pa = _platform_admin_client(app, session_factory)
+    r = pa.post("/settings/rbac/mapping",
+                data={"group": "DOSM-Platform", "role": "platform_admin"},
+                follow_redirects=False)
+    assert r.status_code == 303
+    with session_factory() as s:
+        m = s.execute(
+            select(GroupMapping).where(GroupMapping.group_name == "DOSM-Platform")
+        ).scalar_one()
+        assert m.role == "platform_admin"
+        assert m.tenant_id is None  # tenant-less grant
 
 
 def test_rbac_settings_admin_only(app, session_factory):

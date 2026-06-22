@@ -180,10 +180,20 @@ def _tenant_names(db: Session) -> dict[int, str]:
 def _rbac_rows(db: Session, tid: int | None) -> list[dict]:
     names = _tenant_names(db)
     return [
-        {"group": m.group_name, "role": m.role, "tenant_id": m.tenant_id,
-         "tenant": names.get(m.tenant_id, "?")}
+        {"id": m.id, "group": m.group_name, "role": m.role, "tenant_id": m.tenant_id,
+         # NULL tenant = a tenant-less platform_admin grant.
+         "tenant": names.get(m.tenant_id, "All tenants") if m.tenant_id is not None
+                   else "All tenants"}
         for m in rbac_store.list_mappings(db, tid)
     ]
+
+
+def _can_edit_mapping(user: User, mapping) -> bool:
+    """Platform admins may edit any mapping; tenant admins only their own
+    tenant's tenant-scoped grants (never the tenant-less platform_admin ones)."""
+    if is_platform_admin(user):
+        return True
+    return mapping.tenant_id is not None and mapping.tenant_id == user.tenant_id
 
 
 @router.get("/rbac", response_class=HTMLResponse, include_in_schema=False)
@@ -216,14 +226,21 @@ async def rbac_mapping_save(
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    """Upsert one group -> role assignment within a tenant (add a new group or
-    change an existing group's role - keyed on group name + tenant)."""
+    """Add (or upsert) a group -> role grant. Tenant roles carry a tenant; the
+    tenant-less ``platform_admin`` grant is platform-admin-only."""
     group = group.strip()
     if not group:
         raise HTTPException(400, "group name is required")
-    if role not in ROLES:
+    if role == "platform_admin":
+        # Cross-tenant superuser grant - only a platform admin may create it, and
+        # it has no tenant (guards against tenant-admin privilege escalation).
+        if not is_platform_admin(user):
+            raise HTTPException(403, "only a platform admin can grant platform_admin")
+        tid: int | None = None
+    elif role in ROLES:
+        tid = _resolve_mapping_tenant(db, user, tenant_id)
+    else:
         raise HTTPException(400, f"invalid role {role!r}")
-    tid = _resolve_mapping_tenant(db, user, tenant_id)
     updated = rbac_store.upsert_mapping(db, group, tid, role)
     db.add(AuditLog(
         tenant_id=tid,
@@ -236,19 +253,48 @@ async def rbac_mapping_save(
     return RedirectResponse("/settings/rbac?saved=1", status_code=303)
 
 
-@router.post("/rbac/mapping/delete", include_in_schema=False)
-async def rbac_mapping_delete(
+@router.post("/rbac/mapping/update", include_in_schema=False)
+async def rbac_mapping_update(
     request: Request,
-    group: str = Form(...),
-    tenant_id: str | None = Form(None),
+    mapping_id: int = Form(...),
+    role: str = Form(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    tid = _resolve_mapping_tenant(db, user, tenant_id)
-    if not rbac_store.delete_mapping(db, group, tid):
+    """Inline role change on an existing mapping (keyed by id). To switch a grant
+    between tenant-scoped and platform_admin, remove it and re-add."""
+    mapping = rbac_store.get_by_id(db, mapping_id)
+    if mapping is None or not _can_edit_mapping(user, mapping):
+        raise HTTPException(404)
+    # A tenant-less (platform_admin) row stays platform_admin; a tenant row may
+    # only move among the tenant roles.
+    if mapping.tenant_id is None:
+        if role != "platform_admin":
+            raise HTTPException(400, "platform grant role cannot change here; remove + re-add")
+    elif role not in ROLES:
+        raise HTTPException(400, f"invalid role {role!r}")
+    mapping.role = role
+    db.add(AuditLog(tenant_id=mapping.tenant_id, actor_id=user.id,
+                    action="settings.rbac.mapping.update", target="rbac",
+                    details=f"group={mapping.group_name!r} role={role} tenant={mapping.tenant_id}"))
+    db.commit()
+    return RedirectResponse("/settings/rbac?saved=1", status_code=303)
+
+
+@router.post("/rbac/mapping/delete", include_in_schema=False)
+async def rbac_mapping_delete(
+    request: Request,
+    mapping_id: int = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    mapping = rbac_store.get_by_id(db, mapping_id)
+    if mapping is None or not _can_edit_mapping(user, mapping):
         raise HTTPException(404, "no such group mapping")
-    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="settings.rbac.mapping.delete",
-                    target="rbac", details=f"group={group!r} tenant={tid}"))
+    grp, mtid = mapping.group_name, mapping.tenant_id
+    rbac_store.delete_by_id(db, mapping)
+    db.add(AuditLog(tenant_id=mtid, actor_id=user.id, action="settings.rbac.mapping.delete",
+                    target="rbac", details=f"group={grp!r} tenant={mtid}"))
     db.commit()
     return RedirectResponse("/settings/rbac?saved=1", status_code=303)
 
@@ -369,7 +415,6 @@ async def tenants_page(
 async def tenant_create(
     request: Request,
     name: str = Form(...),
-    slug: str = Form(""),
     description: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_platform_admin),
@@ -377,7 +422,8 @@ async def tenant_create(
     name = name.strip()
     if not name:
         raise HTTPException(400, "name is required")
-    slug = _slugify(slug or name)
+    # Slug is always derived from the name (stable machine identifier).
+    slug = _slugify(name)
     if db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none() is not None:
         raise HTTPException(400, f"a tenant with slug {slug!r} already exists")
     tenant = Tenant(name=name, slug=slug, description=description.strip() or None)
@@ -459,15 +505,18 @@ async def member_set_role(
     user_id: int,
     request: Request,
     role: str = Form(...),
-    locked: str | None = Form(None),
     tenant_id: str | None = Form(None),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
     tid: int | None = Depends(active_tenant_id),
 ):
-    """Set a user's role + lock (and tenant, platform admin only). A tenant
-    admin may only manage users in their own tenant and may not grant
-    platform_admin."""
+    """Set a user's role (and tenant, platform admin only). A tenant admin may
+    only manage users in their own tenant and may not grant platform_admin.
+
+    Setting a role here pins it (``role_locked``) so a subsequent Okta sign-in
+    won't overwrite the manual assignment from the user's group claims. Use
+    ``dosm user set-role <name> <role> --unlock`` to hand control back to the
+    group mapping."""
     target = db.get(User, user_id)
     if target is None:
         raise HTTPException(404)
@@ -495,11 +544,12 @@ async def member_set_role(
             raise HTTPException(400, "assign a tenant for a non-platform role")
     old = target.role
     target.role = role
-    target.role_locked = locked is not None
+    # A manual assignment pins the role so Okta group sync won't revert it.
+    target.role_locked = True
     db.add(AuditLog(
         tenant_id=target.tenant_id, actor_id=user.id, action="user.set_role",
         target=f"user:{target.id}",
-        details=f"{old} -> {role} locked={target.role_locked}",
+        details=f"{old} -> {role} locked=True",
     ))
     db.commit()
     return RedirectResponse("/settings/members?saved=1", status_code=303)

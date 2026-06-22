@@ -149,6 +149,52 @@ def test_shared_credential_visible_to_everyone(app, session_factory, operator_cl
 
 
 # ---------------------------------------------------------------------------
+# Private vs shared pipelines (mirrors credentials)
+# ---------------------------------------------------------------------------
+
+def _make_pipeline(session_factory, owner_id: int, visibility: str) -> int:
+    from dosm.models import Pipeline
+    with session_factory() as s:
+        p = Pipeline(
+            name=f"pipe-{visibility}-{owner_id}",
+            provider="github_actions",
+            config="{}",
+            owner_id=owner_id,
+            visibility=visibility,
+            tenant_id=_default_tid(s),
+        )
+        s.add(p)
+        s.commit()
+        s.refresh(p)
+        return p.id
+
+
+def test_private_pipeline_hidden_from_other_users(
+    app, session_factory, auth_client, operator_client
+):
+    op_id = _ensure_user(session_factory, "testop", "operator")
+    pid = _make_pipeline(session_factory, owner_id=op_id, visibility="private")
+
+    # A different operator cannot see it (404, not 403) or run it.
+    other = _client_for(app, session_factory, "testop2", "operator")
+    assert other.get(f"/pipelines/{pid}", follow_redirects=False).status_code == 404
+    assert other.post(f"/pipelines/{pid}/run", follow_redirects=False).status_code == 404
+    assert f"pipe-private-{op_id}" not in other.get("/pipelines").text
+
+    # The owner can see it; an admin can too.
+    assert operator_client.get(f"/pipelines/{pid}", follow_redirects=False).status_code == 200
+    assert f"pipe-private-{op_id}" in operator_client.get("/pipelines").text
+    assert auth_client.get(f"/pipelines/{pid}", follow_redirects=False).status_code == 200
+
+
+def test_shared_pipeline_visible_to_everyone(app, session_factory, operator_client):
+    op_id = _ensure_user(session_factory, "testop", "operator")
+    pid = _make_pipeline(session_factory, owner_id=op_id, visibility="shared")
+    other = _client_for(app, session_factory, "testop3", "operator")
+    assert other.get(f"/pipelines/{pid}", follow_redirects=False).status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # Per-user data scoping - conversations
 # ---------------------------------------------------------------------------
 

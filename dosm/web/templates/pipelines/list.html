@@ -20,6 +20,7 @@
       <tr>
         <td>
           <a href="/pipelines/{{ r.p.id }}" style="color:var(--fg-strong); font-weight:500">{{ r.p.name }}</a>
+          {% if r.p.visibility == 'private' %}<span class="tag" style="margin-left:6px; color:var(--fg-muted)" title="Visible only to its owner and tenant admins">Private</span>{% endif %}
           {% if r.p.description %}<div class="muted" style="font-size:12px">{{ r.p.description }}</div>{% endif %}
         </td>
         <td><span class="tag">{{ r.provider_name }}</span></td>

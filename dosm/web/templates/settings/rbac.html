@@ -43,23 +43,28 @@
     {% for r in rows %}
       <tr>
         <td style="font-weight:500; color:var(--fg-strong)">{{ r.group }}</td>
-        {% if is_platform_admin %}<td><span class="badge badge-blue">{{ r.tenant }}</span></td>{% endif %}
+        {% if is_platform_admin %}<td>
+          {% if r.tenant_id is none %}<span class="badge badge-amber">All tenants</span>
+          {% else %}<span class="badge badge-blue">{{ r.tenant }}</span>{% endif %}
+        </td>{% endif %}
         <td>
-          <form method="post" action="/settings/rbac/mapping" class="row" style="gap:6px; align-items:center">
-            <input type="hidden" name="group" value="{{ r.group }}" />
-            <input type="hidden" name="tenant_id" value="{{ r.tenant_id }}" />
+          {% if r.tenant_id is none %}
+            <span class="badge badge-amber">platform admin</span>
+          {% else %}
+          <form method="post" action="/settings/rbac/mapping/update" class="row" style="gap:6px; align-items:center">
+            <input type="hidden" name="mapping_id" value="{{ r.id }}" />
             <select name="role" onchange="this.form.submit()">
               {% for role in roles %}
                 <option value="{{ role }}" {% if role == r.role %}selected{% endif %}>{{ role }}</option>
               {% endfor %}
             </select>
           </form>
+          {% endif %}
         </td>
         <td style="text-align:right">
           <form method="post" action="/settings/rbac/mapping/delete" class="inline"
                 onsubmit="return confirm('Remove mapping for {{ r.group }}?');">
-            <input type="hidden" name="group" value="{{ r.group }}" />
-            <input type="hidden" name="tenant_id" value="{{ r.tenant_id }}" />
+            <input type="hidden" name="mapping_id" value="{{ r.id }}" />
             <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Remove</button>
           </form>
         </td>
@@ -77,21 +82,38 @@
       <input type="text" name="group" required placeholder="e.g. DOSM-Operators" style="width:100%; box-sizing:border-box" />
     </label>
     {% if is_platform_admin %}
-    <label>
+    <label data-tenant-field>
       <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Tenant</span>
-      <select name="tenant_id" required>
+      <select name="tenant_id">
         {% for t in tenants %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
       </select>
     </label>
     {% endif %}
     <label>
       <span style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Role</span>
-      <select name="role">
+      <select name="role" id="rbac-add-role">
         {% for role in roles %}<option value="{{ role }}">{{ role }}</option>{% endfor %}
+        {% if is_platform_admin %}<option value="platform_admin">platform admin</option>{% endif %}
       </select>
     </label>
-    <button type="submit" class="btn">Add</button>
+    <button type="submit" class="btn btn-field">Add</button>
   </form>
+  {% if is_platform_admin %}
+  <p class="muted" style="font-size:12px; margin-top:8px">
+    <strong>platform admin</strong> grants cross-tenant superuser access and has no tenant.
+    Only platform admins can assign it.
+  </p>
+  <script>
+  (function () {
+    var roleSel = document.getElementById('rbac-add-role');
+    var tf = document.querySelector('[data-tenant-field]');
+    if (!roleSel || !tf) return;
+    function sync() { tf.style.display = roleSel.value === 'platform_admin' ? 'none' : ''; }
+    roleSel.addEventListener('change', sync);
+    sync();
+  })();
+  </script>
+  {% endif %}
 </section>
 
 <section class="card">

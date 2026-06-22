@@ -21,6 +21,7 @@ from dosm.pipelines.inputs import (
     parse_schema_form,
     validate_payload_values,
 )
+from dosm.pipelines.access import can_see_pipeline
 from dosm.pipelines.payload_access import (
     can_see_payload,
     visible_payloads_filter,
@@ -32,6 +33,15 @@ router = APIRouter(prefix="/pipelines")
 
 def _templates(request: Request):
     return request.app.state.templates
+
+
+def _pipeline_or_404(db: Session, pid: int, tid: int | None, user: User):
+    """Fetch a pipeline scoped to the tenant AND visible to the user. 404s on a
+    cross-tenant or private-not-owned pipeline so its existence doesn't leak."""
+    p = repo.get_pipeline(db, pid, tid)
+    if p is None or not can_see_pipeline(user, p):
+        raise HTTPException(404)
+    return p
 
 
 def _form_context(db: Session, user: User, tid: int | None, pipeline=None, error: str | None = None) -> dict:
@@ -115,7 +125,7 @@ async def pipelines_list(
     user: User = Depends(require_user),
     tid: int | None = Depends(active_tenant_id),
 ):
-    pipelines = repo.list_pipelines(db, tid)
+    pipelines = repo.list_pipelines(db, tid, user)
     enriched = []
     for p in pipelines:
         latest = repo.list_runs(db, p.id, limit=1)
@@ -153,6 +163,7 @@ async def pipelines_create(
     provider: str = Form("github_actions"),
     description: str = Form(""),
     credential_id: str = Form(""),
+    visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
     tid: int = Depends(require_active_tenant),
@@ -170,6 +181,8 @@ async def pipelines_create(
             config={k: v for k, v in config.items() if v not in (None, "")},
             inputs_schema=schema_rows,
             credential_id=_parse_int_or_none(credential_id),
+            owner_id=user.id,
+            visibility=visibility,
         )
     except (IntegrityError, PipelineProviderError) as e:
         db.rollback()
@@ -199,9 +212,7 @@ async def pipelines_detail(
     user: User = Depends(require_user),
     tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     runs = repo.list_runs(db, p.id, limit=25)
     cfg = json.loads(p.config or "{}")
     schema = normalize_schema(json.loads(p.inputs_schema)) if p.inputs_schema else []
@@ -250,9 +261,7 @@ async def pipelines_edit(
     user: User = Depends(require_user),
     tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     return _templates(request).TemplateResponse(
         request, "pipelines/form.html", _form_context(db, user, tid, pipeline=p)
     )
@@ -266,13 +275,12 @@ async def pipelines_update(
     provider: str = Form("github_actions"),
     description: str = Form(""),
     credential_id: str = Form(""),
+    visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
     tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     form = await request.form()
     config = _decode_config_form(provider, form)
     schema_rows = parse_schema_form(form) or None
@@ -286,6 +294,7 @@ async def pipelines_update(
             config={k: v for k, v in config.items() if v not in (None, "")},
             inputs_schema=schema_rows,
             credential_id=_parse_int_or_none(credential_id),
+            visibility=visibility,
         )
     except (IntegrityError, PipelineProviderError) as e:
         db.rollback()
@@ -307,9 +316,7 @@ async def pipelines_delete(
     user: User = Depends(require_operator),
     tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     audit_tid = p.tenant_id
     repo.delete_pipeline(db, p)
     db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="pipeline.delete", target=f"pipeline:{pid}"))
@@ -325,9 +332,7 @@ async def pipelines_trigger(
     user: User = Depends(require_operator),
     tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     cfg = request.app.state.config
     form = await request.form()
     schema = normalize_schema(json.loads(p.inputs_schema)) if p.inputs_schema else []
@@ -395,9 +400,10 @@ async def pipelines_run_detail(
     run = repo.get_run(db, run_id)
     if run is None:
         raise HTTPException(404)
-    # Scope the run through its (tenant-scoped) pipeline - 404 cross-tenant.
+    # Scope the run through its (tenant-scoped) pipeline - 404 cross-tenant or
+    # if the pipeline is private and not visible to this user.
     p = repo.get_pipeline(db, run.pipeline_id, tid)
-    if p is None:
+    if p is None or not can_see_pipeline(user, p):
         raise HTTPException(404)
     inputs = json.loads(run.inputs) if run.inputs else {}
     return _templates(request).TemplateResponse(
@@ -418,9 +424,10 @@ async def pipelines_run_refresh(
     run = repo.get_run(db, run_id)
     if run is None:
         raise HTTPException(404)
-    # Scope the run through its (tenant-scoped) pipeline - 404 cross-tenant.
+    # Scope the run through its (tenant-scoped) pipeline - 404 cross-tenant or
+    # if the pipeline is private and not visible to this user.
     p_for_rec = repo.get_pipeline(db, run.pipeline_id, tid)
-    if p_for_rec is None:
+    if p_for_rec is None or not can_see_pipeline(user, p_for_rec):
         raise HTTPException(404)
     cfg = request.app.state.config
     old_status = run.status
@@ -459,9 +466,7 @@ def _payload_values_from_form(schema: list[dict], form) -> dict:
 def _payload_or_404(db, pid: int, payload_id: int, user, tid: int | None):
     """Load a payload, enforcing it belongs to the (tenant-scoped) pipeline and
     the user may see it (404 - not 403 - so private payloads don't leak)."""
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     pl = repo.get_payload(db, payload_id)
     if pl is None or pl.pipeline_id != pid or not can_see_payload(user, pl):
         raise HTTPException(404)
@@ -476,9 +481,7 @@ async def payload_new_form(
     user: User = Depends(require_operator),
     tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     return _templates(request).TemplateResponse(
         request,
         "pipelines/payload_form.html",
@@ -497,9 +500,7 @@ async def payload_create(
     user: User = Depends(require_operator),
     tid: int | None = Depends(active_tenant_id),
 ):
-    p = repo.get_pipeline(db, pid, tid)
-    if p is None:
-        raise HTTPException(404)
+    p = _pipeline_or_404(db, pid, tid, user)
     schema = _schema_for(p)
     form = await request.form()
     try:

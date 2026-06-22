@@ -38,15 +38,22 @@ def seed_group_mappings_from_config(cfg) -> int:
 
 
 def list_mappings(db: Session, tid: int | None) -> list[GroupMapping]:
-    """All group mappings, optionally scoped to tenant ``tid`` (None = all
-    tenants, the platform-admin view). Ordered by group name."""
+    """Group mappings visible to the caller. ``tid`` None = the platform-admin
+    view (every mapping, including tenant-less platform_admin grants). A concrete
+    ``tid`` returns only that tenant's grants (NULL-tenant platform grants are
+    excluded, so tenant admins never see them). Ordered by group name."""
     stmt = select(GroupMapping).order_by(GroupMapping.group_name)
     if tid is not None:
         stmt = stmt.where(GroupMapping.tenant_id == tid)
     return list(db.execute(stmt).scalars())
 
 
-def get_mapping(db: Session, group: str, tid: int) -> GroupMapping | None:
+def get_by_id(db: Session, mapping_id: int) -> GroupMapping | None:
+    return db.get(GroupMapping, mapping_id)
+
+
+def get_mapping(db: Session, group: str, tid: int | None) -> GroupMapping | None:
+    # ``tid`` None matches the tenant-less platform_admin grant (IS NULL).
     return db.execute(
         select(GroupMapping).where(
             GroupMapping.group_name == group, GroupMapping.tenant_id == tid
@@ -54,9 +61,9 @@ def get_mapping(db: Session, group: str, tid: int) -> GroupMapping | None:
     ).scalar_one_or_none()
 
 
-def upsert_mapping(db: Session, group: str, tid: int, role: str) -> bool:
-    """Add or update a group -> role assignment within tenant ``tid``. Returns
-    True if an existing row was updated, False if a new row was created."""
+def upsert_mapping(db: Session, group: str, tid: int | None, role: str) -> bool:
+    """Add or update a group -> role grant. ``tid`` None creates a tenant-less
+    platform_admin grant. Returns True if an existing row was updated."""
     existing = get_mapping(db, group, tid)
     if existing is not None:
         existing.role = role
@@ -67,10 +74,6 @@ def upsert_mapping(db: Session, group: str, tid: int, role: str) -> bool:
     return False
 
 
-def delete_mapping(db: Session, group: str, tid: int) -> bool:
-    existing = get_mapping(db, group, tid)
-    if existing is None:
-        return False
-    db.delete(existing)
+def delete_by_id(db: Session, mapping: GroupMapping) -> None:
+    db.delete(mapping)
     db.flush()
-    return True

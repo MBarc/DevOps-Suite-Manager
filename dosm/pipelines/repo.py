@@ -22,11 +22,19 @@ class PipelineNotFound(LookupError):
     pass
 
 
-def list_pipelines(db: Session, tid: int | None) -> list[Pipeline]:
+def list_pipelines(db: Session, tid: int | None, user=None) -> list[Pipeline]:
+    """Pipelines in tenant ``tid``. When ``user`` is given, also restrict to the
+    pipelines that user may see (shared + their own private); when None (agent /
+    CLI) no visibility restriction is applied within the tenant."""
     stmt = select(Pipeline).order_by(Pipeline.name)
     clause = tenant_clause(Pipeline, tid)
     if clause is not None:
         stmt = stmt.where(clause)
+    if user is not None:
+        from dosm.pipelines.access import visible_pipelines_filter
+        vclause = visible_pipelines_filter(user)
+        if vclause is not True:
+            stmt = stmt.where(vclause)
     return list(db.execute(stmt).scalars())
 
 
@@ -74,6 +82,8 @@ def create_pipeline(
     config: dict,
     inputs_schema: list[dict] | None,
     credential_id: int | None,
+    owner_id: int | None = None,
+    visibility: str = "shared",
 ) -> Pipeline:
     adapter = get_adapter(provider)
     cfg_norm = adapter.validate_config(config)
@@ -85,6 +95,8 @@ def create_pipeline(
         config=json.dumps(cfg_norm),
         inputs_schema=json.dumps(inputs_schema) if inputs_schema else None,
         credential_id=credential_id,
+        owner_id=owner_id,
+        visibility=visibility if visibility in ("shared", "private") else "shared",
     )
     db.add(p)
     db.flush()
@@ -101,6 +113,7 @@ def update_pipeline(
     config: dict,
     inputs_schema: list[dict] | None,
     credential_id: int | None,
+    visibility: str | None = None,
 ) -> Pipeline:
     adapter = get_adapter(provider)
     cfg_norm = adapter.validate_config(config)
@@ -110,6 +123,8 @@ def update_pipeline(
     pipeline.config = json.dumps(cfg_norm)
     pipeline.inputs_schema = json.dumps(inputs_schema) if inputs_schema else None
     pipeline.credential_id = credential_id
+    if visibility is not None and visibility in ("shared", "private"):
+        pipeline.visibility = visibility
     db.flush()
     return pipeline
 

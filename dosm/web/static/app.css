@@ -121,7 +121,28 @@ a:hover { color: var(--fg-strong); }
 }
 .brand-name { font-size: 15px; }
 
-.sidebar-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+/* flex:1 + min-height:0 lets the nav scroll internally when it's taller than
+   the viewport, keeping the footer (tenant switcher + user chip) pinned and
+   visible instead of pushed off the bottom of the 100vh sidebar. The scrollbar
+   is thin, themed, and only appears on hover - invisible at rest, and it never
+   shows at all when the nav fits the window. */
+.sidebar-nav {
+  display: flex; flex-direction: column; gap: 2px;
+  flex: 1; min-height: 0; overflow-y: auto;
+  scrollbar-width: thin;                 /* Firefox */
+  scrollbar-color: transparent transparent;
+}
+.sidebar-nav:hover { scrollbar-color: var(--border) transparent; }
+.sidebar-nav::-webkit-scrollbar { width: 8px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 2px solid transparent;         /* insets the thumb so it reads as thin */
+  border-radius: var(--r-pill);
+  background-clip: padding-box;
+}
+.sidebar-nav:hover::-webkit-scrollbar-thumb { background: var(--border); background-clip: padding-box; }
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: var(--bg-elev-4); background-clip: padding-box; }
 .sidebar-nav a {
   display: flex;
   align-items: center;
@@ -172,9 +193,61 @@ a:hover { color: var(--fg-strong); }
   font-weight: 700; font-size: 12px;
   display: grid; place-items: center;
 }
-.user-chip .who { line-height: 1.15; font-size: 13px; }
+.user-menu { position: relative; }
+.user-chip { cursor: pointer; transition: background 120ms ease, border-color 120ms ease; }
+.user-chip:hover { background: var(--bg-elev-3); border-color: var(--border); }
+.user-chip:focus-visible { outline: none; box-shadow: var(--ring); }
+.user-chip-caret { width: 14px; height: 14px; margin-left: auto; flex: 0 0 auto; color: var(--fg-dim); }
+.user-menu-pop {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 6px);
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: var(--r-sm); box-shadow: var(--sh-2);
+  padding: var(--sp-1); z-index: 50;
+}
+.user-menu-pop form { margin: 0; }
+.user-menu-item {
+  display: flex; align-items: center; gap: var(--sp-2);
+  width: 100%; padding: var(--sp-2) var(--sp-3);
+  background: transparent; border: none; color: var(--fg);
+  font: 500 13px/1 var(--font-sans); border-radius: var(--r-xs);
+  cursor: pointer; text-align: left;
+}
+.user-menu-item:hover { background: var(--bg-elev-3); color: var(--fg-strong); }
+.user-menu-item svg { width: 14px; height: 14px; flex: 0 0 auto; }
+
+.user-chip .who { line-height: 1.2; font-size: 13px; min-width: 0; }
+.user-chip .who .signed-in-as { color: var(--fg-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; }
+.user-chip .who .username { color: var(--fg-strong); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-chip .who .role { color: var(--fg-muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; }
 .user-chip form { margin-left: auto; }
+
+/* Active-tenant switcher (platform admin) / tenant badge (regular user),
+   sits in the sidebar footer above the user chip. */
+.tenant-switch { margin-bottom: var(--sp-2); }
+.tenant-switch .tenant-label {
+  text-transform: uppercase; letter-spacing: 0.08em;
+  font-size: 10.5px; color: var(--fg-dim);
+  padding: 0 var(--sp-1); margin-bottom: var(--sp-1);
+}
+.tenant-switch form { margin: 0; }
+.tenant-switch select {
+  width: 100%;
+  padding: 7px var(--sp-2);
+  font-size: 12.5px;
+  background: var(--bg-elev-2);
+  border-color: var(--border-soft);
+  background-position: right 8px center;
+  padding-right: 26px;
+}
+.tenant-badge {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 7px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-soft);
+  color: var(--fg-muted); font-size: 12.5px;
+}
+.tenant-badge svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--fg-dim); }
 
 main.main {
   padding: var(--sp-8) var(--sp-8) var(--sp-10);
@@ -307,6 +380,10 @@ button:focus-visible, .btn:focus-visible { outline: none; box-shadow: var(--ring
 .btn-danger:hover { background: rgba(255,122,138,0.1); color: var(--danger); }
 
 .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: var(--r-xs); }
+/* Submit button sized to vertically match adjacent text inputs in a
+   label-stacked `.row` (inputs are ~40px tall vs a default button ~29px, so
+   flex-end bottom-aligns them but the tops don't line up). */
+.btn-field { padding-top: 12px; padding-bottom: 12px; }
 
 /* ----- Forms ---------------------------------------------------------- */
 

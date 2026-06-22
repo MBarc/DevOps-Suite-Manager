@@ -86,6 +86,19 @@
       <textarea name="description" rows="2" placeholder="Optional notes for teammates">{{ pipeline.description or '' if pipeline else '' }}</textarea>
     </label>
 
+    <label>Visibility
+      <select name="visibility">
+        <option value="shared" {% if not pipeline or pipeline.visibility == 'shared' %}selected{% endif %}>
+          Share with tenant
+        </option>
+        <option value="private" {% if pipeline and pipeline.visibility == 'private' %}selected{% endif %}>
+          Keep to myself
+        </option>
+      </select>
+      <span class="field-hint">Shared pipelines are visible to everyone in your tenant; private
+        ones only to you (and tenant admins).</span>
+    </label>
+
     <fieldset class="schema-fieldset">
       <legend class="muted" style="padding:0 6px; font-size:12px">Inputs schema</legend>
       <p class="field-hint" style="margin-top:0">

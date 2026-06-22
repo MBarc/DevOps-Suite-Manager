@@ -65,8 +65,11 @@ class GroupMapping(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     group_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    tenant_id: Mapped[int] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    # NULL tenant_id = a tenant-less ``platform_admin`` grant (cross-tenant
+    # superuser). Such grants are platform-admin-managed only. Tenant-scoped
+    # grants (viewer/operator/admin) always carry a tenant_id.
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
@@ -604,6 +607,13 @@ class Pipeline(Base):
     credential_id: Mapped[int | None] = mapped_column(
         ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
     )
+    # RBAC - ownership + visibility, mirroring Credential. ``shared`` (default)
+    # is visible to everyone in the tenant; ``private`` only to ``owner_id`` and
+    # tenant admins. ``owner_id`` is the creator (NULL for pre-RBAC rows).
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="shared")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

@@ -17,10 +17,10 @@
 <section class="card">
   <h2>Users</h2>
   <p class="muted" style="font-size:13px; margin-bottom:12px">
-    Set each user's role. <strong>Lock</strong> pins the role so a future Okta sign-in won't
-    overwrite it from the user's group claims (the per-user override).
+    Set each user's role here. A role set this way is pinned to the user, so a future Okta
+    sign-in won't overwrite it from their group claims.
     {% if is_platform_admin %}As platform admin you manage every tenant's users and can move a user
-    between tenants or grant <code>platform_admin</code> (which makes them tenant-less).{% else %}
+    between tenants or grant <code>platform admin</code> (which makes them tenant-less).{% else %}
     You manage users in your own tenant.{% endif %}
   </p>
   <table class="data">
@@ -28,7 +28,6 @@
       <th>User</th>
       {% if is_platform_admin %}<th style="width:180px">Tenant</th>{% endif %}
       <th style="width:150px">Role</th>
-      <th style="width:80px">Lock</th>
       <th style="width:90px"></th>
     </tr></thead>
     <tbody>
@@ -55,12 +54,9 @@
               <option value="{{ role }}" {% if role == m.role %}selected{% endif %}>{{ role }}</option>
             {% endfor %}
             {% if is_platform_admin %}
-              <option value="platform_admin" {% if m.role == 'platform_admin' %}selected{% endif %}>platform_admin</option>
+              <option value="platform_admin" {% if m.role == 'platform_admin' %}selected{% endif %}>platform admin</option>
             {% endif %}
           </select>
-        </td>
-        <td style="text-align:center">
-          <input type="checkbox" name="locked" {% if m.role_locked %}checked{% endif %} title="Pin this role" />
         </td>
         <td style="text-align:right">
           <button type="submit" class="btn btn-subtle btn-sm">Save</button>
@@ -68,7 +64,7 @@
         </form>
       </tr>
     {% else %}
-      <tr><td colspan="5" class="muted" style="padding:14px">No users.</td></tr>
+      <tr><td colspan="4" class="muted" style="padding:14px">No users.</td></tr>
     {% endfor %}
     </tbody>
   </table>
