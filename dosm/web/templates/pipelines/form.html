@@ -14,8 +14,12 @@
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
+    overflow-x: auto;            /* scroll instead of overlap when cramped */
   }
-  .schema-editor { width: 100%; table-layout: fixed; }
+  /* The 7-column editor needs room; keep a floor width so headers/cells never
+     crush into each other, and let the fieldset scroll horizontally below it. */
+  .schema-editor { width: 100%; table-layout: fixed; min-width: 680px; }
+  .schema-editor th { white-space: nowrap; }
   .schema-editor td { vertical-align: middle; }
   .schema-editor input[type="text"],
   .schema-editor select {
@@ -34,7 +38,7 @@
   </div>
 </header>
 
-<section class="card card-narrow">
+<section class="card">
   {% if error %}<div class="badge badge-red" style="margin-bottom: var(--sp-3)">{{ error }}</div>{% endif %}
   <form method="post"
         action="{{ '/pipelines/' + pipeline.id|string + '/edit' if pipeline else '/pipelines/new' }}"

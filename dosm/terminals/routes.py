@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, WebSocket,
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from dosm.auth.deps import require_admin, user_has_role
+from dosm.auth.deps import require_platform_admin, user_has_role
 from dosm.auth.tenancy import active_tenant_id, resolve_tenant_id
 from dosm.db import get_session
 from dosm.models import AuditLog, User
@@ -31,7 +31,7 @@ def _templates(request: Request):
 
 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
-async def terminals_index(request: Request, user: User = Depends(require_admin)):
+async def terminals_index(request: Request, user: User = Depends(require_platform_admin)):
     cfg = request.app.state.config
     if not cfg.terminals.enabled:
         raise HTTPException(status_code=404)
@@ -54,7 +54,7 @@ async def terminals_runas(
     target_user: str = Form(...),
     record: int = Form(1),
     db: Session = Depends(get_session),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_platform_admin),
     tid: int | None = Depends(active_tenant_id),
 ):
     """Construct an ephemeral wrapped shell and redirect to its session page."""
@@ -86,7 +86,7 @@ async def terminals_runas(
 async def terminals_session(
     shell_id: str,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_platform_admin),
     record: int = 1,
 ):
     cfg = request.app.state.config
@@ -139,7 +139,7 @@ async def terminals_ws(
     Session = sessionmaker(bind=get_engine(), future=True)
     with Session() as s:
         user = s.get(User, uid)
-        if not user_has_role(user, "admin"):
+        if not user_has_role(user, "platform_admin"):
             await websocket.close(code=4403)
             return
         user_id = user.id
