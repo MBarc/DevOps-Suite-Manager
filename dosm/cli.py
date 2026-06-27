@@ -261,7 +261,7 @@ def tenant_rename(
 @user_app.command("create")
 def user_create(
     username: str = typer.Argument(...),
-    role: str = typer.Option("admin", "--role", help="admin | operator | viewer"),
+    role: str = typer.Option("tenant_admin", "--role", help="tenant_admin | operator | viewer"),
     password: str | None = typer.Option(
         None, "--password", help="Password (will prompt if omitted).", show_default=False
     ),
@@ -281,8 +281,8 @@ def user_create(
     _load()
     if platform_admin:
         role = "platform_admin"
-    elif role not in ("admin", "operator", "viewer"):
-        console.print(f"[red]Invalid role {role!r}. Use admin | operator | viewer.[/red]")
+    elif role not in ("tenant_admin", "operator", "viewer"):
+        console.print(f"[red]Invalid role {role!r}. Use tenant_admin | operator | viewer.[/red]")
         raise typer.Exit(1)
     if password is None:
         password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
@@ -327,7 +327,7 @@ def user_list() -> None:
 @user_app.command("set-role")
 def user_set_role(
     username: str = typer.Argument(...),
-    role: str = typer.Argument(..., help="admin | operator | viewer"),
+    role: str = typer.Argument(..., help="tenant_admin | operator | viewer"),
     lock: bool | None = typer.Option(
         None, "--lock/--unlock",
         help="Pin this role so Okta group changes won't overwrite it (per-user override).",
@@ -339,8 +339,8 @@ def user_set_role(
     user's group claims (the per-user permission override). ``--unlock`` lets
     group-derived roles take over again at next login."""
     _load()
-    if role not in ("admin", "operator", "viewer"):
-        console.print(f"[red]Invalid role {role!r}. Use admin | operator | viewer.[/red]")
+    if role not in ("tenant_admin", "operator", "viewer"):
+        console.print(f"[red]Invalid role {role!r}. Use tenant_admin | operator | viewer.[/red]")
         raise typer.Exit(1)
     with session_scope() as s:
         u = s.execute(select(User).where(User.username == username)).scalar_one_or_none()
@@ -441,7 +441,7 @@ def rbac_show_mapping() -> None:
         console.print("[yellow]No group mappings configured.[/yellow]")
     else:
         console.print(table)
-    if cfg.rbac.default_role in ("admin", "operator", "viewer"):
+    if cfg.rbac.default_role in ("tenant_admin", "operator", "viewer"):
         console.print(
             f"Unmapped users get: [cyan]{cfg.rbac.default_role}[/cyan] (Default tenant)"
         )

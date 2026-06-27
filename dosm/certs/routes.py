@@ -34,6 +34,13 @@ def peek_cached() -> tuple[list[CertInfo], datetime] | None:
     return _last_cert_cache
 
 
+def peek_cached_for(tid: int | None) -> tuple[list[CertInfo], datetime] | None:
+    """Tenant-scoped read of the cert cache, for the agent. Returns only the
+    certs last fetched for ``tid`` - never the globally-shared last fetch, which
+    could belong to another tenant. ``None`` if nothing cached for this tenant."""
+    return _cert_cache.get(tid)
+
+
 async def _fetch_vault_certs(
     db: Session, cfg, warn_days: int, critical_days: int, tid: int | None
 ) -> list[CertInfo]:

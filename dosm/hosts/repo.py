@@ -205,6 +205,19 @@ def _validate_org_unit(db: Session, org_unit_id: int | None, tid: int | None) ->
     return org_unit_id
 
 
+def _validate_credential(db: Session, credential_id: int | None, tid: int) -> int | None:
+    """Confirm a credential the host is being pinned to exists in the host's own
+    tenant. Without this, a forged ``credential_id`` in the form/agent payload
+    could attach (and later use) another tenant's credential - the dropdown only
+    *offers* in-tenant creds but the submitted id is attacker-controllable."""
+    if credential_id is None:
+        return None
+    cred = db.get(Credential, credential_id)
+    if cred is None or cred.tenant_id != tid:
+        raise HostValidationError("Selected credential no longer exists.")
+    return credential_id
+
+
 def create_host(
     db: Session,
     *,
@@ -231,6 +244,8 @@ def create_host(
         ft_port = None
         ft_credential_id = None
     org_unit_id = _validate_org_unit(db, org_unit_id, tenant_id)
+    credential_id = _validate_credential(db, credential_id, tenant_id)
+    ft_credential_id = _validate_credential(db, ft_credential_id, tenant_id)
     if is_jumpbox:
         jump_host_id = None  # jumpboxes connect directly - no chained jumps
     _validate_jump(db, host_id=None, jump_host_id=jump_host_id, tid=tenant_id)
@@ -284,6 +299,8 @@ def update_host(
         ft_port = None
         ft_credential_id = None
     org_unit_id = _validate_org_unit(db, org_unit_id, host.tenant_id)
+    credential_id = _validate_credential(db, credential_id, host.tenant_id)
+    ft_credential_id = _validate_credential(db, ft_credential_id, host.tenant_id)
     if host.is_jumpbox and not is_jumpbox:
         in_use = db.execute(
             select(Host.id).where(Host.jump_host_id == host.id).limit(1)

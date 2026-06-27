@@ -73,25 +73,29 @@ def pick_grant(
     """Pure: pick the (tenant_id, role) grant for a user's group memberships.
 
     ``mappings`` is an iterable of ``(group_name, tenant_id, role)`` tuples (the
-    rows of the ``group_mappings`` table). The highest-ranked role across all
-    matched groups wins, and that row's tenant is the grant. A user in **no**
-    mapped group falls back to ``default_role`` in the Default tenant - unless
-    ``default_role`` is not a real role (``"none"``/unset), in which case this
-    returns ``None`` meaning *access denied*. That is the secure default:
+    rows of the ``group_mappings`` table, ordered by id so the result is
+    deterministic). Group membership grants only the **baseline viewer** role
+    within that group's tenant - elevation to operator/tenant_admin/platform_admin
+    is a per-user action in the Members page, never a group grant. The first
+    matched tenant-scoped group wins its tenant; the stored ``role`` column is
+    ignored and superseded by ``viewer``. Tenant-less rows (the retired
+    platform_admin-via-group grant) are skipped. A user in **no** mapped group
+    falls back to ``default_role`` in the Default tenant - unless ``default_role``
+    is not a real tenant role (``"none"``/unset/``platform_admin``), in which case
+    this returns ``None`` meaning *access denied*. That is the secure default:
     membership in a mapped group is required to sign in.
     """
     member = set(groups or [])
-    best: tuple[int, str] | None = None
-    best_rank = -1
-    for group_name, tenant_id, role in mappings:
-        if group_name not in member:
-            continue
-        rank = ROLE_RANK.get(role, -1)
-        if rank > best_rank:
-            best, best_rank = (tenant_id, role), rank
-    if best is not None:
-        return best
-    if default_role in ROLE_RANK and default_tenant_id is not None:
+    for group_name, tenant_id, _role in mappings:
+        if tenant_id is None:
+            continue  # retired platform_admin-via-group grant - never matches now
+        if group_name in member:
+            return tenant_id, "viewer"
+    if (
+        default_role in ROLE_RANK
+        and default_role != "platform_admin"
+        and default_tenant_id is not None
+    ):
         return default_tenant_id, default_role
     return None
 
@@ -103,6 +107,7 @@ def resolve_grant(db: Session, groups, rbac: RbacConfig) -> tuple[int, str] | No
     fallback."""
     rows = db.execute(
         select(GroupMapping.group_name, GroupMapping.tenant_id, GroupMapping.role)
+        .order_by(GroupMapping.id)
     ).all()
     default_tid = db.execute(
         select(Tenant.id).where(Tenant.slug == "default")

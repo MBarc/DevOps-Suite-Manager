@@ -68,14 +68,14 @@ def _login(app, username: str) -> TestClient:
 @pytest.fixture
 def alice(app, session_factory, two_tenants):
     """Tenant-A (Default) admin."""
-    _make_user(session_factory, "alice", "admin", two_tenants["a"])
+    _make_user(session_factory, "alice", "tenant_admin", two_tenants["a"])
     return _login(app, "alice")
 
 
 @pytest.fixture
 def bob(app, session_factory, two_tenants):
     """Tenant-B (Acme) admin."""
-    _make_user(session_factory, "bob", "admin", two_tenants["b"])
+    _make_user(session_factory, "bob", "tenant_admin", two_tenants["b"])
     return _login(app, "bob")
 
 
@@ -235,7 +235,7 @@ def test_platform_admin_sets_member_role_and_lock(root, two_tenants, session_fac
 
 def test_inactive_tenant_blocks_login_and_access(app, two_tenants, session_factory):
     # A user in tenant B (Acme) that we then deactivate.
-    _make_user(session_factory, "evan", "admin", two_tenants["b"])
+    _make_user(session_factory, "evan", "tenant_admin", two_tenants["b"])
     client = _login(app, "evan")  # works while active
     assert client.get("/hosts", follow_redirects=False).status_code == 200
 
@@ -264,7 +264,7 @@ def test_tenantless_non_platform_user_denied(app, session_factory, two_tenants):
     # A non-platform user with NO tenant must be denied, never treated as
     # "all tenants" (the fail-safe against a cross-tenant leak). Such a user
     # can't even sign in.
-    _make_user(session_factory, "frank", "admin", None)
+    _make_user(session_factory, "frank", "tenant_admin", None)
     client = TestClient(app, raise_server_exceptions=True)
     r = client.post("/login", data={"username": "frank", "password": "testpass", "next": "/"},
                     follow_redirects=False)
@@ -281,7 +281,7 @@ def test_member_role_requires_tenant_for_non_platform_role(root, session_factory
         s.commit()
         uid = u.id
     r = root.post(f"/settings/members/{uid}/role",
-                  data={"role": "admin"}, follow_redirects=False)  # no tenant_id
+                  data={"role": "tenant_admin"}, follow_redirects=False)  # no tenant_id
     assert r.status_code == 400
 
 

@@ -16,9 +16,11 @@ from dosm.models import GroupMapping, Tenant
 
 
 def seed_group_mappings_from_config(cfg) -> int:
-    """One-time upgrade: copy ``config.yaml`` ``rbac.group_role_map`` into the
-    ``group_mappings`` table (under the Default tenant) when the table is still
-    empty. Idempotent - a no-op once any mapping exists. Returns rows seeded."""
+    """One-time upgrade: copy ``config.yaml`` ``rbac.group_role_map`` group names
+    into the ``group_mappings`` table (under the Default tenant) when the table
+    is still empty. Idempotent - a no-op once any mapping exists. Returns rows
+    seeded. The legacy per-group *role* is dropped: every mapped group now grants
+    only the baseline ``viewer`` (elevation moved to the Members page)."""
     grm = dict(cfg.rbac.group_role_map or {})
     if not grm:
         return 0
@@ -31,8 +33,8 @@ def seed_group_mappings_from_config(cfg) -> int:
         if default_tid is None:
             return 0
         n = 0
-        for group, role in grm.items():
-            s.add(GroupMapping(group_name=group, tenant_id=int(default_tid), role=role))
+        for group in grm:
+            s.add(GroupMapping(group_name=group, tenant_id=int(default_tid), role="viewer"))
             n += 1
         return n
 
@@ -62,8 +64,9 @@ def get_mapping(db: Session, group: str, tid: int | None) -> GroupMapping | None
 
 
 def upsert_mapping(db: Session, group: str, tid: int | None, role: str) -> bool:
-    """Add or update a group -> role grant. ``tid`` None creates a tenant-less
-    platform_admin grant. Returns True if an existing row was updated."""
+    """Add or update a group -> tenant grant (callers pass ``role="viewer"`` -
+    group membership only ever confers the baseline role now). Returns True if an
+    existing row was updated."""
     existing = get_mapping(db, group, tid)
     if existing is not None:
         existing.role = role

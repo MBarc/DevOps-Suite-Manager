@@ -16,9 +16,9 @@ from dosm.models import PipelinePayload, User
 
 
 def _is_admin(user: User | None) -> bool:
-    # admin OR platform_admin - both get the unrestricted visibility view
+    # tenant_admin OR platform_admin - both get the unrestricted visibility view
     # (payloads are tenant-scoped via their parent pipeline, not here).
-    return user_has_role(user, "admin")
+    return user_has_role(user, "tenant_admin")
 
 
 def can_see_payload(user: User | None, payload: PipelinePayload) -> bool:

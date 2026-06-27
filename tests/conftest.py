@@ -112,7 +112,7 @@ def admin_user(session_factory, default_tenant):
         user = User(
             username="testadmin",
             password_hash=hash_password("testpass"),
-            role="admin",
+            role="tenant_admin",
             tenant_id=default_tenant["id"],
             is_active=True,
         )

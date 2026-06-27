@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Settings | Members | DOSM{% endblock %}
+{% set role_labels = {'viewer': 'Viewer', 'operator': 'Operator', 'tenant_admin': 'Tenant admin', 'platform_admin': 'Platform admin'} %}
 {% block content %}
 <header class="page-header">
   <div><h1>Members</h1></div>
@@ -17,8 +18,10 @@
 <section class="card">
   <h2>Users</h2>
   <p class="muted" style="font-size:13px; margin-bottom:12px">
-    Set each user's role here. A role set this way is pinned to the user, so a future Okta
-    sign-in won't overwrite it from their group claims.
+    Members appear here after they sign in. Their AD/Okta group admits them at the baseline
+    <strong>Viewer</strong> role (see <a href="/settings/rbac">Access control</a>); this is where you
+    elevate an individual. A role set here is pinned to the user, so a future Okta sign-in won't
+    overwrite it from their group claims.
     {% if is_platform_admin %}As platform admin you manage every tenant's users and can move a user
     between tenants or grant <code>platform admin</code> (which makes them tenant-less).{% else %}
     You manage users in your own tenant.{% endif %}
@@ -51,10 +54,10 @@
         <td>
           <select name="role">
             {% for role in roles %}
-              <option value="{{ role }}" {% if role == m.role %}selected{% endif %}>{{ role }}</option>
+              <option value="{{ role }}" {% if role == m.role %}selected{% endif %}>{{ role_labels.get(role, role) }}</option>
             {% endfor %}
             {% if is_platform_admin %}
-              <option value="platform_admin" {% if m.role == 'platform_admin' %}selected{% endif %}>platform admin</option>
+              <option value="platform_admin" {% if m.role == 'platform_admin' %}selected{% endif %}>{{ role_labels['platform_admin'] }}</option>
             {% endif %}
           </select>
         </td>

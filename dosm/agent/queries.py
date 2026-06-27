@@ -323,7 +323,7 @@ register_query(QUERY_MONITORING)
 # ---------------------------------------------------------------------------
 
 async def _cert_check_runner(cfg, args: dict) -> QueryResult:
-    from dosm.certs.routes import peek_cached
+    from dosm.certs.routes import peek_cached_for
 
     host_filter = (args.get("host") or "").lower().strip()
     try:
@@ -331,7 +331,9 @@ async def _cert_check_runner(cfg, args: dict) -> QueryResult:
     except (KeyError, TypeError, ValueError):
         expires_days = None
 
-    cached = peek_cached()
+    # Read this tenant's cache only - the global peek would expose whichever
+    # tenant most recently loaded /certs.
+    cached = peek_cached_for(agent_tenant_id())
     if cached is None:
         return QueryResult(
             ok=True,
@@ -589,7 +591,9 @@ async def _search_docs_runner(cfg, args: dict) -> QueryResult:
         k = 5
 
     with session_scope() as s:
-        hits = _search(s, cfg, query, limit=k, exclude_org=False)
+        # Scope the RAG index to the agent's tenant - without tid, _search runs
+        # the global chunk/embedding index across every tenant's documents.
+        hits = _search(s, cfg, query, limit=k, exclude_org=False, tid=agent_tenant_id())
 
     if not hits:
         return QueryResult(ok=True, summary="No matching documents", data=f"No documents matched {query!r}.")
@@ -617,29 +621,25 @@ register_query(SEARCH_DOCS)
 # ---------------------------------------------------------------------------
 
 async def _list_docs_runner(cfg, args: dict) -> QueryResult:
-    import os
+    # List from the indexed Document rows (tenant-scoped), not the raw vault
+    # filesystem - the vault is a single shared tree with no per-tenant roots,
+    # so walking it directly would surface other tenants' files.
+    from sqlalchemy import select
+
+    from dosm.auth.tenancy import tenant_clause
+    from dosm.db import session_scope
+    from dosm.models import Document
 
     folder = (args.get("folder") or "").strip().strip("/")
-    base = cfg.docs_dir.resolve()
-    target = (base / folder).resolve() if folder else base
-
-    if base not in target.parents and target != base:
-        return QueryResult(ok=False, summary="folder outside docs vault", error="invalid path")
-    if not target.is_dir():
-        return QueryResult(ok=True, summary=f"folder not found: {folder}", data=f"No folder {folder!r} in the docs vault.")
-
-    entries: list[str] = []
-    for root, dirs, files in os.walk(target):
-        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-        rel_root = os.path.relpath(root, base)
-        for f in sorted(files):
-            if f.endswith((".md", ".markdown", ".txt", ".pdf")):
-                rel = os.path.join(rel_root, f).replace("\\", "/")
-                if rel.startswith("./"):
-                    rel = rel[2:]
-                entries.append(rel)
-        if len(entries) >= 100:
-            break
+    tid = agent_tenant_id()
+    with session_scope() as s:
+        stmt = select(Document.rel_path).order_by(Document.rel_path)
+        clause = tenant_clause(Document, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        if folder:
+            stmt = stmt.where(Document.rel_path.startswith(folder + "/"))
+        entries = list(s.execute(stmt.limit(100)).scalars())
 
     if not entries:
         return QueryResult(ok=True, summary="No documents", data="No documents found in that folder.")

@@ -34,7 +34,7 @@ Create a local user. First user created should be admin.
 
 | Name | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `--role` | text | no | `'admin'` | admin \| operator \| viewer |
+| `--role` | text | no | `'tenant_admin'` | tenant_admin \| operator \| viewer |
 | `--password` | text | no | `-` | Password (will prompt if omitted). |
 
 **Exit codes:**

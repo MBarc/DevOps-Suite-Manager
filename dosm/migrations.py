@@ -547,4 +547,35 @@ def run_migrations(engine: Engine) -> list[str]:
         applied.append("users.display_name")
     if _add_column_if_missing(engine, "users", "last_login", "last_login DATETIME"):
         applied.append("users.last_login")
+    # Access-control rework: the tenant-scoped admin role is renamed ``admin`` ->
+    # ``tenant_admin`` for clarity (it was always tenant-confined, distinct from
+    # the cross-tenant ``platform_admin``). At the same time, AD/Okta group
+    # mappings stop conferring a chosen role: every group now grants only the
+    # baseline ``viewer`` within its tenant, and per-user elevation moved to the
+    # Members page. So (1) rename existing admin users, (2) collapse every
+    # tenant-scoped group mapping to ``viewer``, and (3) delete the retired
+    # tenant-less ``platform_admin``-via-group rows (that grant path is gone -
+    # platform_admin is now only assigned per-user in Members). All idempotent.
+    tbls = set(inspect(engine).get_table_names())
+    with engine.begin() as conn:
+        renamed = 0
+        if "users" in tbls:
+            renamed += conn.execute(text(
+                "UPDATE users SET role = 'tenant_admin' WHERE role = 'admin'"
+            )).rowcount
+        collapsed = deleted = 0
+        if "group_mappings" in tbls:
+            collapsed = conn.execute(text(
+                "UPDATE group_mappings SET role = 'viewer'"
+                " WHERE tenant_id IS NOT NULL AND role != 'viewer'"
+            )).rowcount
+            deleted = conn.execute(text(
+                "DELETE FROM group_mappings WHERE tenant_id IS NULL"
+            )).rowcount
+    if renamed:
+        applied.append(f"users.admin_to_tenant_admin_{renamed}")
+    if collapsed:
+        applied.append(f"group_mappings.collapse_to_viewer_{collapsed}")
+    if deleted:
+        applied.append(f"group_mappings.drop_platform_admin_{deleted}")
     return applied

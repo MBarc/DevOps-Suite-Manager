@@ -43,6 +43,23 @@ def _list_folders(db: Session, tid: int | None) -> list[Folder]:
     return list(db.execute(stmt).scalars())
 
 
+def _require_doc_access(db: Session, path: str, tid: int | None) -> None:
+    """Guard the by-path doc routes against cross-tenant access. The vault is a
+    single shared filesystem tree (no per-tenant roots yet), so a forged
+    ``path`` would otherwise let any tenant open another tenant's file. 404 if
+    ``path`` is an indexed Document owned by a *different* tenant. A path with no
+    Document row (e.g. just created, not yet reindexed) is allowed - it isn't
+    attributable to another tenant. Platform admins (``tid is None``) are
+    unrestricted."""
+    if tid is None:
+        return
+    doc = db.execute(
+        select(Document).where(Document.rel_path == path)
+    ).scalars().first()
+    if doc is not None and doc.tenant_id != tid:
+        raise HTTPException(404)
+
+
 def _get_folder_by_slug(db: Session, slug: str, tid: int | None) -> Folder | None:
     # Folder.slug is unique only within a tenant, so a bare slug lookup can
     # match multiple tenants in the all-tenants view; scope and take the first.

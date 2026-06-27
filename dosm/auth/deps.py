@@ -54,10 +54,11 @@ def require_user(
 ROLE_RANK: dict[str, int] = {
     "viewer": 0,
     "operator": 1,
-    "admin": 2,
+    "tenant_admin": 2,
     # Platform Admin sits above tenant admin: full access across *all* tenants.
-    # Tenant-confined roles (viewer/operator/admin) only ever see their own
-    # tenant; platform_admin is tenant-less and uses the active-tenant switcher.
+    # Tenant-confined roles (viewer/operator/tenant_admin) only ever see their
+    # own tenant; platform_admin is tenant-less and uses the active-tenant
+    # switcher.
     "platform_admin": 3,
 }
 
@@ -89,9 +90,10 @@ def require_role(minimum: str):
     return _dep
 
 
-# Convenience dependencies for the common gates.
+# Convenience dependencies for the common gates. ``require_admin`` keeps its
+# name (it's referenced everywhere) but now gates on the ``tenant_admin`` role.
 require_platform_admin = require_role("platform_admin")
-require_admin = require_role("admin")
+require_admin = require_role("tenant_admin")
 require_operator = require_role("operator")
 
 

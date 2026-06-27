@@ -65,12 +65,20 @@ def _match_store(db: Session, hostname: str, r: HostCheckResult) -> None:
     m.checked_at = datetime.now(UTC)
 
 
-def _matches_for(db: Session, hostnames: list[str]) -> dict[tuple[str, int], MonitoringMatch]:
+def _matches_for(
+    db: Session, hostnames: list[str], source_ids: list[int]
+) -> dict[tuple[str, int], MonitoringMatch]:
+    # Filter by the caller's (tenant-scoped) source ids as well as hostname.
+    # MonitoringMatch has no tenant_id of its own, so without this a hostname
+    # shared across tenants would pull in another tenant's cached matches.
     keys = [h.lower() for h in hostnames]
-    if not keys:
+    if not keys or not source_ids:
         return {}
     rows = db.execute(
-        select(MonitoringMatch).where(MonitoringMatch.hostname.in_(keys))
+        select(MonitoringMatch).where(
+            MonitoringMatch.hostname.in_(keys),
+            MonitoringMatch.source_id.in_(source_ids),
+        )
     ).scalars()
     return {(m.hostname, m.source_id): m for m in rows}
 
@@ -482,7 +490,7 @@ async def _run_checks(
     db: Session, hostname: str, sources: list[MonitoringSource], backend, *, force: bool = False
 ) -> list[HostCheckResult]:
     results: list[HostCheckResult] = []
-    matches = _matches_for(db, [hostname])
+    matches = _matches_for(db, [hostname], [s.id for s in sources])
     fresh_sources: list[MonitoringSource] = []
     for source in sources:
         m = matches.get((hostname.lower(), source.id))
@@ -512,7 +520,7 @@ async def _run_checks_fleet(
     if not adapters or not hosts:
         return {}
 
-    matches = _matches_for(db, [h.hostname for h in hosts])
+    matches = _matches_for(db, [h.hostname for h in hosts], [s.id for s in sources])
     matrix: dict[tuple[str, int], HostCheckResult] = {}
     to_check: list[tuple[object, MonitoringAdapter, MonitoringSource]] = []
     for h in hosts:

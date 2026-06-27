@@ -20,9 +20,9 @@ from dosm.models import Credential, User
 
 
 def _is_admin(user: User | None) -> bool:
-    # admin OR platform_admin - both get the unrestricted visibility view
+    # tenant_admin OR platform_admin - both get the unrestricted visibility view
     # (still tenant-scoped separately via ``tenant_clause``).
-    return user_has_role(user, "admin")
+    return user_has_role(user, "tenant_admin")
 
 
 def can_see_credential(user: User | None, cred: Credential) -> bool:
@@ -37,9 +37,12 @@ def can_see_credential(user: User | None, cred: Credential) -> bool:
 def can_use_credential(user: User | None, cred: Credential) -> bool:
     """True if ``user`` may use ``cred`` to open a connection.
 
-    Same rule as visibility today; kept as a distinct function so the use-time
-    policy can diverge later (e.g. an admin who can *see* but not *use*).
-    """
+    A tenant-scoped user may only use credentials from their own tenant; a
+    platform admin (``tenant_id is None``) is unrestricted. This tenant check is
+    the use-time backstop against a host pinned - via a forged id - to another
+    tenant's credential, layered on the private/shared visibility rule."""
+    if user is not None and user.tenant_id is not None and cred.tenant_id != user.tenant_id:
+        return False
     return can_see_credential(user, cred)
 
 

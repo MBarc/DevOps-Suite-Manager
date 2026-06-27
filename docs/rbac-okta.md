@@ -21,22 +21,33 @@ on the user record.
 ```
 Active Directory ──(federates groups)──> Okta ──(groups claim in ID token)──> DOSM
                                                                                 │
-                                          group_role_map + highest-wins ────────┘
+                                group → tenant, baseline viewer ────────────────┘
                                                                                 ▼
-                                                              role: viewer | operator | admin
+                                            role: viewer  (elevated per-user in Members)
                                                                                 ▼
                                                        require_role() gates on every action
 ```
 
+> **Access model (current):** group membership only ever admits a user into a
+> **tenant** at the baseline **viewer** role. Nobody is elevated by being in a
+> group. To make someone an operator, tenant&nbsp;admin, or platform&nbsp;admin,
+> raise their role per-user on the **Members** page after they've signed in once;
+> that pins the role (`role_locked`) so a later sign-in won't undo it.
+
 ## 2. Permission types (roles)
 
-There are three roles on a strict ladder - each one inherits everything below it.
-Enforced by `require_role(minimum)` in `dosm/auth/deps.py`, which compares a
-numeric rank:
+Roles sit on a strict ladder - each one inherits everything below it. Enforced by
+`require_role(minimum)` in `dosm/auth/deps.py`, which compares a numeric rank:
 
 ```python
-ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}
+ROLE_RANK = {"viewer": 0, "operator": 1, "tenant_admin": 2, "platform_admin": 3}
 ```
+
+`viewer`/`operator`/`tenant_admin` are **tenant-confined** (they only ever see
+their own tenant). `platform_admin` is **tenant-less** and acts across every
+tenant via the active-tenant switcher; it is granted only per-user in Members,
+never by a group. The tenant-confined `tenant_admin` was historically called
+`admin`.
 
 ### `viewer` (rank 0) - read-only
 
@@ -63,9 +74,10 @@ Everything a viewer can do, **plus** the actual work:
 - Cannot touch global configuration, manage users, or use the most sensitive
   surfaces (see admin).
 
-### `admin` (rank 2) - full control
+### `tenant_admin` (rank 2) - full control within a tenant
 
-Everything an operator can do, **plus** the privileged surfaces:
+Everything an operator can do, **plus** the privileged surfaces (scoped to their
+own tenant):
 
 - In-app **Terminals** (raw PowerShell/cmd/bash on the DOSM host, with session
   recording).
@@ -78,7 +90,7 @@ Everything an operator can do, **plus** the privileged surfaces:
 
 ### Quick reference
 
-| Capability | viewer | operator | admin |
+| Capability | viewer | operator | tenant_admin |
 |---|:--:|:--:|:--:|
 | View hosts / pipelines / monitoring / certs / docs / org | ✅ | ✅ | ✅ |
 | LLM chat, live metrics | ✅ | ✅ | ✅ |
@@ -108,44 +120,50 @@ return **404**, not 403, so a private credential's existence doesn't leak), and 
 **use-time guard**: if a shared host is pinned to someone else's private
 credential, connecting returns a clear 403 instead of failing opaquely.
 
-## 4. Correlating an AD group to a permission type
+## 4. Correlating an AD group to tenant access
 
-The mapping is explicit, declarative configuration - DOSM never guesses.
+A group mapping answers one question: **which tenant does this group's members
+land in?** It does *not* choose their role - membership always grants the
+baseline **viewer**. Elevation is a separate, deliberate, per-user act (§4a).
 
-**Where it's defined** - `$DOSM_HOME/config.yaml`:
+**Where it's defined** - the **Access control** page (Settings), stored in the
+`group_mappings` DB table (one row per group → tenant). A tenant admin maps groups
+into their own tenant; a platform admin picks the tenant explicitly. The legacy
+`config.yaml` `rbac.group_role_map` is retained only to seed group *names* into
+that table on first upgrade (its roles are dropped - everything becomes viewer).
 
-```yaml
-rbac:
-  default_role: none              # unmapped users: "none" denies access (default)
-  group_role_map:
-    DOSM-Admins:     admin
-    DOSM-Operators:  operator
-    DOSM-ReadOnly:   viewer
-```
-
-The **keys** are group names exactly as they appear in the token's `groups`
-claim (with AD-federated Okta, those are your AD security groups). The **values**
-are DOSM roles.
-
-**How a role is chosen** (`map_groups_to_role` in `dosm/auth/okta.py`):
+**How access is resolved on login** (`pick_grant`/`resolve_grant` in
+`dosm/auth/okta.py`):
 
 1. Look at every group the user is in.
-2. Keep only the ones present in `group_role_map`.
-3. **Highest role wins** - someone in both `DOSM-Operators` and `DOSM-Admins`
-   becomes `admin`.
-4. If the user is in **no** mapped group, they get `default_role`. The secure
-   default is **`none` → access denied**: an individual user can't sign in
-   unless a group grants them a role. Set `default_role` to a real role
-   (viewer/operator/admin) only if you want everyone who authenticates to get
-   that baseline. This is the "Unmapped users" setting on the Access-control
-   page (Settings).
+2. Keep only the ones mapped to a tenant.
+3. The **first matched** mapping (by id - the earliest-created) places the user in
+   that tenant at role **viewer**. The stored role column is ignored.
+4. If the user is in **no** mapped group, they get the **Unmapped users** policy:
+   the secure default is **No access** (group membership required to sign in); it
+   can instead be set to **Viewer** (Default tenant) to admit everyone who
+   authenticates. Those are the only two choices - a group/default can never
+   confer an elevated role.
 
-**When it's applied:** on **every login**, not just the first. So moving a user
-between AD groups takes effect the next time they sign in - no manual DOSM
-change, no de-provisioning step. The role lands on the user row and an audit
-entry (`rbac.role_assigned`) records any change.
+**When it's applied:** on **every login**. A user's tenant placement and viewer
+baseline are recomputed each sign-in - **unless** their role has been pinned in
+Members (`role_locked`), in which case the manual assignment is preserved and the
+group claim is ignored for role purposes.
 
-Inspect the live mapping any time with `dosm rbac show-mapping`.
+Inspect the live mappings any time with `dosm rbac show-mapping`.
+
+## 4a. Elevating an individual (Members)
+
+Because groups only grant viewer, the common case - "everyone in this AD group
+should have access, but only one or two should administer" - is handled in
+**Settings → Members**, not by carving the AD group. A user appears in Members
+after their first sign-in; a tenant admin (their own tenant) or a platform admin
+raises their role there. Saving **pins** the role (`User.role_locked = True`) so a
+later Okta sign-in won't revert it to viewer from the group claim. From the CLI:
+`dosm user set-role <user> <role> --lock` (and `--unlock` to hand control back to
+the group mapping). `platform_admin` is assignable only by an existing platform
+admin in Members; the very first one is created from the service account with
+`dosm user create --platform-admin`.
 
 ## 5. How Okta integrates, and what we get from it
 
@@ -175,7 +193,7 @@ Okta federating AD.
 | `email` | Contact / display | `User.email` |
 | `preferred_username` (→ email → sub) | Login name shown in UI | `User.username` |
 | `name` | Friendly display name | `User.display_name` |
-| `groups` | **Authorization** - mapped to role | drives `User.role` (not stored raw) |
+| `groups` | **Authorization** - mapped to a tenant (viewer baseline) | drives `User.tenant_id` + viewer role (not stored raw) |
 
 We also record `auth_provider = "okta"` and `last_login`, and write an
 unverifiable sentinel password hash (`!okta`) so SSO accounts can never log in
@@ -193,21 +211,24 @@ via the local form.
   (`okta/client_secret`), never in `config.yaml`.
 
 **Trust boundary:** Okta is authoritative for *identity and group membership*;
-DOSM is authoritative for *what a role can do*. The two are bridged only by
-`group_role_map`. This means you administer access centrally in AD/Okta (add a
-person to `DOSM-Operators`) without touching DOSM, and the **local break-glass
-admin** still works if Okta is ever unreachable.
+DOSM is authoritative for *which tenant you land in and what a role can do*. The
+two are bridged only by the group→tenant mappings. You administer **who can get
+in** centrally in AD/Okta (add a person to a mapped group → they sign in as a
+viewer of that tenant) without touching DOSM; you administer **who is elevated**
+inside DOSM (Members). The **local break-glass admin** still works if Okta is ever
+unreachable.
 
 ## 6. End-to-end example
 
-> Priya is in AD groups `DOSM-Operators` and `Finance`. Okta federates these and
+> Priya is in AD groups `DOSM-Payments` and `Finance`. Okta federates these and
 > includes them in her ID token's `groups` claim. She signs in. DOSM validates
-> the token, sees `["DOSM-Operators", "Finance"]`, finds only `DOSM-Operators` in
-> the map → role **operator** (`Finance` is ignored). She can manage hosts, run
-> pipelines, and connect to servers - but the Settings and Terminals pages aren't
-> even in her sidebar. Later she's promoted and added to `DOSM-Admins` in AD;
-> next sign-in, DOSM recomputes her role to **admin** and audit-logs the change.
-> No DOSM-side edit was needed.
+> the token, sees `["DOSM-Payments", "Finance"]`, finds `DOSM-Payments` mapped to
+> the **Payments** tenant → she's admitted there as a **viewer** (`Finance` is
+> ignored). She can see the Payments fleet but change nothing. Later she's
+> promoted: a Payments **tenant admin** opens **Members**, finds Priya, and sets
+> her role to **operator** - which pins it. From then on she can manage hosts, run
+> pipelines, and connect to servers, and her role survives every future sign-in
+> regardless of her AD groups. Her teammates in `DOSM-Payments` stay viewers.
 
 ## 7. Configuration & operations cheat-sheet
 
@@ -221,18 +242,17 @@ okta:
   # scopes default to [openid, profile, email, groups]
   # groups_claim defaults to "groups"
 rbac:
-  default_role: none   # deny unmapped users (group membership required)
-  group_role_map:
-    DOSM-Admins: admin
-    DOSM-Operators: operator
-    DOSM-ReadOnly: viewer
+  default_role: none   # unmapped users: "none" deny (default) | "viewer" admit at baseline
+  # group_role_map is legacy: only group NAMES are seeded into the group_mappings
+  # table on first upgrade (under the Default tenant), and every grant is viewer.
+  # Manage live group → tenant mappings on the Access control page instead.
 ```
 
 ```bash
 dosm secret set okta/client_secret   # store the Okta client secret (never in YAML)
 dosm okta test                       # check discovery + JWKS + secret presence
-dosm rbac show-mapping               # print the group -> role mapping
-dosm user set-role <user> <role>     # local break-glass role change (audited)
+dosm rbac show-mapping               # print the group -> tenant mappings (all grant viewer)
+dosm user set-role <user> <role>     # elevate/pin a user's role (audited); --unlock to revert
 ```
 
 See `docs/ROADMAP.md` (Phases 21 / 21b) for the design rationale and the current

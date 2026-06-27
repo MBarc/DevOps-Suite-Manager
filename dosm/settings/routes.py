@@ -5,11 +5,14 @@ import csv
 import io
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from functools import partial
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import select
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from dosm.auth import rbac as rbac_store
@@ -27,8 +30,9 @@ from dosm.settings.cli_catalog import detect_all
 
 router = APIRouter(prefix="/settings")
 
-# Valid *tenant* DOSM roles for the RBAC mapping editor (a group grant never
-# assigns platform_admin - that role is tenant-less and set explicitly).
+# Tenant-confined DOSM roles, low→high (viewer, operator, tenant_admin). These
+# are the roles a tenant admin can assign in Members; platform_admin is excluded
+# (it's tenant-less and only a platform admin may grant it).
 ROLES = tuple(r for r in sorted(ROLE_RANK, key=lambda r: ROLE_RANK[r]) if r != "platform_admin")
 
 
@@ -178,13 +182,16 @@ def _tenant_names(db: Session) -> dict[int, str]:
 
 
 def _rbac_rows(db: Session, tid: int | None) -> list[dict]:
+    """Group → tenant grants visible to the caller. Every mapping grants the
+    baseline ``viewer`` role within its tenant (elevation happens in Members),
+    so there is no per-row role. Tenant-less rows no longer exist (the
+    platform_admin-via-group grant was retired) but are skipped defensively."""
     names = _tenant_names(db)
     return [
-        {"id": m.id, "group": m.group_name, "role": m.role, "tenant_id": m.tenant_id,
-         # NULL tenant = a tenant-less platform_admin grant.
-         "tenant": names.get(m.tenant_id, "All tenants") if m.tenant_id is not None
-                   else "All tenants"}
+        {"id": m.id, "group": m.group_name, "tenant_id": m.tenant_id,
+         "tenant": names.get(m.tenant_id, "?")}
         for m in rbac_store.list_mappings(db, tid)
+        if m.tenant_id is not None
     ]
 
 
@@ -212,7 +219,7 @@ async def rbac_page(
         request,
         "settings/rbac.html",
         {"user": user, "rows": rows, "default_role": cfg.rbac.default_role,
-         "roles": list(ROLES), "okta_enabled": cfg.okta.enabled,
+         "okta_enabled": cfg.okta.enabled,
          "is_platform_admin": platform, "tenants": tenants},
     )
 
@@ -221,62 +228,26 @@ async def rbac_page(
 async def rbac_mapping_save(
     request: Request,
     group: str = Form(...),
-    role: str = Form(...),
     tenant_id: str | None = Form(None),
     db: Session = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    """Add (or upsert) a group -> role grant. Tenant roles carry a tenant; the
-    tenant-less ``platform_admin`` grant is platform-admin-only."""
+    """Add (or upsert) a group -> tenant grant. Membership grants the baseline
+    ``viewer`` role within that tenant; individuals are elevated in Members. A
+    tenant admin can only map groups into their own tenant; a platform admin
+    names the tenant in the form."""
     group = group.strip()
     if not group:
         raise HTTPException(400, "group name is required")
-    if role == "platform_admin":
-        # Cross-tenant superuser grant - only a platform admin may create it, and
-        # it has no tenant (guards against tenant-admin privilege escalation).
-        if not is_platform_admin(user):
-            raise HTTPException(403, "only a platform admin can grant platform_admin")
-        tid: int | None = None
-    elif role in ROLES:
-        tid = _resolve_mapping_tenant(db, user, tenant_id)
-    else:
-        raise HTTPException(400, f"invalid role {role!r}")
-    updated = rbac_store.upsert_mapping(db, group, tid, role)
+    tid = _resolve_mapping_tenant(db, user, tenant_id)
+    updated = rbac_store.upsert_mapping(db, group, tid, "viewer")
     db.add(AuditLog(
         tenant_id=tid,
         actor_id=user.id,
         action="settings.rbac.mapping.update" if updated else "settings.rbac.mapping.add",
         target="rbac",
-        details=f"group={group!r} role={role} tenant={tid}",
+        details=f"group={group!r} tenant={tid} (viewer)",
     ))
-    db.commit()
-    return RedirectResponse("/settings/rbac?saved=1", status_code=303)
-
-
-@router.post("/rbac/mapping/update", include_in_schema=False)
-async def rbac_mapping_update(
-    request: Request,
-    mapping_id: int = Form(...),
-    role: str = Form(...),
-    db: Session = Depends(get_session),
-    user: User = Depends(require_admin),
-):
-    """Inline role change on an existing mapping (keyed by id). To switch a grant
-    between tenant-scoped and platform_admin, remove it and re-add."""
-    mapping = rbac_store.get_by_id(db, mapping_id)
-    if mapping is None or not _can_edit_mapping(user, mapping):
-        raise HTTPException(404)
-    # A tenant-less (platform_admin) row stays platform_admin; a tenant row may
-    # only move among the tenant roles.
-    if mapping.tenant_id is None:
-        if role != "platform_admin":
-            raise HTTPException(400, "platform grant role cannot change here; remove + re-add")
-    elif role not in ROLES:
-        raise HTTPException(400, f"invalid role {role!r}")
-    mapping.role = role
-    db.add(AuditLog(tenant_id=mapping.tenant_id, actor_id=user.id,
-                    action="settings.rbac.mapping.update", target="rbac",
-                    details=f"group={mapping.group_name!r} role={role} tenant={mapping.tenant_id}"))
     db.commit()
     return RedirectResponse("/settings/rbac?saved=1", status_code=303)
 
@@ -307,11 +278,13 @@ async def rbac_default_save(
     user: User = Depends(require_platform_admin),
 ):
     """The unmapped-user fallback is a *global* policy (it grants into the
-    Default tenant), so only a platform admin may change it."""
+    Default tenant), so only a platform admin may change it. Like a group grant,
+    it can only confer the baseline ``viewer`` role - or deny access outright."""
     cfg = request.app.state.config
-    # "none" denies access to users in no mapped group (group membership required).
-    if default_role not in ROLE_RANK and default_role != "none":
-        raise HTTPException(400, f"invalid role {default_role!r}")
+    # "none" denies access to users in no mapped group (group membership required);
+    # "viewer" admits everyone who authenticates at the baseline role.
+    if default_role not in ("none", "viewer"):
+        raise HTTPException(400, "default role must be 'none' or 'viewer'")
     _save_rbac(cfg, default_role=default_role)
     db.add(AuditLog(actor_id=user.id, action="settings.rbac.default.update",
                     target="rbac", details=f"default_role={default_role}"))
@@ -346,11 +319,12 @@ async def rbac_export_csv(
     cfg = request.app.state.config
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["group", "tenant", "role"])
+    # Every mapped group grants the baseline viewer role within its tenant.
+    writer.writerow(["group", "tenant", "grants"])
     for row in _rbac_rows(db, tid):
-        writer.writerow([row["group"], row["tenant"], row["role"]])
-    # Trailing row documents the fallback role for groups not listed above.
-    writer.writerow(["(default - unmapped groups)", "Default", cfg.rbac.default_role])
+        writer.writerow([row["group"], row["tenant"], "viewer"])
+    # Trailing row documents the fallback for users in no mapped group.
+    writer.writerow(["(default - unmapped users)", "Default", cfg.rbac.default_role])
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",

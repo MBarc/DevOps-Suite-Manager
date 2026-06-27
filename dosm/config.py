@@ -57,19 +57,20 @@ class OktaConfig(BaseModel):
 
 
 class RbacConfig(BaseModel):
-    """AD/Okta group → DOSM role mapping.
+    """AD/Okta group → tenant membership (legacy single-tenant config form).
 
-    Keys are group names exactly as they appear in the ID token ``groups``
-    claim; values are DOSM roles (``admin`` | ``operator`` | ``viewer``). When a
-    user is a member of several mapped groups, the HIGHEST role wins. A user in
-    no mapped group falls back to ``default_role``.
+    The live group→tenant grants now live in the ``group_mappings`` DB table
+    (managed from Access control), not here. Membership in a mapped group grants
+    only the baseline ``viewer`` role within that group's tenant; elevation is a
+    per-user action in Members. ``group_role_map`` is retained only for the
+    one-time config→DB seed and the offline ``map_groups_to_role`` helper.
     """
 
     group_role_map: dict[str, str] = Field(default_factory=dict)
     # Role for an authenticated user who is in NONE of the mapped groups.
     # ``"none"`` (the secure default) denies access entirely - only members of a
-    # mapped group can sign in. Set to a real role (viewer/operator/admin) to
-    # instead grant everyone who authenticates that baseline.
+    # mapped group can sign in. Set to ``"viewer"`` to instead grant everyone who
+    # authenticates that baseline (Default tenant).
     default_role: str = "none"
 
 
