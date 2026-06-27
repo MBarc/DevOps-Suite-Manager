@@ -7,6 +7,7 @@
   {{ _tab('/settings/integrations', 'Integrations', p.startswith('/settings/integrations')) }}
   {{ _tab('/settings/rbac', 'Access control', p.startswith('/settings/rbac')) }}
   {{ _tab('/settings/members', 'Members', p.startswith('/settings/members')) }}
+  {{ _tab('/settings/audit', 'Audit log', p.startswith('/settings/audit')) }}
   {% if user is defined and user and user.role == 'platform_admin' %}
     {{ _tab('/settings/tenants', 'Tenants', p.startswith('/settings/tenants')) }}
   {% endif %}

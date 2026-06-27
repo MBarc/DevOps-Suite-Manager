@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -43,6 +44,7 @@ org_app = typer.Typer(help="Organisation directory (AD-backed) commands.", no_ar
 ftp_app = typer.Typer(help="File transfer (FTP / FTPS / SFTP), jump-aware.", no_args_is_help=True)
 okta_app = typer.Typer(help="Okta SSO helpers.", no_args_is_help=True)
 rbac_app = typer.Typer(help="Role-based access control helpers.", no_args_is_help=True)
+audit_app = typer.Typer(help="Audit log queries.", no_args_is_help=True)
 applications_app = typer.Typer(
     help="Host organisation: application -> environment -> unit tree.",
     no_args_is_help=True,
@@ -62,6 +64,7 @@ app.add_typer(org_app, name="org")
 app.add_typer(ftp_app, name="ftp")
 app.add_typer(okta_app, name="okta")
 app.add_typer(rbac_app, name="rbac")
+app.add_typer(audit_app, name="audit")
 app.add_typer(applications_app, name="application")
 
 console = Console()
@@ -109,6 +112,16 @@ def _slugify_tenant(name: str) -> str:
 
     slug = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
     return slug or "tenant"
+
+
+def _parse_when(value: str) -> datetime:
+    """Parse an audit time bound: the literal ``now`` or an ISO-8601 date /
+    datetime (a bare date is treated as 00:00). Naive values are assumed UTC."""
+    v = (value or "").strip()
+    if v.lower() == "now":
+        return datetime.now(UTC)
+    dt = datetime.fromisoformat(v)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 # Reusable Typer option for the active tenant on resource commands.
@@ -1621,6 +1634,113 @@ def ftp_cp(
     console.print(
         f"[green]{verb}[/green] {src_host}:{src_path} to {dst_host}:{dst_path} ({n} bytes)"
     )
+
+
+# ---- audit ----
+
+
+@audit_app.command("list")
+def audit_list(
+    start: str | None = typer.Option(
+        None, "--start",
+        help="Start of range: ISO 8601 date/datetime (e.g. 2026-06-01 or "
+             "2026-06-01T09:00). Omit for no lower bound."),
+    end: str = typer.Option(
+        "now", "--end", help="End of range: ISO 8601, or the literal 'now' (default)."),
+    action: str | None = typer.Option(
+        None, "--action", help="Filter by exact action (e.g. host.connect)."),
+    actor: str | None = typer.Option(
+        None, "--user", help="Filter by actor username."),
+    tenant: str | None = _TENANT_SCOPE_OPT,
+    fmt: str = typer.Option(
+        "table", "--format", help="Output format: table | csv | json."),
+    limit: int = typer.Option(
+        0, "--limit", help="Max rows, newest first (0 = no limit)."),
+) -> None:
+    """Pull audit-log entries within a time range, newest first.
+
+    The end of the range may be the literal 'now'. Scope to one tenant with
+    --tenant <slug>, or '--tenant all' for every tenant (the default is the
+    Default tenant). Use --format csv|json to export."""
+    import csv as _csv
+    import sys
+
+    from dosm.auth.tenancy import tenant_clause
+
+    fmt = (fmt or "table").strip().lower()
+    if fmt not in ("table", "csv", "json"):
+        console.print(f"[red]Unknown --format {fmt!r}; use table, csv, or json.[/red]")
+        raise typer.Exit(1)
+    try:
+        start_dt = _parse_when(start) if start else None
+        end_dt = _parse_when(end)
+    except ValueError as exc:
+        console.print(f"[red]Bad date: {exc}[/red]")
+        raise typer.Exit(1)
+    if start_dt is not None and start_dt > end_dt:
+        console.print("[red]--start is after --end.[/red]")
+        raise typer.Exit(1)
+
+    _load()
+    with session_scope() as s:
+        tid = _resolve_tenant_scope(s, tenant)
+        stmt = select(AuditLog).where(AuditLog.ts <= end_dt)
+        if start_dt is not None:
+            stmt = stmt.where(AuditLog.ts >= start_dt)
+        if action:
+            stmt = stmt.where(AuditLog.action == action)
+        if actor:
+            u = s.execute(select(User).where(User.username == actor)).scalars().first()
+            if u is None:
+                console.print(f"[red]No such user {actor!r}.[/red]")
+                raise typer.Exit(1)
+            stmt = stmt.where(AuditLog.actor_id == u.id)
+        clause = tenant_clause(AuditLog, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        stmt = stmt.order_by(AuditLog.ts.desc())
+        if limit and limit > 0:
+            stmt = stmt.limit(limit)
+        rows = list(s.execute(stmt).scalars())
+        user_names = {u.id: (u.display_name or u.username)
+                      for u in s.execute(select(User)).scalars()}
+        tenant_names = {t.id: t.name for t in s.execute(select(Tenant)).scalars()}
+        records = [{
+            "ts": a.ts.isoformat(),
+            "action": a.action,
+            "actor_id": a.actor_id,
+            "actor": user_names.get(a.actor_id),
+            "tenant_id": a.tenant_id,
+            "tenant": tenant_names.get(a.tenant_id),
+            "target": a.target,
+            "details": a.details,
+            "ip": a.ip,
+        } for a in rows]
+
+    if fmt == "json":
+        print(json.dumps(records, indent=2, default=str))
+        return
+    if fmt == "csv":
+        cols = ["ts", "action", "actor_id", "actor", "tenant_id", "tenant",
+                "target", "details", "ip"]
+        writer = _csv.DictWriter(sys.stdout, fieldnames=cols)
+        writer.writeheader()
+        for rec in records:
+            writer.writerow(rec)
+        return
+    if not records:
+        console.print("[yellow]No audit events in range.[/yellow]")
+        return
+    table = Table("Time (UTC)", "Action", "User", "Tenant", "Target", "Details")
+    for rec in records:
+        table.add_row(
+            rec["ts"], rec["action"],
+            rec["actor"] or ("-" if rec["actor_id"] is None else f"user:{rec['actor_id']}"),
+            rec["tenant"] or ("-" if rec["tenant_id"] is None else f"tenant:{rec['tenant_id']}"),
+            rec["target"] or "", rec["details"] or "",
+        )
+    console.print(table)
+    console.print(f"[dim]{len(records)} event(s).[/dim]")
 
 
 if __name__ == "__main__":

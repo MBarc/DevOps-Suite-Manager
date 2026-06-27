@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Settings | Audit log | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><h1>Audit log</h1></div>
+</header>
+
+{% include "settings/_tabs.html" %}
+
+<section class="card">
+  <p class="muted" style="font-size:13px; margin-bottom:14px">
+    Every state-changing action is recorded here, newest first. Times are UTC.
+    {% if multi_tenant %}As platform admin you see events across all tenants;
+    use the filters to narrow to one tenant, user, action, or date range.{% else %}
+    You see events for your own tenant only; use the filters to narrow by user,
+    action, or date range.{% endif %}
+  </p>
+
+  <form method="get" action="/settings/audit"
+        style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:18px">
+    {% if multi_tenant %}
+    <div style="width:170px">
+      <label class="field-hint" style="display:block; margin-bottom:4px">Tenant</label>
+      <select name="tenant_id">
+        <option value="">All tenants</option>
+        {% for t in tenants %}
+          <option value="{{ t.id }}" {% if filters.tenant_id == t.id|string %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div style="width:170px">
+      <label class="field-hint" style="display:block; margin-bottom:4px">User</label>
+      <select name="actor_id">
+        <option value="">All users</option>
+        {% for a in actors %}
+          <option value="{{ a.id }}" {% if filters.actor_id == a.id|string %}selected{% endif %}>{{ a.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="width:190px">
+      <label class="field-hint" style="display:block; margin-bottom:4px">Action</label>
+      <select name="action">
+        <option value="">All actions</option>
+        {% for a in actions %}
+          <option value="{{ a }}" {% if filters.action == a %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="width:160px">
+      <label class="field-hint" style="display:block; margin-bottom:4px">From</label>
+      <input type="date" name="start" value="{{ filters.start }}">
+    </div>
+    <div style="width:160px">
+      <label class="field-hint" style="display:block; margin-bottom:4px">To</label>
+      <input type="date" name="end" value="{{ filters.end }}">
+    </div>
+    <div style="display:flex; gap:6px">
+      <button type="submit" class="btn btn-field">Filter</button>
+      <a href="/settings/audit" class="btn btn-subtle btn-field">Reset</a>
+    </div>
+  </form>
+
+  {% set sep = '&' if base_query else '' %}
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; flex-wrap:wrap">
+    <span class="muted" style="font-size:13px">{{ total }} matching event{{ '' if total == 1 else 's' }}</span>
+    <div style="display:flex; gap:6px">
+      <a class="btn btn-subtle btn-sm" href="/settings/audit/export?{{ base_query }}{{ sep }}format=csv">Export CSV</a>
+      <a class="btn btn-subtle btn-sm" href="/settings/audit/export?{{ base_query }}{{ sep }}format=json">Export JSON</a>
+    </div>
+  </div>
+
+  <table class="data">
+    <thead><tr>
+      <th style="width:160px">Time (UTC)</th>
+      <th style="width:150px">Action</th>
+      <th style="width:140px">User</th>
+      {% if multi_tenant %}<th style="width:130px">Tenant</th>{% endif %}
+      <th style="width:150px">Target</th>
+      <th>Details</th>
+      <th style="width:110px">IP</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td style="white-space:nowrap; color:var(--fg-muted)">{{ r.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td><code style="font-size:12px">{{ r.action }}</code></td>
+        <td>{{ user_names.get(r.actor_id, '—' if r.actor_id is none else 'user:%d' % r.actor_id) }}</td>
+        {% if multi_tenant %}
+        <td class="muted">{{ tenant_names.get(r.tenant_id, '—' if r.tenant_id is none else 'tenant:%d' % r.tenant_id) }}</td>
+        {% endif %}
+        <td class="muted" style="font-size:12px">{{ r.target or '' }}</td>
+        <td class="muted" style="font-size:12px">{{ r.details or '' }}</td>
+        <td class="muted" style="font-size:12px">{{ r.ip or '' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ 7 if multi_tenant else 6 }}" class="muted" style="padding:14px">No audit events match these filters.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if pages > 1 %}
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px">
+    <span class="muted" style="font-size:13px">Page {{ page }} of {{ pages }}</span>
+    <div style="display:flex; gap:6px">
+      {% if page > 1 %}
+        <a class="btn btn-subtle btn-sm" href="?{{ base_query }}{{ sep }}page={{ page - 1 }}">‹ Newer</a>
+      {% endif %}
+      {% if page < pages %}
+        <a class="btn btn-subtle btn-sm" href="?{{ base_query }}{{ sep }}page={{ page + 1 }}">Older ›</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

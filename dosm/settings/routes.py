@@ -527,3 +527,220 @@ async def member_set_role(
     ))
     db.commit()
     return RedirectResponse("/settings/members?saved=1", status_code=303)
+
+
+# -- Audit log (read-only) --------------------------------------------------
+
+AUDIT_PAGE_SIZE = 50
+
+
+def _parse_day(value: str | None) -> datetime | None:
+    """Parse a ``YYYY-MM-DD`` filter value into UTC midnight; ignore junk."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def _admin_tenant_ids(db: Session, user: User) -> set[int] | None:
+    """Tenant ids whose audit log this admin may read. ``None`` means *all*
+    tenants (platform admin). A tenant admin gets exactly their own tenant;
+    anyone else gets the empty set.
+
+    Admin-of-several-tenants is not representable in the model: a ``User`` has
+    a single ``tenant_id`` and only ``platform_admin`` spans tenants. Holding
+    tenant_admin in one tenant must never expose another tenant's logs."""
+    if is_platform_admin(user):
+        return None
+    if user.tenant_id is None:
+        return set()
+    return {user.tenant_id}
+
+
+def _resolve_audit_request(
+    db: Session, user: User, *, action, actor_id, tenant_id, start, end,
+):
+    """Parse filters and resolve tenant access for both the page and the
+    exporter. Returns ``(apply_fn, scope_tids, allowed, actor_pick)`` where
+    ``apply_fn`` adds every WHERE clause to a statement, ``scope_tids`` is the
+    effective tenant set (``None`` = all), and ``allowed`` is what the caller
+    may pick from. Raises 403 if the caller asks for a tenant they don't admin."""
+    allowed = _admin_tenant_ids(db, user)
+    if allowed is not None and not allowed:
+        raise HTTPException(403, "your account is not assigned to a tenant")
+
+    req_tid: int | None = None
+    if tenant_id:
+        try:
+            req_tid = int(tenant_id)
+        except ValueError:
+            req_tid = None
+    # Hard guard: a tenant admin can never reach beyond the tenants they admin.
+    if req_tid is not None and allowed is not None and req_tid not in allowed:
+        raise HTTPException(403, "you do not administer that tenant")
+
+    scope_tids = {req_tid} if req_tid is not None else allowed
+
+    try:
+        actor_pick = int(actor_id) if actor_id else None
+    except ValueError:
+        actor_pick = None
+    start_dt = _parse_day(start)
+    end_dt = _parse_day(end)
+
+    def _apply(stmt):
+        if scope_tids is not None:
+            stmt = stmt.where(AuditLog.tenant_id.in_(scope_tids))
+        if action:
+            stmt = stmt.where(AuditLog.action == action)
+        if actor_pick is not None:
+            stmt = stmt.where(AuditLog.actor_id == actor_pick)
+        if start_dt is not None:
+            stmt = stmt.where(AuditLog.ts >= start_dt)
+        if end_dt is not None:
+            stmt = stmt.where(AuditLog.ts < end_dt + timedelta(days=1))  # inclusive day
+        return stmt
+
+    return _apply, scope_tids, allowed, actor_pick
+
+
+def _audit_records(db: Session, rows: list[AuditLog]) -> list[dict]:
+    """Flatten audit rows to plain dicts (names resolved) for CSV/JSON export."""
+    user_names = {u.id: (u.display_name or u.username)
+                  for u in db.execute(select(User)).scalars()}
+    tenant_names = _tenant_names(db)
+    return [{
+        "ts": r.ts.isoformat(),
+        "action": r.action,
+        "actor_id": r.actor_id,
+        "actor": user_names.get(r.actor_id),
+        "tenant_id": r.tenant_id,
+        "tenant": tenant_names.get(r.tenant_id),
+        "target": r.target,
+        "details": r.details,
+        "ip": r.ip,
+    } for r in rows]
+
+
+@router.get("/audit", response_class=HTMLResponse, include_in_schema=False)
+async def audit_page(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    action: str | None = None,
+    actor_id: str | None = None,
+    tenant_id: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    page: int = 1,
+):
+    """Audit-log viewer. A tenant admin sees only their own tenant's events; a
+    platform admin sees every tenant and may narrow to one via the filter.
+    Filterable by user, tenant, action, and date range; newest first."""
+    apply_fn, scope_tids, allowed, actor_pick = _resolve_audit_request(
+        db, user, action=action, actor_id=actor_id, tenant_id=tenant_id,
+        start=start, end=end)
+
+    total = db.execute(apply_fn(select(func.count()).select_from(AuditLog))).scalar() or 0
+    pages = max(1, (total + AUDIT_PAGE_SIZE - 1) // AUDIT_PAGE_SIZE)
+    page = max(1, min(page, pages))
+    rows = list(db.execute(
+        apply_fn(select(AuditLog))
+        .order_by(AuditLog.ts.desc())
+        .limit(AUDIT_PAGE_SIZE)
+        .offset((page - 1) * AUDIT_PAGE_SIZE)
+    ).scalars())
+
+    # Resolve actor ids → names from the whole user table (an actor may be a
+    # platform admin acting on a tenant, so not necessarily in this scope).
+    user_names = {u.id: (u.display_name or u.username)
+                  for u in db.execute(select(User)).scalars()}
+    tenant_names = _tenant_names(db)
+
+    # Tenants this admin may filter by (all for platform, own for tenant admin).
+    if allowed is None:
+        selectable = list(db.execute(select(Tenant).order_by(Tenant.name)).scalars())
+    elif allowed:
+        selectable = list(db.execute(
+            select(Tenant).where(Tenant.id.in_(allowed)).order_by(Tenant.name)).scalars())
+    else:
+        selectable = []
+    tenants = [{"id": t.id, "name": t.name} for t in selectable]
+    multi_tenant = len(tenants) > 1  # show the tenant column + picker only then
+
+    # Filter dropdown options, scoped to what the caller may see.
+    actor_stmt = select(User).order_by(User.username)
+    action_stmt = select(AuditLog.action).distinct().order_by(AuditLog.action)
+    if allowed is not None:
+        actor_stmt = actor_stmt.where(User.tenant_id.in_(allowed))
+        action_stmt = action_stmt.where(AuditLog.tenant_id.in_(allowed))
+    actors = [{"id": u.id, "name": (u.display_name or u.username)}
+              for u in db.execute(actor_stmt).scalars()]
+    actions = list(db.execute(action_stmt).scalars())
+
+    qparams = {k: v for k, v in {
+        "action": action, "actor_id": actor_id, "tenant_id": tenant_id,
+        "start": start, "end": end}.items() if v}
+
+    return _templates(request).TemplateResponse(
+        request, "settings/audit.html",
+        {"user": user, "rows": rows,
+         "is_platform_admin": is_platform_admin(user), "multi_tenant": multi_tenant,
+         "user_names": user_names, "tenant_names": tenant_names,
+         "tenants": tenants, "actors": actors, "actions": actions,
+         "filters": {"action": action or "", "actor_id": actor_id or "",
+                     "tenant_id": tenant_id or "", "start": start or "",
+                     "end": end or ""},
+         "base_query": urlencode(qparams),
+         "page": page, "pages": pages, "total": total},
+    )
+
+
+@router.get("/audit/export", include_in_schema=False)
+async def audit_export(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    format: str = "csv",
+    action: str | None = None,
+    actor_id: str | None = None,
+    tenant_id: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+):
+    """Download the filtered audit log as CSV or JSON. Same access scoping as
+    the viewer — a tenant admin can only export their own tenant's events."""
+    fmt = (format or "csv").lower()
+    if fmt not in ("csv", "json"):
+        fmt = "csv"
+    apply_fn, scope_tids, _allowed, _ = _resolve_audit_request(
+        db, user, action=action, actor_id=actor_id, tenant_id=tenant_id,
+        start=start, end=end)
+    rows = list(db.execute(
+        apply_fn(select(AuditLog)).order_by(AuditLog.ts.desc())).scalars())
+    records = _audit_records(db, rows)
+
+    # Exporting the audit trail is itself sensitive — record who pulled it.
+    db.add(AuditLog(
+        tenant_id=(next(iter(scope_tids)) if scope_tids and len(scope_tids) == 1 else None),
+        actor_id=user.id, action="audit.export", target=f"format:{fmt}",
+        details=f"rows={len(records)} scope={'all' if scope_tids is None else sorted(scope_tids)}",
+        ip=request.client.host if request.client else None,
+    ))
+    db.commit()
+
+    if fmt == "json":
+        body = json.dumps(records, indent=2, default=str)
+        return Response(body, media_type="application/json", headers={
+            "Content-Disposition": 'attachment; filename="audit-log.json"'})
+    cols = ["ts", "action", "actor_id", "actor", "tenant_id", "tenant",
+            "target", "details", "ip"]
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=cols)
+    writer.writeheader()
+    for rec in records:
+        writer.writerow(rec)
+    return Response(buf.getvalue(), media_type="text/csv", headers={
+        "Content-Disposition": 'attachment; filename="audit-log.csv"'})
