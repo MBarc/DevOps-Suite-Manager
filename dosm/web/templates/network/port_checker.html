@@ -24,7 +24,20 @@
       </div>
       <div class="form-group">
         <label>Destination address</label>
-        <input type="text" name="dst_address" required placeholder="192.168.1.10 or hostname">
+        <div class="combo" id="dst-combo">
+          <input type="text" name="dst_address" required autocomplete="off"
+                 role="combobox" aria-expanded="false" aria-autocomplete="list"
+                 placeholder="e.g. 192.168.1.10 or hostname">
+          <div class="combo-menu" id="dst-menu" role="listbox" hidden>
+            {% for h in hosts %}
+            <button type="button" class="combo-item" role="option"
+                    data-host="{{ h.hostname }}" data-port="{{ h.port or '' }}">
+              <span class="combo-host">{{ h.hostname }}</span>
+              <span class="combo-meta">{{ h.name }}{% if h.port %} · :{{ h.port }}{% endif %}</span>
+            </button>
+            {% endfor %}
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <label>Port</label>
@@ -59,10 +72,85 @@
 .hist-dot.ok { background:#22c55e }
 .hist-dot.fail { background:#ef4444 }
 .hist-dot.pending { background:#71717a }
+
+/* Destination host combobox - DOSM-themed popover, native-datalist replacement */
+.combo { position:relative }
+.combo-menu {
+  position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:30;
+  max-height:240px; overflow-y:auto;
+  background:var(--bg-elev-2); border:1px solid var(--border);
+  border-radius:var(--r-sm); padding:4px;
+  box-shadow:0 12px 28px rgba(0,0,0,.45);
+}
+.combo-menu[hidden] { display:none }
+.combo-item {
+  display:flex; flex-direction:column; align-items:flex-start; gap:1px;
+  width:100%; text-align:left; padding:7px 10px; border:none;
+  background:transparent; border-radius:6px; cursor:pointer;
+  color:var(--fg); font:inherit;
+}
+.combo-item[hidden] { display:none }
+.combo-item:hover, .combo-item.active { background:var(--bg-elev-3); color:var(--fg-strong) }
+.combo-host { font-size:13px }
+.combo-meta { font-size:11px; color:var(--fg-dim) }
 </style>
 
 <script>
 const history = [];
+
+// Destination combobox: pick a registered host from the styled menu or type
+// any ad-hoc address. Selecting a host pre-fills the port (only when empty,
+// never overriding a value the user typed).
+const dstInput = document.querySelector('[name=dst_address]');
+const portInput = document.querySelector('[name=port]');
+const combo = document.getElementById('dst-combo');
+const menu = document.getElementById('dst-menu');
+const items = Array.from(menu.querySelectorAll('.combo-item'));
+
+function filterMenu() {
+  const q = dstInput.value.trim().toLowerCase();
+  let shown = 0;
+  for (const it of items) {
+    const hay = (it.dataset.host + ' ' + it.querySelector('.combo-meta').textContent).toLowerCase();
+    const match = !q || hay.includes(q);
+    it.hidden = !match;
+    if (match) shown++;
+  }
+  return shown;
+}
+function openMenu() {
+  if (!items.length || filterMenu() === 0) { closeMenu(); return; }
+  menu.hidden = false;
+  dstInput.setAttribute('aria-expanded', 'true');
+}
+function closeMenu() {
+  menu.hidden = true;
+  dstInput.setAttribute('aria-expanded', 'false');
+  for (const it of items) it.classList.remove('active');
+}
+function pick(it) {
+  dstInput.value = it.dataset.host;
+  if (it.dataset.port && !portInput.value) portInput.value = it.dataset.port;
+  closeMenu();
+}
+
+dstInput.addEventListener('focus', openMenu);
+dstInput.addEventListener('input', openMenu);
+// mousedown (not click) so selection wins before the input blurs.
+for (const it of items) it.addEventListener('mousedown', (e) => { e.preventDefault(); pick(it); });
+document.addEventListener('click', (e) => { if (!combo.contains(e.target)) closeMenu(); });
+dstInput.addEventListener('keydown', (e) => {
+  if (menu.hidden) return;
+  const vis = items.filter(it => !it.hidden);
+  let idx = vis.findIndex(it => it.classList.contains('active'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(idx + 1, vis.length - 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(idx - 1, 0); }
+  else if (e.key === 'Enter' && idx >= 0) { e.preventDefault(); pick(vis[idx]); return; }
+  else if (e.key === 'Escape') { closeMenu(); return; }
+  else return;
+  for (const it of vis) it.classList.remove('active');
+  if (vis[idx]) { vis[idx].classList.add('active'); vis[idx].scrollIntoView({ block: 'nearest' }); }
+});
 
 document.getElementById('check-form').addEventListener('submit', async (e) => {
   e.preventDefault();
