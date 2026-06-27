@@ -74,10 +74,47 @@
     window.parent.postMessage({ type: 'guac_disconnect' }, '*');
   }
 
+  var errorNotified = false;
+
+  function notifyError(title, text) {
+    if (errorNotified) return;
+    errorNotified = true;
+    window.parent.postMessage(
+      { type: 'guac_error', title: title || '', text: text || '' },
+      '*'
+    );
+  }
+
+  // Find the on-screen Guacamole notification panel (shown on disconnect or
+  // connection error) and read its title/body text.
+  function scrapeNotification() {
+    var note = document.querySelector('.notification');
+    if (!note) return null;
+    function pick(sel) {
+      var el = note.querySelector(sel);
+      return el ? (el.textContent || '').trim() : '';
+    }
+    return {
+      // Guacamole tags connection-failure notifications with class "error";
+      // a clean disconnect (user typed exit / logged out) is not flagged.
+      isError: /(^|\s)error(\s|$)/i.test(note.className),
+      title: pick('.title'),
+      // Body text lives in .text; fall back to the panel sans button labels.
+      text: pick('.text') || pick('.body'),
+    };
+  }
+
   // Guacamole 1.5 shows a notification panel with a "Reconnect" button when
-  // the connection closes (user typed exit, network drop, timeout, etc.).
-  // Watch the DOM for that button appearing.
+  // the connection closes (user typed exit, network drop, timeout, *or* a
+  // failed connect/auth). For a connect/auth failure the panel carries the
+  // real reason (e.g. the RDP server's "account locked" / NLA error) - scrape
+  // it and surface it to DOSM instead of silently navigating away.
   var observer = new MutationObserver(function () {
+    var info = scrapeNotification();
+    if (info && info.isError) {
+      notifyError(info.title, info.text);
+      return;  // do NOT also fire guac_disconnect - keep the error on screen
+    }
     var btns = document.querySelectorAll('button');
     for (var i = 0; i < btns.length; i++) {
       if (/reconnect/i.test(btns[i].textContent)) {

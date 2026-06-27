@@ -16,7 +16,10 @@ from dosm.jumps.tunnels import (
     TunnelLease,
     gc_loop,
     get_tunnel_manager,
+    preflight_direct,
     probe_forward,
+    ssh_auth_probe,
+    tcp_probe,
     verify_ssh_credentials,
 )
 
@@ -32,6 +35,9 @@ __all__ = [
     "connect_through_chain",
     "gc_loop",
     "get_tunnel_manager",
+    "preflight_direct",
     "probe_forward",
+    "ssh_auth_probe",
+    "tcp_probe",
     "verify_ssh_credentials",
 ]

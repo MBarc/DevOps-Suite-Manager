@@ -24,6 +24,7 @@ from dosm.jumps import (
     TargetAuthError,
     TargetUnreachableError,
     get_tunnel_manager,
+    preflight_direct,
     probe_forward,
     verify_ssh_credentials,
 )
@@ -155,6 +156,17 @@ async def host_connect(
                     endpoint_override = (gc.dosm_reachable_host, tunnel_lease.bind_port)
                 connection = build_connection(cfg, host, endpoint_override=endpoint_override)
         else:
+            # Direct (no jump) host: probe it ourselves first so a refused port,
+            # unreachable host, or rejected/locked account surfaces with the
+            # server's own wording in DOSM, rather than only inside guacd's frame.
+            try:
+                await preflight_direct(cfg, host)
+            except (TargetAuthError, TargetUnreachableError) as e:
+                raise GuacamoleBuildError(str(e)) from e
+            except RuntimeError as e:
+                # e.g. a missing secret_ref during credential resolution -
+                # report it the same way build_connection would, not as a 500.
+                raise GuacamoleBuildError(str(e)) from e
             connection = build_connection(cfg, host)
         codec = AuthJsonCodec(load_secret_key(cfg.home / gc.secret_key_file))
         payload = {

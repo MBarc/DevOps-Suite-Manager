@@ -396,10 +396,54 @@ async def probe_forward(
                 pass
 
 
-async def verify_ssh_credentials(
+def _banner_capturing_factory(sink: list[str]):
+    """Return an asyncssh client class that records server auth banners.
+
+    OpenSSH (via PAM) sends human-readable reasons - "Account locked",
+    "Password expired", "Access denied for this account" - as a USERAUTH_BANNER
+    *before* it rejects the authentication. asyncssh logs these and discards
+    them by default; capturing them is the only way to surface the verbose
+    reason the operator would have seen from a plain `ssh` client.
+    """
+    import asyncssh  # type: ignore
+
+    class _BannerClient(asyncssh.SSHClient):  # type: ignore[misc]
+        def auth_banner_received(self, msg: str, lang: str) -> None:  # noqa: D401
+            text = (msg or "").strip()
+            if text:
+                sink.append(text)
+
+    return _BannerClient
+
+
+def _ssh_failure_detail(exc: BaseException, banners: list[str]) -> str:
+    """Build a `: <reason>` suffix from the richest text an SSH failure carries.
+
+    Pulls together, in order and de-duplicated: any server banner ("account
+    locked"), the SSH disconnect ``reason`` if present, and the exception text.
+    Returns an empty string when nothing useful is available.
+    """
+    parts: list[str] = []
+    for b in banners:
+        b = b.strip()
+        if b and b not in parts:
+            parts.append(b)
+    reason = getattr(exc, "reason", None)
+    if reason:
+        reason = str(reason).strip()
+        if reason and reason not in parts:
+            parts.append(reason)
+    text = str(exc).strip()
+    if text and text not in parts:
+        parts.append(text)
+    joined = " - ".join(p for p in parts if p)
+    return f": {joined}" if joined else ""
+
+
+async def ssh_auth_probe(
     *,
-    bind_port: int,
-    bind_host: str = "0.0.0.0",
+    connect_host: str,
+    connect_port: int,
     username: str | None,
     password: str | None,
     private_key: str | None,
@@ -407,23 +451,30 @@ async def verify_ssh_credentials(
     target_port: int,
     timeout: float = 10.0,
 ) -> None:
-    """Attempt SSH auth to the target through an established tunnel.
+    """Attempt an SSH auth handshake and surface the server's verbose reason.
+
+    ``connect_host``/``connect_port`` is where DOSM actually dials (the host
+    itself for a direct connection, or a tunnel's local forward for a jumped
+    one); ``target_host``/``target_port`` is what we name in messages.
 
     Skipped when no auth material is present (guacd will prompt the user).
-    Raises ``TargetAuthError`` if the server rejects the credentials.
-    Raises ``TargetUnreachableError`` if the handshake fails for other reasons.
+    Raises ``TargetAuthError`` if the server rejects the credentials, with the
+    server-supplied reason (e.g. "account is locked") appended when available.
+    Raises ``TargetUnreachableError`` for connect/handshake failures, with the
+    underlying socket/SSH error preserved rather than flattened to a generic.
     """
     if not password and not private_key:
         return
 
     import asyncssh  # type: ignore
 
-    connect_host = "127.0.0.1" if bind_host in ("0.0.0.0", "") else bind_host
+    banners: list[str] = []
     kwargs: dict = {
         "host": connect_host,
-        "port": bind_port,
+        "port": connect_port,
         "username": username or "root",
         "known_hosts": None,
+        "client_factory": _banner_capturing_factory(banners),
     }
     if private_key:
         kwargs["client_keys"] = [asyncssh.import_private_key(private_key)]
@@ -436,17 +487,31 @@ async def verify_ssh_credentials(
     except asyncssh.PermissionDenied as e:
         raise TargetAuthError(
             f"target {target_host}:{target_port} rejected credentials "
-            f"for user {username!r} - check the credential profile"
+            f"for user {username!r}{_ssh_failure_detail(e, banners)}"
         ) from e
-    except TimeoutError:
+    except ConnectionRefusedError as e:
         raise TargetUnreachableError(
-            f"target {target_host}:{target_port} timed out during SSH handshake"
+            f"target {target_host}:{target_port} refused the connection - "
+            f"SSH is not listening on that port{_ssh_failure_detail(e, banners)}"
+        ) from e
+    except (TimeoutError, asyncio.TimeoutError):
+        raise TargetUnreachableError(
+            f"target {target_host}:{target_port} timed out during SSH handshake "
+            f"- the host may be unreachable or SSH may not be enabled"
         )
     except (TargetUnreachableError, TargetAuthError):
         raise
-    except Exception as e:
+    except OSError as e:
         raise TargetUnreachableError(
-            f"SSH handshake with target {target_host}:{target_port} failed: {e}"
+            f"cannot reach target {target_host}:{target_port}"
+            f"{_ssh_failure_detail(e, banners)}"
+        ) from e
+    except Exception as e:
+        # asyncssh.DisconnectError / ConnectionLost land here; their `.reason`
+        # often carries the server's stated cause (captured by _ssh_failure_detail).
+        raise TargetUnreachableError(
+            f"SSH handshake with target {target_host}:{target_port} failed"
+            f"{_ssh_failure_detail(e, banners)}"
         ) from e
     finally:
         if conn is not None:
@@ -454,6 +519,112 @@ async def verify_ssh_credentials(
                 conn.close()
             except Exception:
                 pass
+
+
+async def verify_ssh_credentials(
+    *,
+    bind_port: int,
+    bind_host: str = "0.0.0.0",
+    username: str | None,
+    password: str | None,
+    private_key: str | None,
+    target_host: str,
+    target_port: int,
+    timeout: float = 10.0,
+) -> None:
+    """Attempt SSH auth to the target through an established jump tunnel.
+
+    Thin wrapper over :func:`ssh_auth_probe` that dials the tunnel's local
+    forward (loopback when the listener is bound to all interfaces).
+    """
+    connect_host = "127.0.0.1" if bind_host in ("0.0.0.0", "") else bind_host
+    await ssh_auth_probe(
+        connect_host=connect_host,
+        connect_port=bind_port,
+        username=username,
+        password=password,
+        private_key=private_key,
+        target_host=target_host,
+        target_port=target_port,
+        timeout=timeout,
+    )
+
+
+async def tcp_probe(
+    *,
+    connect_host: str,
+    connect_port: int,
+    target_host: str,
+    target_port: int,
+    timeout: float = PROBE_TIMEOUT_SECONDS,
+) -> None:
+    """TCP-connect to ``connect_host:connect_port`` to verify reachability.
+
+    Used for protocols DOSM cannot auth-probe itself (RDP/VNC) - it confirms
+    the port is open and names the precise OS-level reason if not (connection
+    refused, no route to host, timed out, port filtered). Auth-level detail for
+    those protocols (e.g. a locked RDP account) surfaces later from guacd.
+    """
+    writer = None
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(connect_host, connect_port),
+            timeout=timeout,
+        )
+    except (TimeoutError, asyncio.TimeoutError):
+        raise TargetUnreachableError(
+            f"{target_host}:{target_port} timed out - host unreachable or port filtered"
+        )
+    except ConnectionRefusedError as e:
+        raise TargetUnreachableError(
+            f"{target_host}:{target_port} refused the connection - "
+            f"nothing is listening on that port ({e})"
+        ) from e
+    except OSError as e:
+        raise TargetUnreachableError(
+            f"cannot reach {target_host}:{target_port} - {e}"
+        ) from e
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+
+async def preflight_direct(cfg: Config, host: Host, timeout: float = 10.0) -> None:
+    """Probe a direct (non-jumped) host before handing off to guacd.
+
+    SSH hosts get a full auth handshake so credential and account-state errors
+    (locked, expired, wrong password) surface with the server's own wording.
+    RDP/VNC hosts get a TCP reachability probe (DOSM has no native RDP/VNC auth
+    client - their auth-level errors arrive later from guacd).
+
+    Raises ``TargetAuthError`` / ``TargetUnreachableError`` on failure.
+    """
+    from dosm.jumps.connections import _resolve_creds
+
+    target = _resolve_creds(cfg, host)
+    if host.protocol == "ssh":
+        await ssh_auth_probe(
+            connect_host=target.hostname,
+            connect_port=target.port,
+            username=target.username,
+            password=target.password,
+            private_key=target.private_key,
+            target_host=target.hostname,
+            target_port=target.port,
+            timeout=timeout,
+        )
+    else:  # rdp / vnc - reachability only
+        await tcp_probe(
+            connect_host=target.hostname,
+            connect_port=target.port,
+            target_host=target.hostname,
+            target_port=target.port,
+            timeout=PROBE_TIMEOUT_SECONDS,
+        )
 
 
 async def gc_loop(interval: float = GC_INTERVAL_SECONDS) -> None:

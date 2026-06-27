@@ -43,26 +43,39 @@ def _validate_address(addr: str) -> str:
 
 # ── SSH error classifier ──────────────────────────────────────────────────────
 
+def _ssh_raw_detail(exc: BaseException) -> str:
+    """`- <reason>` suffix carrying the server/OS-supplied cause, if any.
+
+    asyncssh disconnect errors expose the server's stated reason on ``.reason``;
+    everything else falls back to the exception text. Truncated and returned
+    empty when there's nothing beyond the bare type name.
+    """
+    reason = getattr(exc, "reason", None)
+    text = str(reason).strip() if reason else str(exc).strip()
+    return f" - {text[:160]}" if text else ""
+
+
 def _classify_ssh_error(exc: BaseException, hostname: str) -> str:
     import errno as _errno
 
     name = type(exc).__name__
     msg = str(exc).lower()
+    detail = _ssh_raw_detail(exc)
 
     if "permissiondenied" in name.lower() or "permission denied" in msg:
-        return f"SSH authentication failed on {hostname!r} - check credentials"
+        return f"SSH authentication failed on {hostname!r} - check credentials{detail}"
 
     if isinstance(exc, ConnectionRefusedError) or "connection refused" in msg:
-        return f"SSH not enabled on {hostname!r} - port refused the connection"
+        return f"SSH not enabled on {hostname!r} - port refused the connection{detail}"
 
     if isinstance(exc, OSError):
         if exc.errno in (_errno.ENETUNREACH, _errno.EHOSTUNREACH, _errno.ENONET):
-            return f"Host {hostname!r} is unreachable - no route to host"
+            return f"Host {hostname!r} is unreachable - no route to host{detail}"
         if exc.errno == _errno.ECONNRESET:
-            return f"SSH connection reset by {hostname!r}"
+            return f"SSH connection reset by {hostname!r}{detail}"
 
     if "disconnecterror" in name.lower() or "connection lost" in name.lower():
-        return f"SSH connection to {hostname!r} was dropped unexpectedly"
+        return f"SSH connection to {hostname!r} was dropped unexpectedly{detail}"
 
     if "timeout" in name.lower() or "timed out" in msg or isinstance(exc, asyncio.TimeoutError):
         return (
@@ -71,7 +84,7 @@ def _classify_ssh_error(exc: BaseException, hostname: str) -> str:
         )
 
     if "hostkey" in name.lower():
-        return f"SSH host-key verification failed for {hostname!r}"
+        return f"SSH host-key verification failed for {hostname!r}{detail}"
 
     return f"SSH error on {hostname!r}: {name}: {str(exc)[:120]}"
 

@@ -78,10 +78,43 @@
   });
   {% endif %}
 
+  // Render guacd's verbose connection error as an overlay on the iframe.
+  function showGuacError(title, text) {
+    if (document.getElementById('guac-error-overlay')) return;
+    const ov = document.createElement('div');
+    ov.id = 'guac-error-overlay';
+    const card = document.createElement('div');
+    card.className = 'guac-error-card';
+    const h = document.createElement('h2');
+    h.textContent = title && title.trim() ? title.trim() : 'Connection failed';
+    const p = document.createElement('p');
+    p.className = 'error';
+    p.textContent = (text && text.trim())
+      ? text.trim()
+      : 'The remote host closed the session without a reason. Check that the '
+        + 'host is up, the port is correct, and the account is not locked.';
+    const back = document.createElement('a');
+    back.href = '/hosts/{{ host.id }}';
+    back.className = 'btn btn-ghost';
+    back.textContent = 'Back to host';
+    card.appendChild(h);
+    card.appendChild(p);
+    card.appendChild(back);
+    ov.appendChild(card);
+    wrap.appendChild(ov);
+  }
+
   // When Guacamole signals the session closed (exit/disconnect), redirect back
   // to the host detail page so the user isn't left on the reconnect screen.
   window.addEventListener('message', function (e) {
     if (!e.data) return;
+    // guacd reported a connection/auth failure inside the iframe. Surface its
+    // verbose reason as an overlay and stay put, rather than redirecting away
+    // before the operator can read it.
+    if (e.data.type === 'guac_error') {
+      showGuacError(e.data.title, e.data.text);
+      return;
+    }
     if (e.data.type === 'guac_disconnect') {
       window.location.href = '/hosts/{{ host.id }}';
       return;
@@ -231,6 +264,26 @@
     transition: opacity .4s;
   }
   .resource-panel { border-left: 1px solid var(--border); border-radius: 0 0 var(--r-md) 0; }
+  #guac-error-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,.82);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    padding: 24px;
+  }
+  .guac-error-card {
+    max-width: 520px;
+    background: var(--bg, #1a1a1a);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 20px 24px;
+    text-align: center;
+  }
+  .guac-error-card h2 { margin: 0 0 10px; }
+  .guac-error-card .error { margin: 0 0 16px; word-break: break-word; white-space: pre-wrap; }
 </style>
 {% endif %}
 {% endblock %}
