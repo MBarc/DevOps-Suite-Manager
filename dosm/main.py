@@ -41,6 +41,8 @@ from dosm.network import network_router
 from dosm.org import org_router
 from dosm.pipelines import pipelines_router
 from dosm.pipelines.poller import pipeline_poll_loop
+from dosm.confluence.routes import router as confluence_router
+from dosm.confluence.poller import confluence_poll_loop
 from dosm.recording import recording_router
 from dosm.recording.routes import abort_stale_recordings
 from dosm.settings import settings_router
@@ -207,6 +209,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(org_router)
     app.include_router(network_router)
     app.include_router(ftp_router)
+    app.include_router(confluence_router)
     app.include_router(settings_router)
     app.include_router(recording_router)
     if cfg.terminals.enabled:
@@ -228,11 +231,13 @@ def create_app(config: Config | None = None) -> FastAPI:
         app.state.tunnel_gc_task = asyncio.create_task(gc_loop())
         if cfg.pipelines.poller_enabled:
             app.state.pipeline_poller_task = asyncio.create_task(pipeline_poll_loop(cfg))
+        if cfg.confluence.poller_enabled:
+            app.state.confluence_poller_task = asyncio.create_task(confluence_poll_loop(cfg))
 
     @app.on_event("shutdown")
     async def _stop_background_tasks() -> None:
         stop_watcher()
-        for attr in ("tunnel_gc_task", "pipeline_poller_task"):
+        for attr in ("tunnel_gc_task", "pipeline_poller_task", "confluence_poller_task"):
             task = getattr(app.state, attr, None)
             if task is not None:
                 task.cancel()

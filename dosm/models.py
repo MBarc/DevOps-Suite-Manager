@@ -865,6 +865,80 @@ class NetworkScanResult(Base):
     scan: Mapped[NetworkScan] = relationship("NetworkScan", back_populates="results")
 
 
+class ConfluenceListener(Base):
+    """A subscription to one Confluence space. A background poller pulls new /
+    changed pages (as markdown) and attachments into the docs store under this
+    listener's own folder namespace (``confluence/<slug>/``), then triggers a
+    reindex so the AI learns them. Config is per-tenant; the downloaded docs land
+    in the shared (Default-tenant) docs index. Auth reuses a Credential
+    (``login`` with username=email for Cloud, or ``pat`` for Server/DC)."""
+
+    __tablename__ = "confluence_listeners"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_confluence_listener_tenant_name"),
+        UniqueConstraint(
+            "tenant_id", "base_url", "space_key",
+            name="uq_confluence_listener_tenant_space",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    deployment: Mapped[str] = mapped_column(String(16), nullable=False)  # cloud | server
+    base_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    space_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Per-listener docs folder namespace (slugify(name)); files write under
+    # confluence/<slug>/ so concurrent listeners never collide.
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    credential_id: Mapped[int | None] = mapped_column(
+        ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
+    )
+    sync_pages: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_attachments: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # ok | error
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    credential: Mapped[Credential | None] = relationship(
+        "Credential", foreign_keys=lambda: [ConfluenceListener.credential_id]
+    )
+
+
+class ConfluenceSyncItem(Base):
+    """Per-listener record of one synced Confluence object (page or attachment).
+
+    Powers change-detection (skip unchanged ``version``) and mirror-delete (an
+    item present here but absent from the latest Confluence fetch has its file
+    removed + row deleted)."""
+
+    __tablename__ = "confluence_sync_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "listener_id", "kind", "confluence_id",
+            name="uq_confluence_sync_item",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    listener_id: Mapped[int] = mapped_column(
+        ForeignKey("confluence_listeners.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # page | attachment
+    confluence_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    rel_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 __all__ = [
     "Base",
     "Tenant",
@@ -892,6 +966,8 @@ __all__ = [
     "NetworkPort",
     "NetworkScan",
     "NetworkScanResult",
+    "ConfluenceListener",
+    "ConfluenceSyncItem",
 ]
 
 

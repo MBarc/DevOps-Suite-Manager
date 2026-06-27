@@ -7,12 +7,20 @@ from sqlalchemy.orm import sessionmaker
 
 import dosm.db as _db_module
 from dosm.auth.passwords import hash_password
-from dosm.config import Config, DocsIndexConfig, PipelinesConfig, RecordingConfig
+from dosm.config import (
+    Config,
+    ConfluenceConfig,
+    DocsIndexConfig,
+    PipelinesConfig,
+    RecordingConfig,
+)
 from dosm.models import (
     AuditLog,
     Base,
     CertSource,
     ChatMessage,
+    ConfluenceListener,
+    ConfluenceSyncItem,
     Conversation,
     Credential,
     Department,
@@ -55,6 +63,7 @@ def test_config(test_home):
         home=test_home,
         docs_index=DocsIndexConfig(auto_index_on_startup=False, embedder="none"),
         pipelines=PipelinesConfig(poller_enabled=False),
+        confluence=ConfluenceConfig(poller_enabled=False),
         recording=RecordingConfig(enabled=False),
     )
 
@@ -130,6 +139,8 @@ def clean_tables(session_factory, admin_user, default_tenant):
     yield
     with session_factory() as s:
         for model in [
+            ConfluenceSyncItem,
+            ConfluenceListener,
             PlanCard,
             ChatMessage,
             Conversation,

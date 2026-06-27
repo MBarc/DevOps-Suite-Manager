@@ -200,6 +200,21 @@ class PipelinesConfig(BaseModel):
     poller_abandon_after_hours: int = 24
 
 
+class ConfluenceConfig(BaseModel):
+    """Background poller settings for Confluence space listeners.
+
+    Listeners themselves live in the DB (per-tenant ``confluence_listeners``
+    rows) and are read live each tick, so adding a listener needs no restart.
+    Only these loop-level knobs are config (restart-gated).
+    """
+
+    poller_enabled: bool = True
+    poller_tick_seconds: float = 300.0
+    poller_max_concurrent: int = 3
+    # A listener is only resynced if its last sync was at least this long ago.
+    min_resync_seconds: float = 300.0
+
+
 class DirectoryConfig(BaseModel):
     """Active Directory integration via a Windows jumpbox.
 
@@ -271,6 +286,7 @@ class Config(BaseModel):
     metrics: MetricsConfig = MetricsConfig()
     certs: CertsConfig = CertsConfig()
     pipelines: PipelinesConfig = PipelinesConfig()
+    confluence: ConfluenceConfig = ConfluenceConfig()
     directory: DirectoryConfig = DirectoryConfig()
     ssh_command_policy: SSHPolicyConfig = SSHPolicyConfig()
     # cli_tools is a flat {tool_id: bool} map - Settings page toggles for

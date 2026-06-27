@@ -61,6 +61,10 @@ gcp = ["google-cloud-certificate-manager>=1.7"]
 # SMB network-drive docs source (Phase: docs SMB). Pure-Python SMB2/3 client,
 # lazily imported only when docs_index.source = "smb".
 smb = ["smbprotocol>=1.12"]
+# Confluence space listeners (Phase 26). httpx (core) does the REST calls;
+# markdownify converts page HTML to markdown. Lazily imported with a tag-strip
+# fallback, so it's optional - install with pip install 'dosm[confluence]'.
+confluence = ["markdownify>=0.11"]
 
 [project.scripts]
 dosm = "dosm.cli:app"

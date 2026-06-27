@@ -45,6 +45,7 @@ ftp_app = typer.Typer(help="File transfer (FTP / FTPS / SFTP), jump-aware.", no_
 okta_app = typer.Typer(help="Okta SSO helpers.", no_args_is_help=True)
 rbac_app = typer.Typer(help="Role-based access control helpers.", no_args_is_help=True)
 audit_app = typer.Typer(help="Audit log queries.", no_args_is_help=True)
+confluence_app = typer.Typer(help="Confluence space listeners.", no_args_is_help=True)
 applications_app = typer.Typer(
     help="Host organisation: application -> environment -> unit tree.",
     no_args_is_help=True,
@@ -65,6 +66,7 @@ app.add_typer(ftp_app, name="ftp")
 app.add_typer(okta_app, name="okta")
 app.add_typer(rbac_app, name="rbac")
 app.add_typer(audit_app, name="audit")
+app.add_typer(confluence_app, name="confluence")
 app.add_typer(applications_app, name="application")
 
 console = Console()
@@ -1822,6 +1824,154 @@ def audit_list(
         )
     console.print(table)
     console.print(f"[dim]{len(records)} event(s).[/dim]")
+
+
+# ---- confluence listeners -------------------------------------------------
+
+
+@confluence_app.command("list")
+def confluence_list(tenant: str | None = _TENANT_SCOPE_OPT) -> None:
+    """List Confluence listeners."""
+    from dosm.confluence import repo
+
+    _load()
+    with session_scope() as s:
+        tid = _resolve_tenant_scope(s, tenant)
+        rows = repo.list_listeners(s, tid)
+        table = Table("ID", "Name", "Space", "Deployment", "Enabled", "Last sync", "Status")
+        for li in rows:
+            table.add_row(
+                str(li.id), li.name, li.space_key, li.deployment,
+                "yes" if li.enabled else "no",
+                li.last_synced_at.strftime("%Y-%m-%d %H:%M") if li.last_synced_at else "-",
+                li.last_status or "-",
+            )
+    console.print(table)
+
+
+@confluence_app.command("add")
+def confluence_add(
+    name: str = typer.Option(..., "--name", help="Listener name."),
+    deployment: str = typer.Option(..., "--deployment", help="cloud | server"),
+    base_url: str = typer.Option(..., "--base-url", help="Confluence base URL."),
+    space: str = typer.Option(..., "--space", help="Confluence space key."),
+    credential: str = typer.Option(..., "--credential", help="Credential name (login or pat) in the tenant."),
+    no_pages: bool = typer.Option(False, "--no-pages", help="Do not sync page bodies."),
+    no_attachments: bool = typer.Option(False, "--no-attachments", help="Do not sync attachments."),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Add a Confluence listener for one space."""
+    from dosm.confluence import DEPLOYMENTS
+    from dosm.docs_index.vault import slugify
+    from dosm.models import ConfluenceListener
+
+    if deployment not in DEPLOYMENTS:
+        console.print(f"[red]--deployment must be one of: {', '.join(DEPLOYMENTS)}[/red]")
+        raise typer.Exit(1)
+    _load()
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+        cred = s.execute(
+            select(Credential).where(Credential.tenant_id == tid, Credential.name == credential)
+        ).scalar_one_or_none()
+        if cred is None:
+            console.print(f"[red]No credential named {credential!r} in that tenant.[/red]")
+            raise typer.Exit(1)
+        listener = ConfluenceListener(
+            tenant_id=tid, name=name, deployment=deployment, base_url=base_url,
+            space_key=space, slug=slugify(name), credential_id=cred.id,
+            sync_pages=not no_pages, sync_attachments=not no_attachments, enabled=True,
+        )
+        s.add(listener)
+        s.flush()
+        s.add(AuditLog(
+            tenant_id=tid, actor_id=None, action="settings.confluence.create",
+            target=f"confluence_listener:{listener.id}",
+            details=f"cli {deployment} {space} ({name})",
+        ))
+        new_id = listener.id
+    console.print(f"[green]Added[/green] listener {new_id} for space {space}")
+
+
+@confluence_app.command("rm")
+def confluence_rm(
+    listener_id: int = typer.Argument(..., help="Listener id."),
+    yes: bool = typer.Option(False, "--yes", help="Skip confirmation."),
+) -> None:
+    """Delete a Confluence listener (synced docs are left in place)."""
+    from dosm.confluence import repo
+
+    _load()
+    with session_scope() as s:
+        row = repo.get_listener(s, listener_id, None)
+        if row is None:
+            console.print("[red]No such listener.[/red]")
+            raise typer.Exit(1)
+        if not yes:
+            typer.confirm(f"Delete listener {row.name!r} (space {row.space_key})?", abort=True)
+        tid = row.tenant_id
+        s.delete(row)
+        s.add(AuditLog(
+            tenant_id=tid, actor_id=None, action="settings.confluence.delete",
+            target=f"confluence_listener:{listener_id}", details="cli",
+        ))
+    console.print(f"[green]Deleted[/green] listener {listener_id}")
+
+
+@confluence_app.command("test")
+def confluence_test(listener_id: int = typer.Argument(..., help="Listener id.")) -> None:
+    """Probe a listener's Confluence connection."""
+    import asyncio
+
+    from dosm.confluence import make_confluence_client, repo
+
+    _load()
+    cfg = load_config()
+    with session_scope() as s:
+        row = repo.get_listener(s, listener_id, None)
+        if row is None:
+            console.print("[red]No such listener.[/red]")
+            raise typer.Exit(1)
+    client = make_confluence_client(cfg, row)  # row detached; attrs already loaded
+    ok, message = asyncio.run(client.test_connection())
+    if ok:
+        console.print(f"[green]OK[/green] {message}")
+    else:
+        console.print(f"[red]FAIL[/red] {message}")
+        raise typer.Exit(1)
+
+
+@confluence_app.command("sync")
+def confluence_sync(listener_id: int = typer.Argument(..., help="Listener id.")) -> None:
+    """Sync a listener now (pull pages/attachments + reindex)."""
+    import asyncio
+
+    from dosm.confluence import repo
+    from dosm.confluence.sync import sync_listener
+
+    _load()
+    cfg = load_config()
+    with session_scope() as s:
+        row = repo.get_listener(s, listener_id, None)
+        if row is None:
+            console.print("[red]No such listener.[/red]")
+            raise typer.Exit(1)
+        result = asyncio.run(sync_listener(cfg, row, s))
+        s.add(AuditLog(
+            tenant_id=row.tenant_id, actor_id=None, action="settings.confluence.sync",
+            target=f"confluence_listener:{row.id}",
+            details=(
+                f"cli pages={result.pages_written} attachments={result.attachments_written} "
+                f"deleted={result.deleted} errors={len(result.errors)}"
+            ),
+        ))
+    console.print(
+        f"[green]Synced[/green] pages={result.pages_written} "
+        f"attachments={result.attachments_written} removed={result.deleted} "
+        f"unchanged={result.unchanged}"
+    )
+    if result.errors:
+        console.print(f"[yellow]{len(result.errors)} error(s):[/yellow] {result.errors[0]}")
 
 
 if __name__ == "__main__":
