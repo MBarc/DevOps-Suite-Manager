@@ -17,7 +17,8 @@
         <button type="button" id="conv-rename-cancel" class="btn btn-ghost btn-sm">Cancel</button>
       </div>
     </form>
-    <div class="subtitle">Model <code>{{ ollama_model }}</code> · grounded in <code>{{ request.app.state.config.docs_dir }}</code></div>
+    {% set _di = request.app.state.config.docs_index %}
+    <div class="subtitle">Model <code>{{ ollama_model }}</code> · grounded in <code>{% if _di.source == 'smb' %}\\{{ _di.smb.server }}\{{ _di.smb.share }} (SMB){% else %}{{ request.app.state.config.docs_dir }}{% endif %}</code></div>
   </div>
   <div class="actions">
     <a href="/chat" class="btn btn-ghost">All chats</a>

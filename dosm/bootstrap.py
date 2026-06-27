@@ -41,6 +41,16 @@ DEFAULT_CONFIG: dict = {
         "embedder_model": "BAAI/bge-small-en-v1.5",
         "embedding_dim": 384,
         "auto_index_on_startup": True,
+        "source": "local",
+        "smb": {
+            "server": "",
+            "share": "",
+            "base_path": "",
+            "port": 445,
+            "encrypt": True,
+            "credential_id": None,
+            "poll_interval_seconds": 60.0,
+        },
     },
     "guacamole": {
         "enabled": False,
@@ -143,11 +153,14 @@ def initialize_home(home: Path, *, force: bool = False) -> list[Path]:
     # has never been run).
     try:
         from dosm.docs_index.cli_reference import install_cli_reference, is_current
+        from dosm.docs_index.store import LocalDocsStore
 
-        docs_dir = home / "docs"
-        if force or not is_current(docs_dir):
-            _, target = install_cli_reference(docs_dir)
-            created.append(target)
+        # `dosm init` always seeds the LOCAL docs tree - no SMB source is
+        # configured yet at first-run time.
+        store = LocalDocsStore(home / "docs")
+        if force or not is_current(store):
+            _, subdir = install_cli_reference(store)
+            created.append(home / "docs" / subdir)
     except FileNotFoundError:
         pass
 

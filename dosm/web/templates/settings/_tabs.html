@@ -5,6 +5,7 @@
 <div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider); flex-wrap:wrap">
   {{ _tab('/settings', 'Terminal launchers', p == '/settings') }}
   {{ _tab('/settings/integrations', 'Integrations', p.startswith('/settings/integrations')) }}
+  {{ _tab('/settings/docs-source', 'Docs source', p.startswith('/settings/docs-source')) }}
   {{ _tab('/settings/rbac', 'Access control', p.startswith('/settings/rbac')) }}
   {{ _tab('/settings/members', 'Members', p.startswith('/settings/members')) }}
   {{ _tab('/settings/audit', 'Audit log', p.startswith('/settings/audit')) }}

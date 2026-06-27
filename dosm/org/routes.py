@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import re
 from functools import partial
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -102,8 +101,6 @@ def _sync_doc(cfg, dept: Department, members: list[DepartmentMember]) -> None:
     the Helpdesk team" or "who do I email about X" can be answered from
     real AD data, not stale free-text notes.
     """
-    org_dir: Path = cfg.docs_dir / "org"
-    org_dir.mkdir(parents=True, exist_ok=True)
     lines = [
         "---",
         f"title: {dept.name}",
@@ -135,13 +132,16 @@ def _sync_doc(cfg, dept: Department, members: list[DepartmentMember]) -> None:
                 line += " *(disabled)*"
             lines.append(line)
         lines.append("")
-    (org_dir / f"{dept.slug}.md").write_text("\n".join(lines), encoding="utf-8")
+    from dosm.docs_index.store import make_docs_store
+    make_docs_store(cfg).write_bytes(f"org/{dept.slug}.md", "\n".join(lines).encode("utf-8"))
 
 
 def _delete_doc(cfg, dept: Department) -> None:
-    doc = cfg.docs_dir / "org" / f"{dept.slug}.md"
-    if doc.exists():
-        doc.unlink()
+    from dosm.docs_index.store import make_docs_store
+    try:
+        make_docs_store(cfg).delete(f"org/{dept.slug}.md")
+    except FileNotFoundError:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────

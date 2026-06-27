@@ -21,14 +21,43 @@ if TYPE_CHECKING:
 _observer = None
 _observer_lock = threading.Lock()
 
+# SMB sources can't use OS filesystem events (inotify/ReadDirectoryChangesW
+# don't fire for a network share), so they are watched by a periodic polling
+# reindex instead. The size+mtime fast-path keeps each poll cheap.
+_poll_thread: threading.Thread | None = None
+_poll_stop = threading.Event()
+
 _WATCHED_EXTENSIONS = {".md", ".markdown", ".txt", ".pdf", ".docx"}
 
 
+def _start_polling(cfg: Config) -> None:
+    """Background thread that reindexes an SMB source on a fixed cadence."""
+    global _poll_thread
+    _poll_stop.clear()
+    interval = max(5.0, float(cfg.docs_index.smb.poll_interval_seconds))
+
+    def _loop() -> None:
+        from dosm.docs_index.indexer import reindex_async
+
+        while not _poll_stop.wait(interval):
+            reindex_async(cfg, force=False)
+
+    t = threading.Thread(target=_loop, daemon=True, name="docs-smb-poller")
+    t.start()
+    _poll_thread = t
+
+
 def start_watcher(cfg: Config) -> None:
-    """Start the background docs watcher. No-op if already running or watchdog missing."""
+    """Start the background docs watcher. No-op if already running or watchdog missing.
+
+    Local sources use watchdog's OS-native events; SMB sources use polling.
+    """
     global _observer
     with _observer_lock:
-        if _observer is not None:
+        if _observer is not None or (_poll_thread is not None and _poll_thread.is_alive()):
+            return
+        if cfg.docs_index.source == "smb":
+            _start_polling(cfg)
             return
         if not cfg.docs_dir.exists():
             return
@@ -75,7 +104,7 @@ def start_watcher(cfg: Config) -> None:
 
 
 def stop_watcher() -> None:
-    global _observer
+    global _observer, _poll_thread
     with _observer_lock:
         if _observer is not None:
             try:
@@ -84,3 +113,10 @@ def stop_watcher() -> None:
             except Exception:
                 pass
             _observer = None
+        if _poll_thread is not None:
+            _poll_stop.set()
+            try:
+                _poll_thread.join(timeout=2.0)
+            except Exception:
+                pass
+            _poll_thread = None

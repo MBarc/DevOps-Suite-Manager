@@ -663,21 +663,41 @@ register_query(LIST_DOCS)
 # ---------------------------------------------------------------------------
 
 async def _read_doc_runner(cfg, args: dict) -> QueryResult:
+    from sqlalchemy import select
+
+    from dosm.auth.tenancy import tenant_clause
+    from dosm.db import session_scope
+    from dosm.models import Document
+
     path = (args.get("path") or "").strip()
     if not path:
         return QueryResult(ok=False, summary="path argument is required", error="path argument is required")
 
-    base = cfg.docs_dir.resolve()
-    full = (base / path).resolve()
+    # Gate the read on a tenant-owned Document row, so the agent can only read
+    # files indexed within its tenant (the vault filesystem itself is shared).
+    tid = agent_tenant_id()
+    with session_scope() as s:
+        stmt = select(Document.id).where(Document.rel_path == path)
+        clause = tenant_clause(Document, tid)
+        if clause is not None:
+            stmt = stmt.where(clause)
+        owned = s.execute(stmt).scalars().first()
+    if owned is None:
+        return QueryResult(ok=False, summary=f"not found: {path}", error=f"No file at docs/{path}")
 
-    if base not in full.parents and full != base:
+    from dosm.docs_index.store import make_docs_store
+
+    store = make_docs_store(cfg)
+    try:
+        rel = store.safe_rel(path)
+    except ValueError:
         return QueryResult(ok=False, summary="path outside docs vault", error="invalid path")
-    if not full.is_file():
+    if not store.is_file(rel):
         return QueryResult(ok=False, summary=f"not found: {path}", error=f"No file at docs/{path}")
 
     try:
-        text = full.read_text(encoding="utf-8", errors="replace")
-    except OSError as e:
+        text = store.read_text(rel)
+    except Exception as e:
         return QueryResult(ok=False, summary=f"read error: {e}", error=str(e))
 
     truncated = text[:20000]

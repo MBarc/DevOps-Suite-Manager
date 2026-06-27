@@ -842,6 +842,7 @@ async def _upsert_doc_runner(cfg: Config, args: dict) -> ActionResult:
 
     from dosm.docs_index import vault
     from dosm.docs_index.indexer import reindex_async
+    from dosm.docs_index.store import make_docs_store
 
     path = (args.get("path") or "").strip()
     title = (args.get("title") or "").strip()
@@ -855,6 +856,7 @@ async def _upsert_doc_runner(cfg: Config, args: dict) -> ActionResult:
         return ActionResult(ok=False, summary="body_md is required")
 
     started = time.monotonic()
+    store = make_docs_store(cfg)
     try:
         if path:
             # Update existing doc - derive folder_slug + doc_slug from path
@@ -865,17 +867,15 @@ async def _upsert_doc_runner(cfg: Config, args: dict) -> ActionResult:
             else:
                 save_folder_slug = vault.UNFILED_SLUG
                 doc_slug = parts.removesuffix(".md")
-            saved = vault.save_doc(cfg, folder_slug=save_folder_slug, doc_slug=doc_slug, title=title, body_md=body_md, author=author)
+            rel_saved = vault.save_doc(store, folder_slug=save_folder_slug, doc_slug=doc_slug, title=title, body_md=body_md, author=author)
         else:
             # New doc
             slug_base = vault.slugify(title)
-            folder_dir = cfg.docs_dir / folder_slug
-            doc_slug = vault.find_unique_slug(folder_dir, slug_base)
-            saved = vault.save_doc(cfg, folder_slug=folder_slug, doc_slug=doc_slug, title=title, body_md=body_md, author=author)
+            doc_slug = vault.find_unique_slug(store, folder_slug, slug_base)
+            rel_saved = vault.save_doc(store, folder_slug=folder_slug, doc_slug=doc_slug, title=title, body_md=body_md, author=author)
     except Exception as e:
         return ActionResult(ok=False, summary=f"Save failed: {type(e).__name__}: {e}", stderr=str(e))
 
-    rel_saved = saved.relative_to(cfg.docs_dir).as_posix()
     reindex_async(cfg, force=False)
     duration_ms = int((time.monotonic() - started) * 1000)
     action = "updated" if path else "created"
@@ -908,12 +908,13 @@ register_action(UPSERT_DOC)
 async def _delete_doc_runner(cfg: Config, args: dict) -> ActionResult:
     from dosm.docs_index import vault
     from dosm.docs_index.indexer import reindex_async
+    from dosm.docs_index.store import make_docs_store
 
     path = (args.get("path") or "").strip()
     if not path:
         return ActionResult(ok=False, summary="path is required")
     try:
-        vault.delete_doc(cfg, path)
+        vault.delete_doc(make_docs_store(cfg), path)
     except ValueError as e:
         return ActionResult(ok=False, summary=f"Invalid path: {e}", stderr=str(e))
     except FileNotFoundError:

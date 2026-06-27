@@ -9,18 +9,15 @@ The indexer reads frontmatter to populate application_id on Document rows.
 from __future__ import annotations
 
 import io
-import os
 import re
-import tempfile
 import unicodedata
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
 
 if TYPE_CHECKING:
-    from dosm.config import Config
+    from dosm.docs_index.store import DocsStore
 
 UNFILED_SLUG = "_unfiled"
 
@@ -35,12 +32,13 @@ def slugify(text: str) -> str:
     return re.sub(r"[-\s]+", "-", text) or "doc"
 
 
-def find_unique_slug(app_dir: Path, base_slug: str) -> str:
-    """Return base_slug if no collision, else base_slug-2, base_slug-3, …"""
-    if not (app_dir / f"{base_slug}.md").exists():
+def find_unique_slug(store: DocsStore, folder_slug: str, base_slug: str) -> str:
+    """Return base_slug if no collision in ``folder_slug``, else base_slug-2, …"""
+    existing = set(store.child_names(folder_slug))
+    if f"{base_slug}.md" not in existing:
         return base_slug
     n = 2
-    while (app_dir / f"{base_slug}-{n}.md").exists():
+    while f"{base_slug}-{n}.md" in existing:
         n += 1
     return f"{base_slug}-{n}"
 
@@ -84,37 +82,24 @@ def serialize_doc(
     return f"---\n{yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)}---\n\n{body_md.rstrip()}\n"
 
 
-# ── Path safety ───────────────────────────────────────────────────────────────
-
-
-def resolve_path(cfg: Config, rel: str) -> Path:
-    """Resolve a relative doc path safely under docs_dir. Raises ValueError on traversal."""
-    docs_root = cfg.docs_dir.resolve()
-    target = (docs_root / rel).resolve()
-    if not str(target).startswith(str(docs_root) + os.sep) and target != docs_root:
-        raise ValueError(f"path traversal rejected: {rel!r}")
-    return target
-
-
-# ── File I/O ─────────────────────────────────────────────────────────────────
+# ── File I/O (via the docs store) ─────────────────────────────────────────────
 
 
 def save_doc(
-    cfg: Config,
+    store: DocsStore,
     *,
     folder_slug: str,
     doc_slug: str,
     title: str,
     body_md: str,
     author: str,
-) -> Path:
-    """Write (or overwrite) a vault markdown doc atomically. Returns the absolute path."""
-    docs_root = cfg.docs_dir.resolve()
-    folder_dir = (docs_root / folder_slug).resolve()
-    if not str(folder_dir).startswith(str(docs_root) + os.sep):
-        raise ValueError(f"invalid folder_slug: {folder_slug!r}")
-    folder_dir.mkdir(parents=True, exist_ok=True)
-    target = folder_dir / f"{doc_slug}.md"
+) -> str:
+    """Write (or overwrite) a vault markdown doc. Returns the rel POSIX path.
+
+    The store performs the path-safety check and an atomic write where the
+    backend supports it.
+    """
+    rel = store.safe_rel(f"{folder_slug}/{doc_slug}.md")
     content = serialize_doc(
         title=title,
         folder_slug=folder_slug,
@@ -122,29 +107,18 @@ def save_doc(
         author=author,
         updated_at=datetime.now(UTC),
     )
-    fd, tmp_path = tempfile.mkstemp(dir=folder_dir, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            f.write(content)
-        os.replace(tmp_path, target)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-    return target
+    store.write_bytes(rel, content.encode("utf-8"))
+    return rel
 
 
-def delete_doc(cfg: Config, rel: str) -> None:
+def delete_doc(store: DocsStore, rel: str) -> None:
     """Delete a vault doc. Raises ValueError on traversal, FileNotFoundError if missing."""
-    target = resolve_path(cfg, rel)
-    target.unlink()
+    store.delete(store.safe_rel(rel))
 
 
-def file_mtime_ms(path: Path) -> int:
+def file_mtime_ms(store: DocsStore, rel: str) -> int:
     """Return modification time as integer milliseconds - used for stale-edit detection."""
-    return int(path.stat().st_mtime * 1000)
+    return store.stat(rel).mtime_ms
 
 
 # ── Importers ────────────────────────────────────────────────────────────────

@@ -96,7 +96,8 @@
 <header class="page-header">
   <div>
     <h1>Documentation</h1>
-    <div class="subtitle">Indexed from <code>{{ request.app.state.config.docs_dir }}</code></div>
+    {% set _di = request.app.state.config.docs_index %}
+    <div class="subtitle">Indexed from <code>{% if _di.source == 'smb' %}\\{{ _di.smb.server }}\{{ _di.smb.share }}{% if _di.smb.base_path %}\{{ _di.smb.base_path }}{% endif %} (SMB){% else %}{{ request.app.state.config.docs_dir }}{% endif %}</code></div>
   </div>
   <div class="actions">
     <a class="btn btn-ghost btn-sm" href="/docs/new">New doc</a>
@@ -159,7 +160,8 @@
 <section class="card">
   <div class="empty-state">
     No documents yet. <a href="/docs/new">Create one</a>, <a href="/docs/import">import a file</a>,
-    or drop markdown/PDF files into <code>{{ request.app.state.config.docs_dir }}</code> and click <strong>Reindex</strong>.
+    {% set _di = request.app.state.config.docs_index %}
+    or drop markdown/PDF files into <code>{% if _di.source == 'smb' %}\\{{ _di.smb.server }}\{{ _di.smb.share }}{% if _di.smb.base_path %}\{{ _di.smb.base_path }}{% endif %}{% else %}{{ request.app.state.config.docs_dir }}{% endif %}</code> and click <strong>Reindex</strong>.
   </div>
 </section>
 {% endif %}

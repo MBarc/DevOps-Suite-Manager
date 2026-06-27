@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 
 import numpy as np
 from sqlalchemy import delete, select
@@ -16,6 +14,7 @@ from dosm.db import session_scope
 from dosm.docs_index.chunker import Chunk, chunk_text
 from dosm.docs_index.embedder import Embedder, NoEmbedder, make_embedder
 from dosm.docs_index.parsers import ParseError, parse
+from dosm.docs_index.store import DocsStore, make_docs_store, store_fell_back
 from dosm.models import DEFAULT_TENANT_SLUG, DocChunk, Document, Folder, Tenant
 
 
@@ -127,31 +126,19 @@ def _matches_any(rel: str, patterns: list[str]) -> bool:
     return False
 
 
-def _iter_doc_files(cfg: Config) -> list[Path]:
-    root = cfg.docs_dir
-    if not root.exists():
+def _iter_doc_files(cfg: Config, store: DocsStore) -> list[str]:
+    if not store.exists():
         return []
     includes = cfg.docs_index.include_globs
     excludes = cfg.docs_index.exclude_globs
-    found: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(root).as_posix()
+    found: list[str] = []
+    for rel in store.iter_files():
         if not _matches_any(rel, includes):
             continue
         if _matches_any(rel, excludes):
             continue
-        found.append(path)
+        found.append(rel)
     return sorted(found)
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for block in iter(lambda: fh.read(65536), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 def _embedding_to_bytes(vec: np.ndarray) -> bytes:
@@ -159,37 +146,51 @@ def _embedding_to_bytes(vec: np.ndarray) -> bytes:
 
 
 def _index_one(
-    cfg: Config, path: Path, *, embedder: Embedder, force: bool
+    cfg: Config, store: DocsStore, rel: str, *, embedder: Embedder, force: bool
 ) -> str:
     """Index a single file. Returns one of: 'indexed', 'unchanged', 'error'."""
-    rel = path.relative_to(cfg.docs_dir).as_posix()
-    stat = path.stat()
-    size = stat.st_size
-    mtime = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(tzinfo=None)
-    digest = _sha256(path)
-
-    # Read frontmatter metadata for markdown files before opening the DB session,
-    # so the session stays short (no file I/O inside the transaction).
-    app_id: int | None = None
-    fm_title: str | None = None
-    if path.suffix.lower() in {".md", ".markdown"}:
-        try:
-            from dosm.docs_index.vault import parse_frontmatter
-            raw_text = path.read_text(encoding="utf-8", errors="replace")
-            fm, _ = parse_frontmatter(raw_text)
-            fm_title = str(fm["title"])[:255] if fm.get("title") else None
-            _fm_app_slug = fm.get("folder")
-        except Exception:
-            _fm_app_slug = None
-    else:
-        _fm_app_slug = None
+    st = store.stat(rel)
+    size = st.size
+    mtime = datetime.fromtimestamp(st.mtime_ms / 1000, tz=UTC).replace(tzinfo=None)
+    is_markdown = rel.lower().endswith((".md", ".markdown"))
 
     with session_scope() as s:
         doc = s.execute(
             select(Document).where(Document.rel_path == rel)
         ).scalar_one_or_none()
-        if doc is not None and not force and doc.sha256 == digest and doc.status == "indexed":
+
+        # Fast-path: if size + mtime are unchanged, skip hashing/parsing entirely.
+        # This is what makes scanning an SMB source viable (no full read per file).
+        if (
+            doc is not None
+            and not force
+            and doc.status == "indexed"
+            and doc.size_bytes == size
+            and doc.modified_at == mtime
+        ):
             return "unchanged"
+
+        # Size/mtime differ (or first index): hash to confirm a real content change.
+        digest = store.sha256(rel)
+        if doc is not None and not force and doc.sha256 == digest and doc.status == "indexed":
+            # Content identical, only the stat changed (e.g. touched/copied) -
+            # refresh the metadata so the fast-path hits next time, no re-embed.
+            doc.size_bytes = size
+            doc.modified_at = mtime
+            return "unchanged"
+
+        # Read frontmatter metadata for markdown files.
+        app_id: int | None = None
+        fm_title: str | None = None
+        _fm_app_slug: str | None = None
+        if is_markdown:
+            try:
+                from dosm.docs_index.vault import parse_frontmatter
+                fm, _ = parse_frontmatter(store.read_text(rel))
+                fm_title = str(fm["title"])[:255] if fm.get("title") else None
+                _fm_app_slug = fm.get("folder")
+            except Exception:
+                _fm_app_slug = None
 
         # Resolve folder slug to id inside the session.
         if _fm_app_slug:
@@ -202,7 +203,7 @@ def _index_one(
                 _log(f"unknown folder slug {_fm_app_slug!r} in {rel}")
 
         try:
-            text, title = parse(path)
+            text, title = parse(store, rel)
         except ParseError as e:
             if doc is None:
                 doc = Document(
@@ -312,16 +313,22 @@ def reindex(cfg: Config, *, force: bool = False) -> IndexStats:
     try:
         embedder = _get_embedder(cfg)
         _update(embedder_name=embedder.name)
-        files = _iter_doc_files(cfg)
+        store = make_docs_store(cfg)
+        if store_fell_back(cfg, store):
+            from dosm.docs_index.store import last_store_error
+            msg = f"SMB source unavailable, using local: {last_store_error()}"
+            _log(msg)
+            with _status_lock:
+                _status.last_error = msg
+        files = _iter_doc_files(cfg, store)
         _update(total_files=len(files))
-        _log(f"scanning {len(files)} docs (embedder={embedder.name}, force={force})")
+        _log(f"scanning {len(files)} docs from {store.label} (embedder={embedder.name}, force={force})")
 
         on_disk: set[str] = set()
-        for path in files:
-            rel = path.relative_to(cfg.docs_dir).as_posix()
+        for rel in files:
             on_disk.add(rel)
             try:
-                outcome = _index_one(cfg, path, embedder=embedder, force=force)
+                outcome = _index_one(cfg, store, rel, embedder=embedder, force=force)
             except Exception as e:
                 outcome = "error"
                 _log(f"error {rel}: {e}")

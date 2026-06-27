@@ -689,18 +689,24 @@ def docs_new(
 
     cfg = load_config()
     init_engine(cfg)
+    from dosm.docs_index.store import LocalDocsStore, make_docs_store
     from dosm.docs_index.vault import find_unique_slug, save_doc, slugify
 
-    slug = find_unique_slug(cfg.docs_dir / app_slug, slugify(title))
+    store = make_docs_store(cfg)
+    slug = find_unique_slug(store, app_slug, slugify(title))
     # Write initial file so the editor has something to open.
-    saved = save_doc(cfg, folder_slug=app_slug, doc_slug=slug, title=title, body_md=f"# {title}\n\n", author="cli")
-    editor = (
-        __import__("os").environ.get("EDITOR")
-        or __import__("os").environ.get("VISUAL")
-        or ("notepad.exe" if sys.platform == "win32" else "vi")
-    )
-    subprocess.call([editor, str(saved)])
-    console.print(f"[green]Saved[/green] {saved.relative_to(cfg.docs_dir)}")
+    rel = save_doc(store, folder_slug=app_slug, doc_slug=slug, title=title, body_md=f"# {title}\n\n", author="cli")
+    if isinstance(store, LocalDocsStore):
+        saved = store.root / rel
+        editor = (
+            __import__("os").environ.get("EDITOR")
+            or __import__("os").environ.get("VISUAL")
+            or ("notepad.exe" if sys.platform == "win32" else "vi")
+        )
+        subprocess.call([editor, str(saved)])
+    else:
+        console.print(f"Saved to {store.label}; edit it from the Docs web UI (no local file to open).")
+    console.print(f"[green]Saved[/green] {rel}")
     console.print("Run [bold]dosm docs reindex[/bold] to update the search index.")
 
 
@@ -742,9 +748,11 @@ def docs_import(
         console.print(f"[red]Conversion failed:[/red] {e}")
         raise typer.Exit(1)
 
-    slug = vault.find_unique_slug(cfg.docs_dir / app_slug, vault.slugify(doc_title))
-    saved = vault.save_doc(cfg, folder_slug=app_slug, doc_slug=slug, title=doc_title, body_md=body_md, author="cli")
-    console.print(f"[green]Imported[/green] {saved.relative_to(cfg.docs_dir)}")
+    from dosm.docs_index.store import make_docs_store
+    store = make_docs_store(cfg)
+    slug = vault.find_unique_slug(store, app_slug, vault.slugify(doc_title))
+    rel = vault.save_doc(store, folder_slug=app_slug, doc_slug=slug, title=doc_title, body_md=body_md, author="cli")
+    console.print(f"[green]Imported[/green] {rel}")
     console.print("Run [bold]dosm docs reindex[/bold] to update the search index.")
 
 
@@ -755,7 +763,8 @@ def docs_reindex(
     """Scan $DOSM_HOME/docs, chunk + embed, update the index. Runs synchronously."""
     _load()
     cfg = load_config()
-    console.print(f"[green]Reindexing[/green] {cfg.docs_dir} (force={force})")
+    from dosm.docs_index.store import make_docs_store
+    console.print(f"[green]Reindexing[/green] {make_docs_store(cfg).label} (force={force})")
     stats = reindex(cfg, force=force)
     console.print(
         f"done · {stats.indexed} indexed · {stats.skipped_unchanged} unchanged · "
@@ -783,14 +792,16 @@ def docs_install_cli_reference(
         install_cli_reference,
         is_current,
     )
+    from dosm.docs_index.store import make_docs_store
 
     _load()
     cfg = load_config()
-    if not force and is_current(cfg.docs_dir):
-        console.print(f"[yellow]Already current[/yellow]: {cfg.docs_dir / '_dosm-cli'}")
+    store = make_docs_store(cfg)
+    if not force and is_current(store):
+        console.print(f"[yellow]Already current[/yellow] on {store.label}")
         console.print("Use [bold]--force[/bold] to reinstall.")
         return
-    count, target = install_cli_reference(cfg.docs_dir)
+    count, target = install_cli_reference(store)
     with session_scope() as s:
         ensure_cli_folder(s)
     console.print(f"[green]Installed[/green] {count} file(s) to {target}")
@@ -815,6 +826,76 @@ def docs_status() -> None:
         console.print(f"finished_at: {s.finished_at.isoformat(timespec='seconds')}")
     if s.last_error:
         console.print(f"[red]last_error:[/red] {s.last_error}")
+
+
+@docs_app.command("test-source")
+def docs_test_source() -> None:
+    """Check that the configured docs source (local or SMB) is reachable."""
+    _load()
+    cfg = load_config()
+    from dosm.docs_index.store import probe_source
+
+    ok, message, sample = probe_source(cfg)
+    console.print(f"source: [bold]{cfg.docs_index.source}[/bold]")
+    if ok:
+        console.print(f"[green]reachable[/green]: {message}")
+        if sample:
+            console.print("sample files:")
+            for rel in sample:
+                console.print(f"  {rel}")
+    else:
+        console.print(f"[red]unreachable[/red]: {message}")
+        raise typer.Exit(1)
+
+
+@docs_app.command("migrate-to-smb")
+def docs_migrate_to_smb(
+    dry_run: bool = typer.Option(False, "--dry-run", help="List what would be copied without writing."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite files already on the share."),
+    no_reindex: bool = typer.Option(False, "--no-reindex", help="Skip the reindex after copying."),
+) -> None:
+    """Copy local docs ($DOSM_HOME/docs) to the configured SMB share.
+
+    Configure and test the SMB source first (Settings → Docs source, or
+    `dosm docs test-source`). Idempotent - existing files on the share are
+    skipped unless --overwrite.
+    """
+    _load()
+    cfg = load_config()
+    from dosm.docs_index.store import (
+        LocalDocsStore,
+        last_store_error,
+        make_docs_store,
+        migrate_docs,
+        store_fell_back,
+    )
+
+    if cfg.docs_index.source != "smb":
+        console.print("[red]docs_index.source is not 'smb'[/red] - configure the SMB source first.")
+        raise typer.Exit(1)
+    dst = make_docs_store(cfg)
+    if store_fell_back(cfg, dst):
+        console.print(f"[red]SMB source unavailable:[/red] {last_store_error()}")
+        raise typer.Exit(1)
+    src = LocalDocsStore(cfg.docs_dir)
+    if not src.exists():
+        console.print("[yellow]No local docs to migrate.[/yellow]")
+        return
+
+    console.print(f"Migrating {src.label} -> {dst.label}{' [dry-run]' if dry_run else ''}")
+    result = migrate_docs(src, dst, dry_run=dry_run, overwrite=overwrite)
+    console.print(
+        f"copied={len(result.copied)} skipped={len(result.skipped)} errors={len(result.errors)}"
+    )
+    for rel, err in result.errors[:20]:
+        console.print(f"[red]error[/red] {rel}: {err}")
+
+    if not dry_run and not no_reindex and not result.errors:
+        console.print("[green]Reindexing[/green] from the SMB source (force)...")
+        stats = reindex(cfg, force=True)
+        console.print(f"done · {stats.indexed} indexed · {stats.errors} errors")
+    if result.errors:
+        raise typer.Exit(1)
 
 
 # ---- guacamole ------------------------------------------------------------

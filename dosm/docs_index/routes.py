@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
@@ -19,6 +19,7 @@ from dosm.docs_index import vault
 from dosm.docs_index.indexer import get_index_status, reindex_async
 from dosm.docs_index.markdown import render as render_markdown
 from dosm.docs_index.search import search as search_docs
+from dosm.docs_index.store import make_docs_store
 from dosm.models import AuditLog, Document, Folder, User
 
 router = APIRouter(prefix="/docs")
@@ -169,18 +170,20 @@ async def docs_view(
     tid: int | None = Depends(active_tenant_id),
 ) -> Response:
     cfg = request.app.state.config
+    store = make_docs_store(cfg)
     try:
-        target = vault.resolve_path(cfg, path)
+        rel = store.safe_rel(path)
     except ValueError:
         raise HTTPException(400, "invalid path")
-    if not target.exists() or not target.is_file():
+    _require_doc_access(db, path, tid)
+    if not store.is_file(rel):
         raise HTTPException(404)
     try:
-        text = target.read_text(encoding="utf-8", errors="replace")
-    except OSError as e:
+        text = store.read_text(rel)
+    except Exception as e:
         raise HTTPException(500, f"read failed: {e}") from e
 
-    is_md = target.suffix.lower() in {".md", ".markdown"}
+    is_md = rel.lower().endswith((".md", ".markdown"))
     if raw or not is_md:
         return PlainTextResponse(text)
 
@@ -197,7 +200,7 @@ async def docs_view(
         {
             "user": user,
             "path": path,
-            "title": (doc.title if doc else None) or target.stem,
+            "title": (doc.title if doc else None) or PurePosixPath(rel).stem,
             "rendered_html": rendered,
             "doc": doc,
         },
@@ -241,13 +244,15 @@ async def docs_edit(
     tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
+    store = make_docs_store(cfg)
     try:
-        target = vault.resolve_path(cfg, path)
+        rel = store.safe_rel(path)
     except ValueError:
         raise HTTPException(400, "invalid path")
-    if not target.exists() or not target.is_file():
+    _require_doc_access(db, path, tid)
+    if not store.is_file(rel):
         raise HTTPException(404)
-    text = target.read_text(encoding="utf-8", errors="replace")
+    text = store.read_text(rel)
     fm, body = vault.parse_frontmatter(text)
     folders = _list_folders(db, tid)
     return _templates(request).TemplateResponse(
@@ -257,10 +262,10 @@ async def docs_edit(
             "user": user,
             "folders": folders,
             "path": path,
-            "title": fm.get("title", "") or target.stem,
+            "title": fm.get("title", "") or PurePosixPath(rel).stem,
             "app_slug": fm.get("folder", vault.UNFILED_SLUG),
             "body": body,
-            "original_mtime": str(vault.file_mtime_ms(target)),
+            "original_mtime": str(vault.file_mtime_ms(store, rel)),
             "error": None,
         },
     )
@@ -279,6 +284,7 @@ async def docs_save(
     tid: int = Depends(require_active_tenant),
 ):
     cfg = request.app.state.config
+    store = make_docs_store(cfg)
     title = title.strip() or "Untitled"
     app_slug = app_slug.strip() or vault.UNFILED_SLUG
     folders = _list_folders(db, tid)
@@ -286,13 +292,14 @@ async def docs_save(
     if path:
         # Editing existing doc - save to same path, don't move across folder dirs.
         try:
-            target = vault.resolve_path(cfg, path)
+            rel = store.safe_rel(path)
         except ValueError:
             raise HTTPException(400, "invalid path")
-        if not target.exists():
+        _require_doc_access(db, path, tid)
+        if not store.is_file(rel):
             raise HTTPException(404)
         # Stale-edit conflict detection.
-        if original_mtime and str(vault.file_mtime_ms(target)) != original_mtime:
+        if original_mtime and str(vault.file_mtime_ms(store, rel)) != original_mtime:
             return _templates(request).TemplateResponse(
                 request,
                 "docs/editor.html",
@@ -305,22 +312,22 @@ async def docs_save(
                 },
                 status_code=409,
             )
-        rel_parts = Path(path)
+        rel_parts = PurePosixPath(rel)
         doc_slug = rel_parts.stem
         save_folder_slug = rel_parts.parent.name or vault.UNFILED_SLUG
-        saved = vault.save_doc(
-            cfg, folder_slug=save_folder_slug, doc_slug=doc_slug, title=title, body_md=body, author=user.username
+        rel_saved = vault.save_doc(
+            store, folder_slug=save_folder_slug, doc_slug=doc_slug, title=title, body_md=body, author=user.username
         )
         action = "docs.update"
     else:
         # New doc.
         slug_base = vault.slugify(title)
-        folder_dir = cfg.docs_dir / app_slug
-        doc_slug = vault.find_unique_slug(folder_dir, slug_base)
-        saved = vault.save_doc(cfg, folder_slug=app_slug, doc_slug=doc_slug, title=title, body_md=body, author=user.username)
+        doc_slug = vault.find_unique_slug(store, app_slug, slug_base)
+        rel_saved = vault.save_doc(
+            store, folder_slug=app_slug, doc_slug=doc_slug, title=title, body_md=body, author=user.username
+        )
         action = "docs.create"
 
-    rel_saved = saved.relative_to(cfg.docs_dir).as_posix()
     db.add(AuditLog(tenant_id=tid, actor_id=user.id, action=action, target=f"doc:{rel_saved}", details=f"title={title!r}"))
     db.commit()
     reindex_async(cfg, force=False)
@@ -377,8 +384,10 @@ async def docs_delete(
     tid: int | None = Depends(active_tenant_id),
 ):
     cfg = request.app.state.config
+    store = make_docs_store(cfg)
+    _require_doc_access(db, path, tid)
     try:
-        vault.delete_doc(cfg, path)
+        vault.delete_doc(store, path)
     except ValueError:
         raise HTTPException(400, "invalid path")
     except FileNotFoundError:

@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Settings | Docs source | DOSM{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Settings</h1>
+  </div>
+</header>
+
+{% include "settings/_tabs.html" %}
+
+{% if request.query_params.get('saved') %}
+<section class="card" style="border-left:3px solid var(--warning,#d97706); padding-top:var(--sp-3); padding-bottom:var(--sp-3)">
+  <span class="badge badge-amber"><span class="dot"></span> Saved</span>
+  <span class="muted" style="margin-left:var(--sp-2)">
+    Restart DOSM for the docs indexer and watcher to switch sources.
+  </span>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Docs source</h2>
+  <p class="muted" style="font-size:13px; margin-bottom:16px">
+    Where the Docs index reads and writes files. <strong>Local</strong> uses
+    <code>$DOSM_HOME/docs</code>. <strong>SMB network drive</strong> reads/writes a
+    Windows/NAS share directly (no OS mount) - useful for sharing one docs vault
+    across hosts. Switching source takes effect after a restart.
+  </p>
+
+  <form method="post" action="/settings/docs-source" id="docs-source-form">
+    <div style="margin-bottom:16px">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:6px">
+        <input type="radio" name="source" value="local" {% if di.source != 'smb' %}checked{% endif %}
+               onchange="toggleSmb()" />
+        <span style="font-weight:500">Local filesystem</span>
+        <span class="muted" style="font-size:12px">($DOSM_HOME/docs)</span>
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="radio" name="source" value="smb" {% if di.source == 'smb' %}checked{% endif %}
+               onchange="toggleSmb()" />
+        <span style="font-weight:500">SMB network drive</span>
+      </label>
+    </div>
+
+    <div id="smb-fields" style="border-left:2px solid var(--divider); padding-left:16px; margin-bottom:16px">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px">
+        <div>
+          <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Server</label>
+          <input name="server" value="{{ smb.server }}" placeholder="fileserver.corp.local" style="width:240px" />
+        </div>
+        <div>
+          <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Share</label>
+          <input name="share" value="{{ smb.share }}" placeholder="docs" style="width:160px" />
+        </div>
+        <div>
+          <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Port</label>
+          <input name="port" type="number" value="{{ smb.port }}" style="width:90px" />
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Base path within share</label>
+        <input name="base_path" value="{{ smb.base_path }}" placeholder="(optional) e.g. teams/ops/docs" style="width:380px" />
+        <div class="muted" style="font-size:11px; margin-top:4px">Subfolder of the share that is the docs root. Leave blank for the share root.</div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Credential (login)</label>
+        <select name="credential_id" style="width:320px">
+          <option value="">- select a login credential -</option>
+          {% for c in login_creds %}
+            <option value="{{ c.id }}" {% if smb.credential_id == c.id %}selected{% endif %}>
+              {{ c.name }}{% if c.domain %} ({{ c.domain }}\{{ c.username }}){% elif c.username %} ({{ c.username }}){% endif %}
+            </option>
+          {% endfor %}
+        </select>
+        <div class="muted" style="font-size:11px; margin-top:4px">
+          A <em>login</em> credential (username + domain + password). The password stays in the secrets
+          backend. Create one under <a href="/credentials">Credentials</a> if the list is empty.
+        </div>
+      </div>
+
+      <div style="display:flex; gap:16px; align-items:center; margin-bottom:12px">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer">
+          <input type="checkbox" name="encrypt" value="1" {% if smb.encrypt %}checked{% endif %} />
+          <span style="font-size:13px">Encrypt SMB traffic (SMB3)</span>
+        </label>
+        <div>
+          <label style="font-size:12px; font-weight:500; margin-right:6px">Poll interval (s)</label>
+          <input name="poll_interval_seconds" type="number" step="1" value="{{ smb.poll_interval_seconds }}" style="width:80px" />
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; align-items:center">
+        <button type="button" class="btn btn-secondary" onclick="testConn()">Test connection</button>
+        <span id="test-result" style="font-size:12px"></span>
+      </div>
+    </div>
+
+    <button type="submit" class="btn">Save</button>
+  </form>
+</section>
+
+<script>
+function toggleSmb() {
+  const smb = document.querySelector('input[name=source][value=smb]').checked;
+  document.getElementById('smb-fields').style.display = smb ? '' : 'none';
+}
+async function testConn() {
+  const form = document.getElementById('docs-source-form');
+  const out = document.getElementById('test-result');
+  out.textContent = 'Testing...';
+  out.style.color = 'var(--fg-muted)';
+  const data = new FormData(form);
+  try {
+    const resp = await fetch('/settings/docs-source/test', { method: 'POST', body: data });
+    const j = await resp.json();
+    if (j.ok) {
+      out.style.color = 'var(--success,#16a34a)';
+      out.textContent = 'OK - ' + j.message + (j.sample && j.sample.length ? ' (' + j.sample.length + '+ files)' : ' (empty)');
+    } else {
+      out.style.color = 'var(--danger,#dc2626)';
+      out.textContent = 'Failed: ' + j.message;
+    }
+  } catch (e) {
+    out.style.color = 'var(--danger,#dc2626)';
+    out.textContent = 'Request failed: ' + e;
+  }
+}
+toggleSmb();
+</script>
+{% endblock %}

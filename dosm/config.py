@@ -114,8 +114,30 @@ class MetricsConfig(BaseModel):
     winrm_timeout_seconds: float = 8.0
 
 
+class SmbDocsConfig(BaseModel):
+    """Connection settings for an SMB network-drive docs source.
+
+    DOSM talks SMB2/3 directly (no OS mount), so this works from inside the
+    Linux container. Auth reuses a ``login`` credential profile - the password
+    lives in the secrets backend (referenced by the credential), never here.
+    """
+
+    server: str = ""  # file-server host or IP
+    share: str = ""  # share name
+    base_path: str = ""  # subpath within the share that is the docs root
+    port: int = 445
+    encrypt: bool = True
+    credential_id: int | None = None  # -> Credential(kind="login")
+    poll_interval_seconds: float = 60.0  # watcher polling cadence (no FS events over SMB)
+
+
 class DocsIndexConfig(BaseModel):
-    """Local docs ingestion: scan $DOSM_HOME/docs, chunk, embed, store."""
+    """Docs ingestion: scan the docs source, chunk, embed, store.
+
+    ``source`` selects where docs files live: ``local`` ($DOSM_HOME/docs) or
+    ``smb`` (a network share, see ``smb``). Defaults to local so existing
+    installs are unaffected.
+    """
 
     chunk_size_chars: int = 1800
     chunk_overlap_chars: int = 200
@@ -127,6 +149,8 @@ class DocsIndexConfig(BaseModel):
     embedder_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384
     auto_index_on_startup: bool = True
+    source: str = "local"  # "local" | "smb"
+    smb: SmbDocsConfig = Field(default_factory=SmbDocsConfig)
 
 
 class CustomTerminal(BaseModel):

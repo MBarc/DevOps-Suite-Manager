@@ -32,6 +32,37 @@ def _slug(username: str) -> str:
     return f"{ts}-{safe}"
 
 
+def _finalize_journal(cfg, tmp_path, final_rel: str) -> None:
+    """Move a completed temp journal to its final home.
+
+    If the destination is inside the docs tree (the default - sessions_dir is
+    ``docs/sessions``), write it through the docs store so it follows the docs
+    source (e.g. lands on the SMB share and gets indexed). Otherwise finalize
+    locally as before.
+    """
+    final_path = cfg.home / final_rel
+    try:
+        docs_rel = final_path.resolve().relative_to(cfg.docs_dir.resolve()).as_posix()
+    except ValueError:
+        docs_rel = None
+    if docs_rel is not None:
+        from dosm.docs_index.store import make_docs_store
+
+        make_docs_store(cfg).write_bytes(docs_rel, tmp_path.read_bytes())
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+    else:
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            tmp_path.rename(final_path)
+        except Exception:
+            import shutil
+
+            shutil.move(str(tmp_path), str(final_path))
+
+
 # ---------------------------------------------------------------------------
 # Startup helper - abort any sessions that were active when the process died.
 # ---------------------------------------------------------------------------
@@ -52,7 +83,6 @@ def abort_stale_recordings(cfg) -> None:
             slug = row.slug
             tmp_path = cfg.home / cfg.recording.tmp_dir / f"{slug}.md"
             final_rel = f"{cfg.recording.sessions_dir}/{slug}.md"
-            final_path = cfg.home / final_rel
             if tmp_path.exists():
                 try:
                     with open(tmp_path, "a", encoding="utf-8") as fh:
@@ -61,8 +91,7 @@ def abort_stale_recordings(cfg) -> None:
                             f"\n---\n\n"
                             f"*Recording aborted: server restarted at {ts}.*\n"
                         )
-                    final_path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp_path.rename(final_path)
+                    _finalize_journal(cfg, tmp_path, final_rel)
                     row.journal_path = final_rel
                 except Exception:
                     pass
@@ -191,18 +220,11 @@ async def recording_stop(
         raise HTTPException(404, "no active recording for this user")
 
     final_rel = f"{cfg.recording.sessions_dir}/{rec.slug}.md"
-    final_path = cfg.home / final_rel
 
     rec.writer.write_footer("finalized")
     rec.writer.close()
 
-    final_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        rec.tmp_path.rename(final_path)
-    except Exception:
-        # Cross-device move fallback
-        import shutil
-        shutil.move(str(rec.tmp_path), str(final_path))
+    _finalize_journal(cfg, rec.tmp_path, final_rel)
 
     row = db.get(RecordingSession, rec.recording_id)
     if row and row.user_id != user.id:

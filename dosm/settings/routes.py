@@ -23,7 +23,8 @@ from dosm.auth.deps import (
     require_platform_admin,
 )
 from dosm.auth.tenancy import ACTIVE_TENANT_SESSION_KEY, active_tenant_id
-from dosm.config import update_config_yaml
+from dosm.config import SmbDocsConfig, update_config_yaml
+from dosm.credentials.access import visible_credentials
 from dosm.db import get_session
 from dosm.models import AuditLog, Tenant, User
 from dosm.settings.cli_catalog import detect_all
@@ -172,6 +173,109 @@ async def integrations_save(
     ))
     db.commit()
     return RedirectResponse("/settings/integrations?saved=1", status_code=303)
+
+
+# ── Docs source (local filesystem vs SMB network drive) ────────────────────
+
+
+def _login_credentials(db: Session, user: User, tid: int | None):
+    """Login (username+password) credentials usable for SMB auth, for the picker."""
+    return [c for c in visible_credentials(db, user, tid) if c.kind == "login"]
+
+
+@router.get("/docs-source", response_class=HTMLResponse, include_in_schema=False)
+async def docs_source_page(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
+    cfg = request.app.state.config
+    return _templates(request).TemplateResponse(
+        request,
+        "settings/docs_source.html",
+        {
+            "user": user,
+            "di": cfg.docs_index,
+            "smb": cfg.docs_index.smb,
+            "login_creds": _login_credentials(db, user, tid),
+        },
+    )
+
+
+def _smb_from_form(server, share, base_path, port, encrypt, credential_id, poll) -> dict:
+    cred_id = int(credential_id) if str(credential_id).strip() else None
+    return {
+        "server": server.strip(),
+        "share": share.strip(),
+        "base_path": base_path.strip(),
+        "port": int(port or 445),
+        "encrypt": encrypt is not None,
+        "credential_id": cred_id,
+        "poll_interval_seconds": float(poll or 60.0),
+    }
+
+
+@router.post("/docs-source", include_in_schema=False)
+async def docs_source_save(
+    request: Request,
+    source: str = Form("local"),
+    server: str = Form(""),
+    share: str = Form(""),
+    base_path: str = Form(""),
+    port: int = Form(445),
+    encrypt: str | None = Form(None),
+    credential_id: str = Form(""),
+    poll_interval_seconds: float = Form(60.0),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    cfg = request.app.state.config
+    source = "smb" if source == "smb" else "local"
+    smb_dict = _smb_from_form(server, share, base_path, port, encrypt, credential_id, poll_interval_seconds)
+
+    # Write the whole docs_index block (update_config_yaml shallow-merges top-level keys).
+    new_docs = {**cfg.docs_index.model_dump(), "source": source, "smb": smb_dict}
+    update_config_yaml(cfg.home, {"docs_index": new_docs})
+    # Reflect on the live cfg so the picker + probe see fresh values; the running
+    # indexer/watcher keep the old source until a restart (see template notice).
+    cfg.docs_index.source = source
+    cfg.docs_index.smb = SmbDocsConfig(**smb_dict)
+
+    db.add(AuditLog(
+        actor_id=user.id,
+        action="settings.docs_source.update",
+        target="docs_source",
+        details=f"source={source} server={smb_dict['server']!r} share={smb_dict['share']!r}",
+    ))
+    db.commit()
+    return RedirectResponse("/settings/docs-source?saved=1", status_code=303)
+
+
+@router.post("/docs-source/test", include_in_schema=False)
+async def docs_source_test(
+    request: Request,
+    server: str = Form(""),
+    share: str = Form(""),
+    base_path: str = Form(""),
+    port: int = Form(445),
+    encrypt: str | None = Form(None),
+    credential_id: str = Form(""),
+    user: User = Depends(require_admin),
+):
+    """Probe the SMB connection described by the submitted form values (not the
+    saved config), so the operator can test before committing."""
+    cfg = request.app.state.config
+    from dosm.docs_index.store import build_smb_store, probe_store
+
+    smb_dict = _smb_from_form(server, share, base_path, port, encrypt, credential_id, 60.0)
+    smb = SmbDocsConfig(**smb_dict)
+    try:
+        store = build_smb_store(cfg, smb)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "message": str(e)})
+    ok, message, sample = await run_in_threadpool(probe_store, store)
+    return JSONResponse({"ok": ok, "message": message, "sample": sample})
 
 
 # ── Access control (RBAC) - AD/Okta group → DOSM role mapping ──────────────

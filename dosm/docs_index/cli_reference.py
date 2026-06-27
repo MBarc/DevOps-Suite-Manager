@@ -16,10 +16,13 @@ install where the wheel-only ``cli_docs`` directory does not exist.
 """
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from dosm.docs_index.store import DocsStore
 
 VAULT_SUBDIR = "_dosm-cli"
 FOLDER_SLUG = "dosm-cli"
@@ -48,37 +51,42 @@ def _bundled_root() -> Path:
     )
 
 
-def install_cli_reference(target_docs_dir: Path) -> tuple[int, Path]:
-    """Copy bundled CLI docs into ``target_docs_dir / _dosm-cli/``.
+def install_cli_reference(store: DocsStore) -> tuple[int, str]:
+    """Copy bundled CLI docs into the docs store under ``_dosm-cli/``.
 
-    Overwrites any existing contents - this folder is owned by DOSM and
-    must not be hand-edited. ``_generated/<group>.md`` files are flattened
-    into the target directory so the indexer treats them as siblings of
-    the README and exit-codes pages.
+    The bundle source is always local (inside the package); the destination is
+    whatever ``store`` points at (local dir or SMB share). Overwrites any
+    existing contents - this folder is owned by DOSM and must not be
+    hand-edited. ``_generated/<group>.md`` files are flattened into the target
+    directory so the indexer treats them as siblings of the README and
+    exit-codes pages.
 
-    Returns ``(file_count, target_dir)``.
+    Returns ``(file_count, target_subdir)``.
     """
     src = _bundled_root()
-    target = target_docs_dir / VAULT_SUBDIR
-    if target.exists():
-        shutil.rmtree(target)
-    target.mkdir(parents=True)
+
+    # Clear the existing _dosm-cli/ contents (no shutil.rmtree over SMB).
+    for name in store.child_names(VAULT_SUBDIR):
+        try:
+            store.delete(f"{VAULT_SUBDIR}/{name}")
+        except (FileNotFoundError, ValueError):
+            pass
 
     count = 0
     for top_level in ("README.md", "exit-codes.md"):
         src_file = src / top_level
         if src_file.is_file():
-            shutil.copy2(src_file, target / top_level)
+            store.write_bytes(f"{VAULT_SUBDIR}/{top_level}", src_file.read_bytes())
             count += 1
 
     generated = src / "_generated"
     for md in sorted(generated.glob("*.md")):
-        shutil.copy2(md, target / md.name)
+        store.write_bytes(f"{VAULT_SUBDIR}/{md.name}", md.read_bytes())
         count += 1
 
     # Stamp file lets `dosm init` skip re-installing on every run.
-    (target / ".dosm-cli-version").write_text(_version_stamp(), encoding="utf-8")
-    return count, target
+    store.write_bytes(f"{VAULT_SUBDIR}/.dosm-cli-version", _version_stamp().encode("utf-8"))
+    return count, VAULT_SUBDIR
 
 
 def _version_stamp() -> str:
@@ -87,14 +95,14 @@ def _version_stamp() -> str:
     return __version__ + "\n"
 
 
-def is_current(target_docs_dir: Path) -> bool:
+def is_current(store: DocsStore) -> bool:
     """True if ``_dosm-cli/`` exists and matches the running DOSM version."""
-    stamp = target_docs_dir / VAULT_SUBDIR / ".dosm-cli-version"
-    if not stamp.is_file():
+    rel = f"{VAULT_SUBDIR}/.dosm-cli-version"
+    if not store.is_file(rel):
         return False
     try:
-        return stamp.read_text(encoding="utf-8").strip() == _version_stamp().strip()
-    except OSError:
+        return store.read_text(rel).strip() == _version_stamp().strip()
+    except Exception:
         return False
 
 
