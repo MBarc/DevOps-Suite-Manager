@@ -52,7 +52,7 @@ dosm db init
 # ---------------------------------------------------------------------------
 
 if [ -n "${DOSM_ADMIN_PASSWORD:-}" ]; then
-    dosm user create admin --password "$DOSM_ADMIN_PASSWORD" 2>/dev/null || true
+    dosm user create "${DOSM_ADMIN_USERNAME:-admin}" --password "$DOSM_ADMIN_PASSWORD" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
