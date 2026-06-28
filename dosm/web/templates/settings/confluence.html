@@ -8,6 +8,7 @@
 </header>
 
 {% include "settings/_tabs.html" %}
+{% include "settings/_integrations_subtabs.html" %}
 
 <section class="card">
   <h2>Confluence listeners</h2>
@@ -21,107 +22,102 @@
   </p>
 
   {% if can_edit %}
-  <form method="post" action="/settings/confluence/new" id="add-form" style="border-left:2px solid var(--divider); padding-left:16px; margin-bottom:20px">
-    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px">
-      <div>
-        <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Name</label>
-        <input name="name" placeholder="Ops runbooks" style="width:200px" required />
-      </div>
-      <div>
-        <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Deployment</label>
-        <select name="deployment" id="deployment" style="width:200px" onchange="hintAuth()">
+  <form method="post" action="/settings/confluence/new" class="stack" id="add-form">
+    <div class="row">
+      <label style="flex:1">Name
+        <input type="text" name="name" required placeholder="Ops runbooks" />
+      </label>
+      <label style="width:220px">Deployment
+        <select name="deployment" id="deployment">
           {% for value, label in deployments.items() %}
-            <option value="{{ value }}">{{ label }}</option>
+          <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
         </select>
-      </div>
-      <div>
-        <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Space key</label>
-        <input name="space_key" placeholder="OPS" style="width:120px" required />
-      </div>
-    </div>
-
-    <div style="margin-bottom:12px">
-      <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Base URL</label>
-      <input name="base_url" id="base_url" placeholder="https://your-site.atlassian.net/wiki" style="width:420px" required />
-      <div class="muted" id="base-hint" style="font-size:11px; margin-top:4px">
-        Cloud: <code>https://&lt;site&gt;.atlassian.net/wiki</code>. Server/DC: your Confluence base URL.
-      </div>
-    </div>
-
-    <div style="margin-bottom:12px">
-      <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Credential</label>
-      <select name="credential_id" style="width:320px" required>
-        <option value="">- select a credential -</option>
-        {% for c in credentials %}
-          <option value="{{ c.id }}">{{ c.name }} ({{ c.kind }}{% if c.username %} - {{ c.username }}{% endif %})</option>
-        {% endfor %}
-      </select>
-      <div class="muted" id="cred-hint" style="font-size:11px; margin-top:4px">
-        Cloud: a <em>login</em> credential with username = your Atlassian email and the API token as the secret.
-        Server/DC: a <em>pat</em> credential holding a personal access token. Create one under
-        <a href="/credentials">Credentials</a>.
-      </div>
-    </div>
-
-    <div style="display:flex; gap:16px; align-items:center; margin-bottom:12px">
-      <label style="display:flex; align-items:center; gap:6px; cursor:pointer">
-        <input type="checkbox" name="sync_pages" value="1" checked />
-        <span style="font-size:13px">Sync pages</span>
-      </label>
-      <label style="display:flex; align-items:center; gap:6px; cursor:pointer">
-        <input type="checkbox" name="sync_attachments" value="1" checked />
-        <span style="font-size:13px">Sync attachments</span>
       </label>
     </div>
 
-    <button type="submit" class="btn">Add listener</button>
+    <div class="row" style="align-items:flex-start">
+      <label style="flex:1">Base URL
+        <input type="text" name="base_url" id="base_url" required placeholder="https://your-site.atlassian.net/wiki" />
+        <span class="field-hint">Cloud: <code>https://&lt;site&gt;.atlassian.net/wiki</code>. Server/DC: your Confluence base URL.</span>
+      </label>
+      <label style="width:160px">Space key
+        <input type="text" name="space_key" required placeholder="OPS" />
+      </label>
+    </div>
+
+    <div class="row">
+      <label style="flex:1">Credential
+        <select name="credential_id" required>
+          <option value="">- select a credential -</option>
+          {% for c in credentials %}
+          <option value="{{ c.id }}">{{ c.name }} ({{ c.kind }}{% if c.username %} · {{ c.username }}{% endif %})</option>
+          {% endfor %}
+        </select>
+        <span class="field-hint">
+          Cloud: a <em>login</em> credential with username = your Atlassian email and the API token as the secret.
+          Server/DC: a <em>pat</em> credential holding a personal access token.
+          <a href="/credentials">Manage credentials</a>.
+        </span>
+      </label>
+    </div>
+
+    <div class="row">
+      <label class="inline-check"><input type="checkbox" name="sync_pages" value="1" checked /> Sync pages</label>
+      <label class="inline-check"><input type="checkbox" name="sync_attachments" value="1" checked /> Sync attachments</label>
+    </div>
+
+    <div class="row" style="margin-top:var(--sp-2)">
+      <button type="submit">Add listener</button>
+    </div>
   </form>
   {% endif %}
+</section>
 
+<section class="card" style="padding:0; overflow:hidden">
   {% if listeners %}
-  <table class="data-table" style="width:100%">
+  <table style="width:100%; border-collapse:collapse; font-size:13px">
     <thead>
-      <tr>
-        <th>Name</th><th>Space</th><th>Deployment</th><th>Syncs</th><th>Status</th>
-        {% if can_edit %}<th style="text-align:right">Actions</th>{% endif %}
+      <tr style="border-bottom:1px solid var(--divider); text-align:left">
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Name</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Space</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Deployment</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Syncs</th>
+        <th style="padding:10px 16px; color:var(--fg-muted); font-weight:600">Status</th>
+        {% if can_edit %}<th style="padding:10px 16px; color:var(--fg-muted); font-weight:600; text-align:right">Actions</th>{% endif %}
       </tr>
     </thead>
     <tbody>
       {% for l in listeners %}
-      <tr data-id="{{ l.id }}">
-        <td>{{ l.name }}</td>
-        <td><code>{{ l.space_key }}</code></td>
-        <td>{{ deployments.get(l.deployment, l.deployment) }}</td>
-        <td style="font-size:12px">
-          {% if l.sync_pages %}pages{% endif %}{% if l.sync_pages and l.sync_attachments %} + {% endif %}{% if l.sync_attachments %}attachments{% endif %}
+      <tr style="border-top:1px solid var(--divider)">
+        <td style="padding:10px 16px; font-weight:500">{{ l.name }}</td>
+        <td style="padding:10px 16px"><code>{{ l.space_key }}</code></td>
+        <td style="padding:10px 16px; color:var(--fg-muted)">{{ deployments.get(l.deployment, l.deployment) }}</td>
+        <td style="padding:10px 16px; color:var(--fg-muted)">
+          {% if l.sync_pages %}pages{% endif %}{% if l.sync_pages and l.sync_attachments %} · {% endif %}{% if l.sync_attachments %}attachments{% endif %}
         </td>
-        <td style="font-size:12px">
-          {% if l.enabled %}
-            <span class="badge badge-green"><span class="dot"></span> enabled</span>
-          {% else %}
-            <span class="badge"><span class="dot"></span> disabled</span>
-          {% endif %}
+        <td style="padding:10px 16px">
+          {% if l.enabled %}<span style="color:var(--success,#16a34a)">●</span> on{% else %}<span style="color:var(--fg-dim)">○</span> off{% endif %}
           {% if l.last_status == 'error' %}
-            <span class="badge badge-red" title="{{ l.last_error }}">last sync failed</span>
+            <span style="color:var(--danger,#ef4444)" title="{{ l.last_error }}"> · last sync failed</span>
           {% elif l.last_synced_at %}
-            <span class="muted">synced {{ l.last_synced_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            <span style="color:var(--fg-muted)"> · synced {{ l.last_synced_at.strftime('%Y-%m-%d %H:%M') }}</span>
           {% else %}
-            <span class="muted">never synced</span>
+            <span style="color:var(--fg-dim)"> · never synced</span>
           {% endif %}
-          <span class="row-result" style="margin-left:6px"></span>
         </td>
         {% if can_edit %}
-        <td style="text-align:right; white-space:nowrap">
-          <button type="button" class="btn btn-secondary btn-sm" onclick="rowAction({{ l.id }}, 'test')">Test</button>
-          <button type="button" class="btn btn-secondary btn-sm" onclick="rowAction({{ l.id }}, 'sync-now')">Sync now</button>
+        <td style="padding:10px 16px; text-align:right; white-space:nowrap">
+          <button type="button" class="btn btn-ghost btn-sm act-btn" data-id="{{ l.id }}" data-act="test">Test</button>
+          <button type="button" class="btn btn-ghost btn-sm act-btn" data-id="{{ l.id }}" data-act="sync-now">Sync now</button>
           <form method="post" action="/settings/confluence/{{ l.id }}/toggle" style="display:inline">
-            <button type="submit" class="btn btn-secondary btn-sm">{% if l.enabled %}Disable{% else %}Enable{% endif %}</button>
+            <button type="submit" class="btn btn-ghost btn-sm">{{ 'Disable' if l.enabled else 'Enable' }}</button>
           </form>
           <form method="post" action="/settings/confluence/{{ l.id }}/delete" style="display:inline"
                 onsubmit="return confirm('Delete listener {{ l.name }}? Synced docs are left in place.')">
-            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
           </form>
+          <span class="act-result" data-id="{{ l.id }}" style="font-size:12px; margin-left:8px"></span>
         </td>
         {% endif %}
       </tr>
@@ -129,31 +125,40 @@
     </tbody>
   </table>
   {% else %}
-  <p class="muted">No listeners yet.{% if can_edit %} Add one above.{% endif %}</p>
+  <div class="empty-state" style="padding:40px 24px">No listeners yet.{% if can_edit %} Add one above.{% endif %}</div>
   {% endif %}
 </section>
 
 <script>
-function hintAuth() {
-  const dep = document.getElementById('deployment').value;
-  const base = document.getElementById('base_url');
-  if (dep === 'cloud' && !base.value) base.placeholder = 'https://your-site.atlassian.net/wiki';
-  if (dep === 'server' && !base.value) base.placeholder = 'https://confluence.your-company.com';
-}
-async function rowAction(id, action) {
-  const row = document.querySelector('tr[data-id="' + id + '"]');
-  const out = row.querySelector('.row-result');
-  out.textContent = action === 'test' ? 'Testing...' : 'Syncing...';
-  out.style.color = 'var(--fg-muted)';
-  try {
-    const resp = await fetch('/settings/confluence/' + id + '/' + action, { method: 'POST' });
-    const j = await resp.json();
-    out.style.color = j.ok ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)';
-    out.textContent = (j.ok ? 'OK - ' : 'Failed: ') + j.message;
-  } catch (e) {
-    out.style.color = 'var(--danger,#dc2626)';
-    out.textContent = 'Request failed: ' + e;
+(function () {
+  // Nudge the base-URL placeholder to match the chosen deployment.
+  var dep = document.getElementById('deployment');
+  var base = document.getElementById('base_url');
+  if (dep && base) {
+    dep.addEventListener('change', function () {
+      base.placeholder = dep.value === 'server'
+        ? 'https://confluence.your-company.com'
+        : 'https://your-site.atlassian.net/wiki';
+    });
   }
-}
+  // Inline Test / Sync now.
+  document.querySelectorAll('.act-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      var id = btn.dataset.id, act = btn.dataset.act;
+      var out = document.querySelector('.act-result[data-id="' + id + '"]');
+      out.textContent = act === 'test' ? 'Testing…' : 'Syncing…';
+      out.style.color = 'var(--fg-muted)';
+      try {
+        var res = await fetch('/settings/confluence/' + id + '/' + act, {method: 'POST'});
+        var d = await res.json();
+        out.textContent = (d.ok ? '✓ ' : '✗ ') + d.message;
+        out.style.color = d.ok ? 'var(--success,#16a34a)' : 'var(--danger,#ef4444)';
+      } catch (e) {
+        out.textContent = '✗ ' + e;
+        out.style.color = 'var(--danger,#ef4444)';
+      }
+    });
+  });
+})();
 </script>
 {% endblock %}

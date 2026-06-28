@@ -1,0 +1,12 @@
+{# Sub-tabs for the Integrations section (Guacamole + nested Confluence). #}
+{% set sp = request.url.path %}
+{% macro _subtab(href, label, active) %}
+  <a href="{{ href }}" style="padding:5px 13px; font-size:12.5px; font-weight:500; text-decoration:none;
+     border-radius:var(--r-pill); border:1px solid {{ 'transparent' if active else 'var(--border)' }};
+     color:{{ 'var(--accent-fg,#fff)' if active else 'var(--fg-muted)' }};
+     background:{{ 'var(--accent,#6366f1)' if active else 'transparent' }}">{{ label }}</a>
+{% endmacro %}
+<div style="display:flex; gap:8px; margin-bottom:16px">
+  {{ _subtab('/settings/integrations', 'Guacamole', sp.startswith('/settings/integrations')) }}
+  {{ _subtab('/settings/confluence', 'Confluence', sp.startswith('/settings/confluence')) }}
+</div>

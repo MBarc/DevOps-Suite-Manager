@@ -4,13 +4,14 @@
 {% endmacro %}
 <div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--divider); flex-wrap:wrap">
   {{ _tab('/settings', 'Terminal launchers', p == '/settings') }}
-  {{ _tab('/settings/integrations', 'Integrations', p.startswith('/settings/integrations')) }}
+  {# Confluence is nested under Integrations (see _integrations_subtabs.html), so
+     the Integrations tab stays active on /settings/confluence too. #}
+  {{ _tab('/settings/integrations', 'Integrations', p.startswith('/settings/integrations') or p.startswith('/settings/confluence')) }}
   {{ _tab('/settings/docs-source', 'Docs source', p.startswith('/settings/docs-source')) }}
-  {{ _tab('/settings/confluence', 'Confluence', p.startswith('/settings/confluence')) }}
   {{ _tab('/settings/rbac', 'Access control', p.startswith('/settings/rbac')) }}
   {{ _tab('/settings/members', 'Members', p.startswith('/settings/members')) }}
-  {{ _tab('/settings/audit', 'Audit log', p.startswith('/settings/audit')) }}
   {% if user is defined and user and user.role == 'platform_admin' %}
     {{ _tab('/settings/tenants', 'Tenants', p.startswith('/settings/tenants')) }}
   {% endif %}
+  {{ _tab('/settings/audit', 'Audit log', p.startswith('/settings/audit')) }}
 </div>

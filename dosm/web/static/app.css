@@ -396,6 +396,7 @@ label {
   letter-spacing: 0.02em;
 }
 input[type="text"], input[type="password"], input[type="number"], input[type="search"],
+input[type="url"], input[type="email"], input[type="tel"],
 input[type="date"], input[type="datetime-local"],
 textarea, select {
   background: var(--bg-elev-3);

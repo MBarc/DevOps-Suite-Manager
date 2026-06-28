@@ -27,46 +27,39 @@
     across hosts. Switching source takes effect after a restart.
   </p>
 
-  <form method="post" action="/settings/docs-source" id="docs-source-form">
-    <div style="margin-bottom:16px">
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:6px">
-        <input type="radio" name="source" value="local" {% if di.source != 'smb' %}checked{% endif %}
-               onchange="toggleSmb()" />
-        <span style="font-weight:500">Local filesystem</span>
+  <form method="post" action="/settings/docs-source" id="docs-source-form" class="stack">
+    <div class="stack" style="gap:var(--sp-2)">
+      <label class="inline-check" style="cursor:pointer">
+        <input type="radio" name="source" value="local" {% if di.source != 'smb' %}checked{% endif %} onchange="toggleSmb()" />
+        <span style="font-weight:500; color:var(--fg-strong)">Local filesystem</span>
         <span class="muted" style="font-size:12px">($DOSM_HOME/docs)</span>
       </label>
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
-        <input type="radio" name="source" value="smb" {% if di.source == 'smb' %}checked{% endif %}
-               onchange="toggleSmb()" />
-        <span style="font-weight:500">SMB network drive</span>
+      <label class="inline-check" style="cursor:pointer">
+        <input type="radio" name="source" value="smb" {% if di.source == 'smb' %}checked{% endif %} onchange="toggleSmb()" />
+        <span style="font-weight:500; color:var(--fg-strong)">SMB network drive</span>
       </label>
     </div>
 
-    <div id="smb-fields" style="border-left:2px solid var(--divider); padding-left:16px; margin-bottom:16px">
-      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px">
-        <div>
-          <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Server</label>
-          <input name="server" value="{{ smb.server }}" placeholder="fileserver.corp.local" style="width:240px" />
-        </div>
-        <div>
-          <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Share</label>
-          <input name="share" value="{{ smb.share }}" placeholder="docs" style="width:160px" />
-        </div>
-        <div>
-          <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Port</label>
-          <input name="port" type="number" value="{{ smb.port }}" style="width:90px" />
-        </div>
+    <div id="smb-fields" class="stack" style="border-left:2px solid var(--divider); padding-left:16px">
+      <div class="row">
+        <label style="flex:1; max-width:260px">Server
+          <input type="text" name="server" value="{{ smb.server }}" placeholder="fileserver.corp.local" />
+        </label>
+        <label style="width:170px">Share
+          <input type="text" name="share" value="{{ smb.share }}" placeholder="docs" />
+        </label>
+        <label style="width:110px">Port
+          <input type="number" name="port" value="{{ smb.port }}" />
+        </label>
       </div>
 
-      <div style="margin-bottom:12px">
-        <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Base path within share</label>
-        <input name="base_path" value="{{ smb.base_path }}" placeholder="(optional) e.g. teams/ops/docs" style="width:380px" />
-        <div class="muted" style="font-size:11px; margin-top:4px">Subfolder of the share that is the docs root. Leave blank for the share root.</div>
-      </div>
+      <label>Base path within share
+        <input type="text" name="base_path" value="{{ smb.base_path }}" placeholder="(optional) e.g. teams/ops/docs" />
+        <span class="field-hint">Subfolder of the share that is the docs root. Leave blank for the share root.</span>
+      </label>
 
-      <div style="margin-bottom:12px">
-        <label style="display:block; font-size:12px; font-weight:500; margin-bottom:4px">Credential (login)</label>
-        <select name="credential_id" style="width:320px">
+      <label>Credential (login)
+        <select name="credential_id">
           <option value="">- select a login credential -</option>
           {% for c in login_creds %}
             <option value="{{ c.id }}" {% if smb.credential_id == c.id %}selected{% endif %}>
@@ -74,30 +67,31 @@
             </option>
           {% endfor %}
         </select>
-        <div class="muted" style="font-size:11px; margin-top:4px">
+        <span class="field-hint">
           A <em>login</em> credential (username + domain + password). The password stays in the secrets
-          backend. Create one under <a href="/credentials">Credentials</a> if the list is empty.
-        </div>
-      </div>
+          backend. <a href="/credentials">Manage credentials</a> if the list is empty.
+        </span>
+      </label>
 
-      <div style="display:flex; gap:16px; align-items:center; margin-bottom:12px">
-        <label style="display:flex; align-items:center; gap:6px; cursor:pointer">
+      <div class="row" style="align-items:center">
+        <label class="inline-check" style="cursor:pointer">
           <input type="checkbox" name="encrypt" value="1" {% if smb.encrypt %}checked{% endif %} />
-          <span style="font-size:13px">Encrypt SMB traffic (SMB3)</span>
+          Encrypt SMB traffic (SMB3)
         </label>
-        <div>
-          <label style="font-size:12px; font-weight:500; margin-right:6px">Poll interval (s)</label>
-          <input name="poll_interval_seconds" type="number" step="1" value="{{ smb.poll_interval_seconds }}" style="width:80px" />
-        </div>
+        <label style="width:150px">Poll interval (s)
+          <input type="number" name="poll_interval_seconds" step="1" value="{{ smb.poll_interval_seconds }}" />
+        </label>
       </div>
 
-      <div style="display:flex; gap:10px; align-items:center">
-        <button type="button" class="btn btn-secondary" onclick="testConn()">Test connection</button>
+      <div class="row" style="align-items:center">
+        <button type="button" class="btn btn-ghost" onclick="testConn()">Test connection</button>
         <span id="test-result" style="font-size:12px"></span>
       </div>
     </div>
 
-    <button type="submit" class="btn">Save</button>
+    <div>
+      <button type="submit">Save</button>
+    </div>
   </form>
 </section>
 
@@ -119,11 +113,11 @@ async function testConn() {
       out.style.color = 'var(--success,#16a34a)';
       out.textContent = 'OK - ' + j.message + (j.sample && j.sample.length ? ' (' + j.sample.length + '+ files)' : ' (empty)');
     } else {
-      out.style.color = 'var(--danger,#dc2626)';
+      out.style.color = 'var(--danger,#ef4444)';
       out.textContent = 'Failed: ' + j.message;
     }
   } catch (e) {
-    out.style.color = 'var(--danger,#dc2626)';
+    out.style.color = 'var(--danger,#ef4444)';
     out.textContent = 'Request failed: ' + e;
   }
 }
