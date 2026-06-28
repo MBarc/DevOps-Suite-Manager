@@ -186,3 +186,28 @@ def test_rbac_settings_admin_only(app, session_factory):
     assert op.post("/settings/rbac/mapping",
                    data={"group": "X"}, follow_redirects=False).status_code == 403
     assert op.get("/settings/rbac/export.csv", follow_redirects=False).status_code == 403
+
+
+def test_members_export_csv(auth_client):
+    r = auth_client.get("/settings/members/export.csv")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    rows = list(csv.DictReader(io.StringIO(r.text)))
+    me = next(row for row in rows if row["username"] == "testadmin")
+    assert me["role"] == "tenant_admin"
+    assert me["tenant"]  # assigned tenant name is populated
+    assert "role_locked" in me  # permissions column present
+
+
+def test_members_export_json(auth_client):
+    r = auth_client.get("/settings/members/export.json")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    me = next(row for row in json.loads(r.text) if row["username"] == "testadmin")
+    assert me["role"] == "tenant_admin"
+
+
+def test_members_export_admin_only(app, session_factory):
+    op = _operator_client(app, session_factory)
+    assert op.get("/settings/members/export.csv", follow_redirects=False).status_code == 403
+    assert op.get("/settings/members/export.json", follow_redirects=False).status_code == 403

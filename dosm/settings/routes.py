@@ -578,6 +578,74 @@ async def members_page(
     )
 
 
+# Columns for the members export (CSV header order + JSON keys).
+_MEMBER_FIELDS = [
+    "username", "display_name", "email", "role", "role_locked",
+    "tenant", "auth_provider", "active", "last_login",
+]
+
+
+def _member_rows(db: Session, user: User, tid: int | None) -> list[dict]:
+    """Flatten the scoped member list for CSV/JSON export. Scope matches the
+    members page: a platform admin gets every tenant; a tenant admin only theirs."""
+    stmt = select(User).order_by(User.username)
+    if not is_platform_admin(user):
+        stmt = stmt.where(User.tenant_id == tid)
+    tenant_names = _tenant_names(db)
+    rows = []
+    for u in db.execute(stmt).scalars():
+        rows.append({
+            "username": u.username,
+            "display_name": u.display_name or "",
+            "email": u.email or "",
+            "role": u.role,
+            "role_locked": u.role_locked,
+            "tenant": tenant_names.get(u.tenant_id, "") if u.tenant_id else "(platform)",
+            "auth_provider": u.auth_provider,
+            "active": u.is_active,
+            "last_login": u.last_login.strftime("%Y-%m-%dT%H:%M:%SZ") if u.last_login else "",
+        })
+    return rows
+
+
+@router.get("/members/export.json", include_in_schema=False)
+async def members_export_json(
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
+    rows = _member_rows(db, user, tid)
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="members.export",
+                    target="format:json", details=f"{len(rows)} members"))
+    db.commit()
+    return Response(
+        content=json.dumps(rows, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="dosm-members.json"'},
+    )
+
+
+@router.get("/members/export.csv", include_in_schema=False)
+async def members_export_csv(
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
+    rows = _member_rows(db, user, tid)
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_MEMBER_FIELDS)
+    writer.writeheader()
+    writer.writerows(rows)
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="members.export",
+                    target="format:csv", details=f"{len(rows)} members"))
+    db.commit()
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="dosm-members.csv"'},
+    )
+
+
 @router.post("/members/{user_id}/role", include_in_schema=False)
 async def member_set_role(
     user_id: int,
