@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Files | DOSM{% endblock %}
+{% block title %}File Transfer | DOSM{% endblock %}
 {% block content %}
 <style>
   .ft-list { display:flex; flex-direction:column; gap:8px; }
@@ -32,6 +32,10 @@
     <div class="subtitle">Browse and transfer files on FTP, FTPS, and SFTP hosts.</div>
   </div>
   <div class="actions">
+    <div class="ex-viewtoggle" role="tablist" aria-label="View mode">
+      <a href="/files?view=explorer">Explorer</a>
+      <a class="active" href="/files?view=table" aria-selected="true">List</a>
+    </div>
     <a class="btn btn-subtle" href="/hosts">Manage hosts</a>
   </div>
 </header>

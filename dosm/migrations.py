@@ -351,6 +351,22 @@ def run_migrations(engine: Engine) -> list[str]:
         "org_unit_id INTEGER REFERENCES org_units(id) ON DELETE SET NULL",
     ):
         applied.append("hosts.org_unit_id")
+    # Same org-tree placement for pipelines + credentials (shared tree, so they
+    # file into the same application -> environment -> unit folders as hosts).
+    if _add_column_if_missing(
+        engine,
+        "pipelines",
+        "org_unit_id",
+        "org_unit_id INTEGER REFERENCES org_units(id) ON DELETE SET NULL",
+    ):
+        applied.append("pipelines.org_unit_id")
+    if _add_column_if_missing(
+        engine,
+        "credentials",
+        "org_unit_id",
+        "org_unit_id INTEGER REFERENCES org_units(id) ON DELETE SET NULL",
+    ):
+        applied.append("credentials.org_unit_id")
     # Phase 15 - Documentation vault: application taxonomy on documents
     # Note: SQLite ALTER TABLE ADD COLUMN does not enforce FK constraints;
     # the ORM relationship provides the association at the Python level.

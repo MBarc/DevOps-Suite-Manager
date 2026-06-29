@@ -43,6 +43,7 @@ from dosm.pipelines import pipelines_router
 from dosm.pipelines.poller import pipeline_poll_loop
 from dosm.confluence.routes import router as confluence_router
 from dosm.confluence.poller import confluence_poll_loop
+from dosm.inventory import inventory_router
 from dosm.recording import recording_router
 from dosm.recording.routes import abort_stale_recordings
 from dosm.settings import settings_router
@@ -192,6 +193,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(credentials_router)
     app.include_router(hosts_router)
+    app.include_router(inventory_router)
     app.include_router(applications_router)
     # Always mount /hosts/{id}/connect; the route itself handles the
     # guacamole.enabled=false case with a friendly error page.

@@ -132,27 +132,40 @@ def subtree_ids(db: Session, unit: OrgUnit) -> list[int]:
     return ids
 
 
-def direct_host_counts(db: Session, tid: int | None) -> dict[int, int]:
-    """Map of org_unit_id -> number of hosts assigned *directly* to that node,
-    within tenant ``tid``."""
+def direct_counts(db: Session, tid: int | None, model, extra=None) -> dict[int, int]:
+    """Map of org_unit_id -> number of ``model`` rows assigned *directly* to that
+    node, within tenant ``tid``. ``model`` is any org-aware table (Host, Pipeline,
+    Credential); ``extra`` is an optional additional WHERE clause (e.g. a
+    visibility filter or ``Host.ft_method.is_not(None)``)."""
     stmt = (
-        select(Host.org_unit_id, func.count(Host.id))
-        .where(Host.org_unit_id.is_not(None))
-        .group_by(Host.org_unit_id)
+        select(model.org_unit_id, func.count(model.id))
+        .where(model.org_unit_id.is_not(None))
+        .group_by(model.org_unit_id)
     )
-    clause = tenant_clause(Host, tid)
+    clause = tenant_clause(model, tid)
     if clause is not None:
         stmt = stmt.where(clause)
+    if extra is not None:
+        stmt = stmt.where(extra)
     rows = db.execute(stmt).all()
     return {uid: n for uid, n in rows}
 
 
-def build_tree(db: Session, tid: int | None) -> list[dict]:
-    """Nested render structure: each node carries direct + rolled-up host counts.
+def direct_host_counts(db: Session, tid: int | None) -> dict[int, int]:
+    """Hosts assigned directly to each node (back-compat wrapper)."""
+    return direct_counts(db, tid, Host)
+
+
+def build_tree(db: Session, tid: int | None, counts: dict[int, int] | None = None) -> list[dict]:
+    """Nested render structure: each node carries direct + rolled-up counts.
 
     [{"unit": OrgUnit, "direct": int, "total": int, "children": [...]}, ...]
+
+    ``counts`` is a precomputed ``{org_unit_id: direct_count}`` map (from
+    ``direct_counts`` for the relevant resource); when None it defaults to host
+    counts so existing Hosts callers are unchanged.
     """
-    direct = direct_host_counts(db, tid)
+    direct = direct_host_counts(db, tid) if counts is None else counts
     apps = list_applications(db, tid)
 
     def node(u: OrgUnit) -> dict:
@@ -260,11 +273,18 @@ def delete_unit(db: Session, unit: OrgUnit) -> None:
     db.flush()
 
 
-def assign_host(db: Session, host: Host, org_unit_id: int | None) -> None:
-    """Assign ``host`` to an org unit in the *same tenant* (or clear it)."""
+def assign_to_unit(db: Session, obj, org_unit_id: int | None) -> None:
+    """Assign any org-aware row (host / pipeline / credential) to an org unit in
+    the *same tenant* (or clear it). ``obj`` must have ``.tenant_id`` and
+    ``.org_unit_id``."""
     if org_unit_id is not None:
         unit = db.get(OrgUnit, org_unit_id)
-        if unit is None or unit.tenant_id != host.tenant_id:
+        if unit is None or unit.tenant_id != obj.tenant_id:
             raise OrgValidationError("Org unit not found.")
-    host.org_unit_id = org_unit_id
+    obj.org_unit_id = org_unit_id
     db.flush()
+
+
+def assign_host(db: Session, host: Host, org_unit_id: int | None) -> None:
+    """Assign ``host`` to an org unit in the *same tenant* (or clear it)."""
+    assign_to_unit(db, host, org_unit_id)

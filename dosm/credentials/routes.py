@@ -4,15 +4,18 @@ import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dosm.applications import repo as org_repo
 from dosm.auth.deps import require_operator, require_user
+from dosm.auth.prefs import get_pref, set_pref
 from dosm.auth.tenancy import active_tenant_id, require_active_tenant
 from dosm.credentials.access import (
     can_see_credential,
+    visible_credentials_filter,
     visible_credentials_query,
 )
 from dosm.db import get_session
@@ -22,6 +25,10 @@ from dosm.secrets import SecretNotFound, get_backend
 VISIBILITIES = ("shared", "private")
 
 router = APIRouter(prefix="/credentials")
+
+
+def _parse_int_or_none(v: str) -> int | None:
+    return int(v) if (v or "").strip() else None
 
 CRED_KINDS = ("login", "ssh_key", "pat", "azure_sp", "aws_keys", "gcp_sa")
 
@@ -73,6 +80,15 @@ async def credentials_list(
     user: User = Depends(require_user),
     tid: int | None = Depends(active_tenant_id),
 ):
+    ou_id = _parse_int_or_none(request.query_params.get("org_unit_id", ""))
+    view = request.query_params.get("view", "")
+    if view in ("explorer", "table"):
+        set_pref(db, user, "credentials_view", view)
+    else:
+        view = get_pref(user, "credentials_view", "explorer") or "explorer"
+    if view not in ("explorer", "table"):
+        view = "explorer"
+
     rows = list(db.execute(visible_credentials_query(user, tid)).scalars())
     enriched = []
     for c in rows:
@@ -82,9 +98,49 @@ async def credentials_list(
                 "host_count": _hosts_using(db, c.id),
             }
         )
+
+    if view == "explorer":
+        vclause = visible_credentials_filter(user)
+        extra = None if vclause is True else vclause
+        tree = org_repo.build_tree(
+            db, tid, counts=org_repo.direct_counts(db, tid, Credential, extra=extra))
+        n_unassigned = sum(1 for c in rows if c.org_unit_id is None)
+        return _templates(request).TemplateResponse(
+            request, "credentials/explorer.html", {
+                "rows": enriched, "tree": tree,
+                "n_total": len(rows), "n_unassigned": n_unassigned,
+                "initial_org_unit_id": ou_id, "user": user,
+            })
     return _templates(request).TemplateResponse(
         request, "credentials/list.html", {"rows": enriched, "user": user}
     )
+
+
+@router.post("/{cred_id}/assign-org", include_in_schema=False)
+async def credentials_assign_org(
+    cred_id: int,
+    org_unit_id: str = Form(""),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
+) -> JSONResponse:
+    """Reassign a credential's org folder (explorer drag-and-drop). Empty
+    ``org_unit_id`` clears it."""
+    cred = _get_credential(db, cred_id, tid)
+    if cred is None or not can_see_credential(user, cred):
+        raise HTTPException(404)
+    oid = _parse_int_or_none(org_unit_id)
+    try:
+        org_repo.assign_to_unit(db, cred, oid)
+    except org_repo.OrgValidationError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    unit = org_repo.get_unit(db, oid, cred.tenant_id) if oid else None
+    path = unit.path_str if unit else None
+    db.add(AuditLog(tenant_id=cred.tenant_id, actor_id=user.id, action="credential.update",
+                    target=f"credential:{cred.id}", details=f"org-assign -> {path or 'unassigned'}"))
+    db.commit()
+    return JSONResponse({"ok": True, "org_unit_id": oid, "path": path})
 
 
 def _form_context(host=None, error: str | None = None, secret_present: bool = False, **overrides) -> dict:
@@ -102,12 +158,16 @@ def _form_context(host=None, error: str | None = None, secret_present: bool = Fa
 @router.get("/new", response_class=HTMLResponse, include_in_schema=False)
 async def credentials_new(
     request: Request,
+    org_unit_id: str = "",
+    db: Session = Depends(get_session),
     user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
 ):
     return _templates(request).TemplateResponse(
         request,
         "credentials/form.html",
-        _form_context(user=user),
+        _form_context(user=user, org_units=org_repo.list_units(db, tid),
+                      preset_org_unit_id=_parse_int_or_none(org_unit_id)),
     )
 
 
@@ -120,6 +180,7 @@ async def credentials_create(
     domain: str = Form(""),
     secret_ref: str = Form(""),
     secret_value: str = Form(""),
+    org_unit_id: str = Form(""),
     visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
@@ -152,6 +213,7 @@ async def credentials_create(
         username=username.strip() or None,
         domain=domain.strip() or None,
         secret_ref=secret_ref,
+        org_unit_id=_parse_int_or_none(org_unit_id),
         owner_id=user.id,
         visibility=visibility,
     )
@@ -244,7 +306,8 @@ async def credentials_edit(
     return _templates(request).TemplateResponse(
         request,
         "credentials/form.html",
-        _form_context(host=cred, user=user),
+        _form_context(host=cred, user=user, org_units=org_repo.list_units(db, tid),
+                      preset_org_unit_id=cred.org_unit_id),
     )
 
 
@@ -257,6 +320,7 @@ async def credentials_update(
     username: str = Form(""),
     domain: str = Form(""),
     secret_value: str = Form(""),
+    org_unit_id: str = Form(""),
     visibility: str = Form(""),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
@@ -279,6 +343,7 @@ async def credentials_update(
     cred.kind = kind
     cred.username = username.strip() or None
     cred.domain = domain.strip() or None
+    cred.org_unit_id = _parse_int_or_none(org_unit_id)
     cred.visibility = new_visibility
     # secret_ref is immutable after creation - keeps existing value
     cred.updated_at = datetime.now(UTC)

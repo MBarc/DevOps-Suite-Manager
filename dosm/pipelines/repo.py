@@ -82,6 +82,7 @@ def create_pipeline(
     config: dict,
     inputs_schema: list[dict] | None,
     credential_id: int | None,
+    org_unit_id: int | None = None,
     owner_id: int | None = None,
     visibility: str = "shared",
 ) -> Pipeline:
@@ -95,6 +96,7 @@ def create_pipeline(
         config=json.dumps(cfg_norm),
         inputs_schema=json.dumps(inputs_schema) if inputs_schema else None,
         credential_id=credential_id,
+        org_unit_id=org_unit_id,
         owner_id=owner_id,
         visibility=visibility if visibility in ("shared", "private") else "shared",
     )
@@ -113,6 +115,7 @@ def update_pipeline(
     config: dict,
     inputs_schema: list[dict] | None,
     credential_id: int | None,
+    org_unit_id: int | None = None,
     visibility: str | None = None,
 ) -> Pipeline:
     adapter = get_adapter(provider)
@@ -123,6 +126,7 @@ def update_pipeline(
     pipeline.config = json.dumps(cfg_norm)
     pipeline.inputs_schema = json.dumps(inputs_schema) if inputs_schema else None
     pipeline.credential_id = credential_id
+    pipeline.org_unit_id = org_unit_id
     if visibility is not None and visibility in ("shared", "private"):
         pipeline.visibility = visibility
     db.flush()

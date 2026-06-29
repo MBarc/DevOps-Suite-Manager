@@ -3,15 +3,17 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dosm.applications import repo as org_repo
 from dosm.auth.deps import require_operator, require_user, user_has_role
+from dosm.auth.prefs import get_pref, set_pref
 from dosm.auth.tenancy import active_tenant_id, require_active_tenant
 from dosm.db import get_session
 from dosm.hosts import repo as hosts_repo  # for credential helpers reuse
-from dosm.models import AuditLog, User
+from dosm.models import AuditLog, Pipeline, User
 from dosm.pipelines import repo
 from dosm.pipelines.adapters import PipelineProviderError, get_adapter, list_providers
 from dosm.pipelines.inputs import (
@@ -44,7 +46,8 @@ def _pipeline_or_404(db: Session, pid: int, tid: int | None, user: User):
     return p
 
 
-def _form_context(db: Session, user: User, tid: int | None, pipeline=None, error: str | None = None) -> dict:
+def _form_context(db: Session, user: User, tid: int | None, pipeline=None,
+                  error: str | None = None, preset_org_unit_id: int | None = None) -> dict:
     cfg: dict = {}
     schema: list = []
     if pipeline is not None:
@@ -72,6 +75,8 @@ def _form_context(db: Session, user: User, tid: int | None, pipeline=None, error
         "cred_hints": cred_hints,
         "selected_provider": selected,
         "credentials": hosts_repo.list_credentials(db, tid),
+        "org_units": org_repo.list_units(db, tid),
+        "preset_org_unit_id": pipeline.org_unit_id if pipeline is not None else preset_org_unit_id,
         "user": user,
         "error": error,
     }
@@ -125,6 +130,16 @@ async def pipelines_list(
     user: User = Depends(require_user),
     tid: int | None = Depends(active_tenant_id),
 ):
+    ou_id = _parse_int_or_none(request.query_params.get("org_unit_id", ""))
+    # View mode (explorer tree, or the classic table) is a per-user pref.
+    view = request.query_params.get("view", "")
+    if view in ("explorer", "table"):
+        set_pref(db, user, "pipelines_view", view)
+    else:
+        view = get_pref(user, "pipelines_view", "explorer") or "explorer"
+    if view not in ("explorer", "table"):
+        view = "explorer"
+
     pipelines = repo.list_pipelines(db, tid, user)
     enriched = []
     for p in pipelines:
@@ -139,6 +154,20 @@ async def pipelines_list(
             provider_name = p.provider
         enriched.append({"p": p, "latest": latest[0] if latest else None,
                          "cfg": cfg, "summary": summary, "provider_name": provider_name})
+
+    if view == "explorer":
+        from dosm.pipelines.access import visible_pipelines_filter
+        vclause = visible_pipelines_filter(user)
+        extra = None if vclause is True else vclause
+        tree = org_repo.build_tree(
+            db, tid, counts=org_repo.direct_counts(db, tid, Pipeline, extra=extra))
+        n_unassigned = sum(1 for p in pipelines if p.org_unit_id is None)
+        return _templates(request).TemplateResponse(
+            request, "pipelines/explorer.html", {
+                "rows": enriched, "tree": tree,
+                "n_total": len(pipelines), "n_unassigned": n_unassigned,
+                "initial_org_unit_id": ou_id, "user": user,
+            })
     return _templates(request).TemplateResponse(
         request, "pipelines/list.html", {"rows": enriched, "user": user}
     )
@@ -147,12 +176,14 @@ async def pipelines_list(
 @router.get("/new", response_class=HTMLResponse, include_in_schema=False)
 async def pipelines_new(
     request: Request,
+    org_unit_id: str = "",
     db: Session = Depends(get_session),
     user: User = Depends(require_user),
     tid: int | None = Depends(active_tenant_id),
 ):
     return _templates(request).TemplateResponse(
-        request, "pipelines/form.html", _form_context(db, user, tid)
+        request, "pipelines/form.html",
+        _form_context(db, user, tid, preset_org_unit_id=_parse_int_or_none(org_unit_id)),
     )
 
 
@@ -163,6 +194,7 @@ async def pipelines_create(
     provider: str = Form("github_actions"),
     description: str = Form(""),
     credential_id: str = Form(""),
+    org_unit_id: str = Form(""),
     visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
@@ -181,6 +213,7 @@ async def pipelines_create(
             config={k: v for k, v in config.items() if v not in (None, "")},
             inputs_schema=schema_rows,
             credential_id=_parse_int_or_none(credential_id),
+            org_unit_id=_parse_int_or_none(org_unit_id),
             owner_id=user.id,
             visibility=visibility,
         )
@@ -202,6 +235,31 @@ async def pipelines_create(
         )
     )
     return RedirectResponse(f"/pipelines/{p.id}", status_code=303)
+
+
+@router.post("/{pid}/assign-org", include_in_schema=False)
+async def pipelines_assign_org(
+    pid: int,
+    org_unit_id: str = Form(""),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_operator),
+    tid: int | None = Depends(active_tenant_id),
+) -> JSONResponse:
+    """Reassign a pipeline's org folder (explorer drag-and-drop). Empty
+    ``org_unit_id`` clears it. Returns JSON so the card + counts update in place."""
+    p = _pipeline_or_404(db, pid, tid, user)
+    oid = _parse_int_or_none(org_unit_id)
+    try:
+        org_repo.assign_to_unit(db, p, oid)
+    except org_repo.OrgValidationError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    unit = org_repo.get_unit(db, oid, p.tenant_id) if oid else None
+    path = unit.path_str if unit else None
+    db.add(AuditLog(tenant_id=p.tenant_id, actor_id=user.id, action="pipeline.update",
+                    target=f"pipeline:{p.id}", details=f"org-assign -> {path or 'unassigned'}"))
+    db.commit()
+    return JSONResponse({"ok": True, "org_unit_id": oid, "path": path})
 
 
 @router.get("/{pid}", response_class=HTMLResponse, include_in_schema=False)
@@ -275,6 +333,7 @@ async def pipelines_update(
     provider: str = Form("github_actions"),
     description: str = Form(""),
     credential_id: str = Form(""),
+    org_unit_id: str = Form(""),
     visibility: str = Form("shared"),
     db: Session = Depends(get_session),
     user: User = Depends(require_operator),
@@ -294,6 +353,7 @@ async def pipelines_update(
             config={k: v for k, v in config.items() if v not in (None, "")},
             inputs_schema=schema_rows,
             credential_id=_parse_int_or_none(credential_id),
+            org_unit_id=_parse_int_or_none(org_unit_id),
             visibility=visibility,
         )
     except (IntegrityError, PipelineProviderError) as e:

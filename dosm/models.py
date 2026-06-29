@@ -161,9 +161,17 @@ class Credential(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="shared")
+    # Org placement in the shared application -> environment -> unit tree.
+    org_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("org_units.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    org_unit: Mapped["OrgUnit | None"] = relationship(
+        "OrgUnit", foreign_keys=lambda: [Credential.org_unit_id], lazy="selectin"
     )
 
 
@@ -614,12 +622,19 @@ class Pipeline(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="shared")
+    # Org placement in the shared application -> environment -> unit tree.
+    org_unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("org_units.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
     credential: Mapped[Credential | None] = relationship("Credential")
+    org_unit: Mapped["OrgUnit | None"] = relationship(
+        "OrgUnit", foreign_keys=lambda: [Pipeline.org_unit_id], lazy="selectin"
+    )
 
 
 class PipelineRun(Base):

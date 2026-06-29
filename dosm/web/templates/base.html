@@ -19,10 +19,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
         Dashboard
       </a>
-      <a href="/hosts" class="{% if path.startswith('/hosts') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="0.9"/><circle cx="7" cy="17" r="0.9"/></svg>
-        Hosts
+      <a href="/inventory" class="{% if path.startswith('/inventory') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-5 9 5-9 5-9-5z"/><path d="M3 9v6l9 5 9-5V9"/><path d="M12 14v6"/></svg>
+        Inventory
       </a>
+      {# Hosts / Pipelines / Credentials are now unified under the Inventory blade
+         above. Their detail/create/edit/connect/run pages still live at /hosts,
+         /pipelines, /credentials (linked from Inventory cards) - only the
+         top-level nav entries were retired. #}
       {% if user is defined and user and user.role in ('tenant_admin', 'platform_admin') %}
       <a href="/files" class="{% if path.startswith('/files') %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 11h18"/></svg>
@@ -35,14 +39,6 @@
         Terminals
       </a>
       {% endif %}
-      <a href="/pipelines" class="{% if path.startswith('/pipelines') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l3 4h9"/><path d="M3 17h6l3-4"/><circle cx="3" cy="7" r="1.5"/><circle cx="3" cy="17" r="1.5"/><circle cx="21" cy="11" r="1.5"/></svg>
-        Pipelines
-      </a>
-      <a href="/credentials" class="{% if path.startswith('/credentials') %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="M12 12l8-8M16 8l3 3"/></svg>
-        Credentials
-      </a>
 
       <div class="sidebar-section-label">Monitoring</div>
       <a href="/monitoring" class="{% if path.startswith('/monitoring') %}active{% endif %}">

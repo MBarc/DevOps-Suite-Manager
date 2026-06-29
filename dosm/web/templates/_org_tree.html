@@ -1,0 +1,55 @@
+{# Shared org-tree pane for explorer views (hosts has its own inline copy).
+   Import with: {% import "_org_tree.html" as orgtree %}
+   then render: {{ orgtree.tree_pane(tree, n_total, n_unassigned, can_edit, "hint") }}
+   The tree nodes render OrgUnit folders with rolled-up counts. #}
+
+{% macro tree_node(n, can_edit) %}
+<li class="tree-node" data-id="{{ n.unit.id }}" data-tier="{{ n.unit.tier }}" data-name="{{ n.unit.name }}" data-desc="{{ n.unit.description or '' }}">
+  <div class="tree-row" tabindex="0" role="treeitem">
+    {% if n.children %}
+      <button type="button" class="tree-caret" aria-label="Expand/collapse"></button>
+    {% else %}
+      <span class="tree-caret-sp"></span>
+    {% endif %}
+    <svg class="tree-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    <span class="tree-label" title="{{ n.unit.name }}">{{ n.unit.name }}</span>
+    <span class="tier-badge tier-{{ n.unit.tier }}">{{ {'application':'APP','environment':'ENV','unit':'UNIT'}[n.unit.tier] }}</span>
+    <span class="tree-count">{{ n.total }}</span>
+    {% if can_edit %}
+    <button type="button" class="tree-menu" title="Folder actions" aria-label="Folder actions">⋯</button>
+    {% endif %}
+  </div>
+  {% if n.children %}
+  <ul class="tree-children" role="group">
+    {% for c in n.children %}{{ tree_node(c, can_edit) }}{% endfor %}
+  </ul>
+  {% endif %}
+</li>
+{% endmacro %}
+
+{% macro tree_pane(tree, n_total, n_unassigned, can_edit, empty_hint) %}
+<aside class="ex-tree" role="tree" aria-label="Organisation">
+  <ul class="tree-root">
+    <li class="tree-node tree-special" data-node="all">
+      <div class="tree-row" tabindex="0" role="treeitem">
+        <span class="tree-caret-sp"></span>
+        <svg class="tree-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>
+        <span class="tree-label">All</span>
+        <span class="tree-count">{{ n_total }}</span>
+      </div>
+    </li>
+    {% for app in tree %}{{ tree_node(app, can_edit) }}{% endfor %}
+    <li class="tree-node tree-special" data-node="unassigned">
+      <div class="tree-row" tabindex="0" role="treeitem">
+        <span class="tree-caret-sp"></span>
+        <svg class="tree-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+        <span class="tree-label">Unassigned</span>
+        <span class="tree-count">{{ n_unassigned }}</span>
+      </div>
+    </li>
+  </ul>
+  {% if not tree %}
+  <div class="tree-hint">{{ empty_hint }}</div>
+  {% endif %}
+</aside>
+{% endmacro %}

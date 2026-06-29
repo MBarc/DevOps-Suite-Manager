@@ -103,6 +103,16 @@
         ones only to you (and tenant admins).</span>
     </label>
 
+    <label>Application (folder)
+      <select name="org_unit_id">
+        <option value="">(unassigned)</option>
+        {% for u in org_units %}
+        <option value="{{ u.id }}" {% if preset_org_unit_id == u.id %}selected{% endif %}>{{ u.path_str }}</option>
+        {% endfor %}
+      </select>
+      <span class="field-hint">Optional - file this pipeline into the shared application tree (Explorer view).</span>
+    </label>
+
     <fieldset class="schema-fieldset">
       <legend class="muted" style="padding:0 6px; font-size:12px">Inputs schema</legend>
       <p class="field-hint" style="margin-top:0">

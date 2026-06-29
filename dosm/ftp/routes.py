@@ -16,10 +16,12 @@ import tempfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from dosm.applications import repo as org_repo
 from dosm.auth.deps import require_admin
+from dosm.auth.prefs import get_pref, set_pref
 from dosm.auth.tenancy import active_tenant_id, tenant_clause
 from dosm.db import get_session
 from dosm.ftp.base import FileTransferError
@@ -56,6 +58,10 @@ def _join(cur: str, name: str) -> str:
     return name if not cur else f"{cur}/{name}"
 
 
+def _parse_int_or_none(v: str) -> int | None:
+    return int(v) if (v or "").strip() else None
+
+
 # ── Landing: pick a file-transfer host ───────────────────────────────────────
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def index(
@@ -64,16 +70,34 @@ async def index(
     user: User = Depends(require_admin),
     tid: int | None = Depends(active_tenant_id),
 ):
-    stmt = (
-        select(Host)
-        .where(Host.ft_method.isnot(None))
-        .where(Host.ft_method != "")
-        .order_by(Host.name)
-    )
+    ou_id = _parse_int_or_none(request.query_params.get("org_unit_id", ""))
+    view = request.query_params.get("view", "")
+    if view in ("explorer", "table"):
+        set_pref(db, user, "files_view", view)
+    else:
+        view = get_pref(user, "files_view", "explorer") or "explorer"
+    if view not in ("explorer", "table"):
+        view = "explorer"
+
+    ft_clause = and_(Host.ft_method.isnot(None), Host.ft_method != "")
+    stmt = select(Host).where(ft_clause).order_by(Host.name)
     clause = tenant_clause(Host, tid)
     if clause is not None:
         stmt = stmt.where(clause)
     hosts = db.execute(stmt).scalars().all()
+
+    if view == "explorer":
+        # File transfer reuses each host's org placement; counts reflect only
+        # file-transfer-capable hosts, and drag-drop posts to /hosts/{id}/assign-org.
+        tree = org_repo.build_tree(
+            db, tid, counts=org_repo.direct_counts(db, tid, Host, extra=ft_clause))
+        n_unassigned = sum(1 for h in hosts if h.org_unit_id is None)
+        return _templates(request).TemplateResponse(
+            request, "ftp/explorer.html", {
+                "hosts": hosts, "tree": tree,
+                "n_total": len(hosts), "n_unassigned": n_unassigned,
+                "initial_org_unit_id": ou_id, "user": user,
+            })
     return _templates(request).TemplateResponse(
         request, "ftp/index.html", {"hosts": hosts, "user": user}
     )
