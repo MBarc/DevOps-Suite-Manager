@@ -883,7 +883,7 @@ async def audit_export(
     end: str | None = None,
 ):
     """Download the filtered audit log as CSV or JSON. Same access scoping as
-    the viewer — a tenant admin can only export their own tenant's events."""
+    the viewer: a tenant admin can only export their own tenant's events."""
     fmt = (format or "csv").lower()
     if fmt not in ("csv", "json"):
         fmt = "csv"
@@ -894,7 +894,7 @@ async def audit_export(
         apply_fn(select(AuditLog)).order_by(AuditLog.ts.desc())).scalars())
     records = _audit_records(db, rows)
 
-    # Exporting the audit trail is itself sensitive — record who pulled it.
+    # Exporting the audit trail is itself sensitive, so record who pulled it.
     db.add(AuditLog(
         tenant_id=(next(iter(scope_tids)) if scope_tids and len(scope_tids) == 1 else None),
         actor_id=user.id, action="audit.export", target=f"format:{fmt}",

@@ -39,7 +39,7 @@
         '<h3>Delete ' + (opts.typeLabel || 'item') + '?</h3>' +
         '<p class="ex-modal-name"></p>' +
         '<p class="ex-modal-warn">This permanently removes it and <strong>cannot be undone.</strong></p>' +
-        '<label class="ex-modal-check"><input type="checkbox" /> I understand — don’t ask me again</label>' +
+        '<label class="ex-modal-check"><input type="checkbox" /> I understand, don\'t ask me again</label>' +
         '<div class="ex-modal-actions">' +
           '<button type="button" class="btn btn-ghost ex-modal-cancel">Cancel</button>' +
           '<button type="button" class="btn btn-danger ex-modal-ok">Delete</button>' +

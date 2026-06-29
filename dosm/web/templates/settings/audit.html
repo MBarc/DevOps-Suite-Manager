@@ -85,9 +85,9 @@
       <tr>
         <td style="white-space:nowrap; color:var(--fg-muted)">{{ r.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td>
         <td><code style="font-size:12px">{{ r.action }}</code></td>
-        <td>{{ user_names.get(r.actor_id, '—' if r.actor_id is none else 'user:%d' % r.actor_id) }}</td>
+        <td>{{ user_names.get(r.actor_id, '-' if r.actor_id is none else 'user:%d' % r.actor_id) }}</td>
         {% if multi_tenant %}
-        <td class="muted">{{ tenant_names.get(r.tenant_id, '—' if r.tenant_id is none else 'tenant:%d' % r.tenant_id) }}</td>
+        <td class="muted">{{ tenant_names.get(r.tenant_id, '-' if r.tenant_id is none else 'tenant:%d' % r.tenant_id) }}</td>
         {% endif %}
         <td class="muted" style="font-size:12px">{{ r.target or '' }}</td>
         <td class="muted" style="font-size:12px">{{ r.details or '' }}</td>
