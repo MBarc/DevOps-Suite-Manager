@@ -513,7 +513,7 @@ def secret_delete(path: str = typer.Argument(...)) -> None:
 @cred_app.command("add")
 def credential_add(
     name: str = typer.Argument(..., help="Unique friendly name, e.g. 'prod-admin'"),
-    kind: str = typer.Option(..., "--kind", help="login | ssh_key | pat | azure_sp | aws_keys | gcp_sa"),
+    kind: str = typer.Option(..., "--kind", help="login | ssh_key | pat | azure_sp | aws_keys | gcp_sa | dynamic"),
     username: str | None = typer.Option(None, "--username"),
     password: str | None = typer.Option(
         None, "--password", help="Secret value (password / token / key) to store in the secrets backend."
@@ -545,7 +545,14 @@ def credential_add(
         s.add(AuditLog(tenant_id=tid, actor_id=None, action="credential.create",
                        target=f"credential:{name}", details=f"cli kind={kind}"))
     # Store the secret value AFTER the row commits (SQLite single-writer ordering).
-    if password:
+    # A dynamic (per-user / PIM) credential has no shared secret - each user adds
+    # their own under My Credentials - so never store one here.
+    if kind == "dynamic":
+        console.print(
+            f"[green]Created credential[/green] {name} "
+            f"(dynamic / per-user - each user sets their own in My Credentials)"
+        )
+    elif password:
         from dosm.secrets import get_backend
         get_backend(cfg).set_str(ref, password)
         console.print(f"[green]Created credential[/green] {name} (secret stored at {ref})")
@@ -571,6 +578,113 @@ def credential_list(tenant: str | None = _TENANT_SCOPE_OPT) -> None:
     for cid, name, kind, username, secret_ref in rows:
         table.add_row(str(cid), name, kind, username or "", secret_ref)
     console.print(table)
+
+
+def _get_credential_by_ref(s, ref: str, tid: int | None) -> Credential:
+    """Resolve a credential by numeric id or by name within tenant ``tid``, or
+    exit with an error."""
+    stmt = select(Credential)
+    stmt = stmt.where(Credential.id == int(ref)) if ref.isdigit() else stmt.where(Credential.name == ref)
+    if tid is not None:
+        stmt = stmt.where(Credential.tenant_id == tid)
+    cred = s.execute(stmt).scalar_one_or_none()
+    if cred is None:
+        console.print(f"[red]No credential {ref!r} in this tenant.[/red]")
+        raise typer.Exit(1)
+    return cred
+
+
+@cred_app.command("rename")
+def credential_rename(
+    ref: str = typer.Argument(..., help="Current name or numeric id of the credential."),
+    new_name: str = typer.Argument(..., help="New name (unique per tenant)."),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Rename a credential profile."""
+    _load()
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+        cred = _get_credential_by_ref(s, ref, tid)
+        old = cred.name
+        clash = s.execute(
+            select(Credential).where(
+                Credential.name == new_name,
+                Credential.tenant_id == cred.tenant_id,
+                Credential.id != cred.id,
+            )
+        ).scalar_one_or_none()
+        if clash is not None:
+            console.print(f"[red]A credential named {new_name!r} already exists in this tenant.[/red]")
+            raise typer.Exit(1)
+        cred.name = new_name
+        s.add(AuditLog(tenant_id=cred.tenant_id, actor_id=None, action="credential.rename",
+                       target=f"credential:{cred.id}", details=f"cli {old!r} to {new_name!r}"))
+    console.print(f"[green]Renamed credential[/green] {old} to {new_name}")
+
+
+@cred_app.command("set-user-secret")
+def credential_set_user_secret(
+    ref: str = typer.Argument(..., help="Dynamic credential name or id."),
+    for_user: str = typer.Option(..., "--user", help="DOSM username this material belongs to."),
+    username: str = typer.Option(..., "--username", help="The user's own PIM login username."),
+    password: str | None = typer.Option(None, "--password", help="The user's PIM password (prompted if omitted)."),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Store one user's own username + password for a dynamic (per-user / PIM)
+    credential, the same per-user secret they would set under My Credentials."""
+    from types import SimpleNamespace
+
+    from dosm.credentials.dynamic import set_user_material
+    from dosm.models import User
+
+    _load()
+    cfg = load_config()
+    if password is None:
+        password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+        cred = _get_credential_by_ref(s, ref, tid)
+        if cred.kind != "dynamic":
+            console.print(f"[red]{cred.name!r} is not a dynamic (per-user) credential.[/red]")
+            raise typer.Exit(1)
+        u = s.execute(select(User).where(User.username == for_user)).scalar_one_or_none()
+        if u is None:
+            console.print(f"[red]No user {for_user!r}.[/red]")
+            raise typer.Exit(1)
+        uid, sref, cname = u.id, cred.secret_ref, cred.name
+        s.add(AuditLog(tenant_id=cred.tenant_id, actor_id=None, action="credential.user_secret.set",
+                       target=f"credential:{cred.id}", details=f"cli user={uid}"))
+    # Write the secret AFTER the row session commits (SQLite single-writer ordering).
+    set_user_material(cfg, SimpleNamespace(secret_ref=sref), uid, username, password)
+    console.print(f"[green]Stored[/green] {for_user}'s credentials for {cname}")
+
+
+@cred_app.command("clear-user-secret")
+def credential_clear_user_secret(
+    ref: str = typer.Argument(..., help="Dynamic credential name or id."),
+    for_user: str = typer.Option(..., "--user", help="DOSM username whose stored material to clear."),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Clear one user's stored per-user secret for a dynamic credential."""
+    from types import SimpleNamespace
+
+    from dosm.credentials.dynamic import clear_user_material
+    from dosm.models import User
+
+    _load()
+    cfg = load_config()
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+        cred = _get_credential_by_ref(s, ref, tid)
+        u = s.execute(select(User).where(User.username == for_user)).scalar_one_or_none()
+        if u is None:
+            console.print(f"[red]No user {for_user!r}.[/red]")
+            raise typer.Exit(1)
+        uid, sref, cname = u.id, cred.secret_ref, cred.name
+        s.add(AuditLog(tenant_id=cred.tenant_id, actor_id=None, action="credential.user_secret.clear",
+                       target=f"credential:{cred.id}", details=f"cli user={uid}"))
+    clear_user_material(cfg, SimpleNamespace(secret_ref=sref), uid)
+    console.print(f"[green]Cleared[/green] {for_user}'s credentials for {cname}")
 
 
 # ---- hosts ----------------------------------------------------------------
