@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from dosm.auth.deps import require_operator
 from dosm.auth.tenancy import active_tenant_id
-from dosm.credentials.access import first_unusable_credential
+from dosm.credentials.access import first_unprovisioned_dynamic, first_unusable_credential
+from dosm.credentials.dynamic import set_connecting_user
 from dosm.db import get_session
 from dosm.guacamole.auth_json import AuthJsonCodec, build_connection_id, load_secret_key
 from dosm.guacamole.builder import GuacamoleBuildError, _resolve_credential, build_connection
@@ -88,6 +89,25 @@ async def host_connect(
                 f"another user; ask them to share it or use your own"
             ),
         )
+
+    # Per-user (PIM) gate: block if any credential in the chain is dynamic and
+    # this user hasn't stored their own secret yet - point them at My Credentials.
+    unprovisioned = first_unprovisioned_dynamic(
+        cfg, user, [host.credential, *(h.credential for h in chain)]
+    )
+    if unprovisioned is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This host uses per-user (PIM) credentials ({unprovisioned.name!r}). "
+                f"Open 'My Credentials' (/credentials/mine) and add your username + "
+                f"password to connect."
+            ),
+        )
+
+    # Identify the connecting user so dynamic-credential resolution (in the
+    # builder / jump tunnel below) picks up this user's own secret.
+    set_connecting_user(user.id)
 
     error: str | None = None
     iframe_url: str | None = None

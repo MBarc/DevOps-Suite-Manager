@@ -87,3 +87,17 @@ def first_unusable_credential(user: User | None, creds) -> Credential | None:
         if cred is not None and not can_use_credential(user, cred):
             return cred
     return None
+
+
+def first_unprovisioned_dynamic(cfg, user: User | None, creds) -> Credential | None:
+    """Return the first *dynamic* (per-user/PIM) credential in ``creds`` that
+    ``user`` has not stored their own secret for, or ``None``. Use at connection
+    time so we can tell the user to set up their credentials before connecting,
+    instead of failing mid-connect."""
+    from dosm.credentials.dynamic import has_user_material, is_dynamic
+
+    uid = user.id if user is not None else None
+    for cred in creds:
+        if cred is not None and is_dynamic(cred) and not has_user_material(cfg, cred, uid):
+            return cred
+    return None

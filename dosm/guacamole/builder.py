@@ -80,6 +80,13 @@ def _resolve_credential(cfg: Config, cred: Credential | None) -> tuple[str | Non
     """Return (username, password, ssh_private_key, domain) for the given credential."""
     if cred is None:
         return None, None, None, None
+    if cred.kind == "dynamic":
+        from dosm.credentials.dynamic import DynamicCredentialError, resolve_dynamic
+        try:
+            username, password = resolve_dynamic(cfg, cred)
+        except DynamicCredentialError as e:
+            raise GuacamoleBuildError(str(e)) from e
+        return username, password, None, None
     try:
         secret_text = get_backend(cfg).get_str(cred.secret_ref)
     except SecretNotFound as e:

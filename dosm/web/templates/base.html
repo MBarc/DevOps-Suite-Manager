@@ -23,6 +23,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-5 9 5-9 5-9-5z"/><path d="M3 9v6l9 5 9-5V9"/><path d="M12 14v6"/></svg>
         Inventory
       </a>
+      <a href="/credentials/mine" class="{% if path.startswith('/credentials/mine') %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="M12 12l8-8M16 8l3 3"/></svg>
+        My Credentials
+      </a>
       {# Hosts / Pipelines / Credentials are now unified under the Inventory blade
          above. Their detail/create/edit/connect/run pages still live at /hosts,
          /pipelines, /credentials (linked from Inventory cards) - only the

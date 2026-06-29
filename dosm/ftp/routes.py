@@ -23,6 +23,7 @@ from dosm.applications import repo as org_repo
 from dosm.auth.deps import require_admin
 from dosm.auth.prefs import get_pref, set_pref
 from dosm.auth.tenancy import active_tenant_id, tenant_clause
+from dosm.credentials.dynamic import set_connecting_user
 from dosm.db import get_session
 from dosm.ftp.base import FileTransferError
 from dosm.ftp.service import (
@@ -32,7 +33,15 @@ from dosm.ftp.service import (
 )
 from dosm.models import AuditLog, Host, User
 
-router = APIRouter(prefix="/files")
+
+def _identify_connecting_user(user: User = Depends(require_admin)) -> None:
+    """Router dependency: record the connecting user so a host's dynamic
+    (per-user / PIM) credential resolves to *this* user's stored secret in the
+    file-transfer backends. Runs for every /files route (already admin-gated)."""
+    set_connecting_user(user.id)
+
+
+router = APIRouter(prefix="/files", dependencies=[Depends(_identify_connecting_user)])
 
 _DOWNLOAD_CHUNK = 64 * 1024
 

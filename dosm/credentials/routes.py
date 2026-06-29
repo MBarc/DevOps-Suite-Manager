@@ -10,13 +10,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dosm.applications import repo as org_repo
-from dosm.auth.deps import require_operator, require_user
+from dosm.auth.deps import require_admin, require_operator, require_user
 from dosm.auth.prefs import get_pref, set_pref
 from dosm.auth.tenancy import active_tenant_id, require_active_tenant
 from dosm.credentials.access import (
     can_see_credential,
     visible_credentials_filter,
     visible_credentials_query,
+)
+from dosm.credentials.dynamic import (
+    clear_user_material,
+    get_user_material,
+    set_user_material,
 )
 from dosm.db import get_session
 from dosm.models import AuditLog, Credential, Host, Tenant, User
@@ -30,7 +35,7 @@ router = APIRouter(prefix="/credentials")
 def _parse_int_or_none(v: str) -> int | None:
     return int(v) if (v or "").strip() else None
 
-CRED_KINDS = ("login", "ssh_key", "pat", "azure_sp", "aws_keys", "gcp_sa")
+CRED_KINDS = ("login", "ssh_key", "pat", "azure_sp", "aws_keys", "gcp_sa", "dynamic")
 
 KIND_LABELS = {
     "login": "Login (username + password)",
@@ -39,6 +44,7 @@ KIND_LABELS = {
     "azure_sp": "Azure service principal",
     "aws_keys": "AWS access keys",
     "gcp_sa": "GCP service account",
+    "dynamic": "Dynamic - per-user (PIM)",
 }
 
 
@@ -242,7 +248,9 @@ async def credentials_create(
     # the secrets backend, so SQLite's single-writer doesn't deadlock with us.
     db.commit()
 
-    if secret_value:
+    # A dynamic (per-user / PIM) credential has no shared secret - each user
+    # stores their own later via My Credentials.
+    if secret_value and kind != "dynamic":
         try:
             get_backend(cfg).set_str(secret_ref, secret_value)
         except Exception as e:
@@ -260,6 +268,137 @@ async def credentials_create(
     return RedirectResponse(f"/credentials/{cid}", status_code=303)
 
 
+# ── My Credentials: per-user secrets for dynamic (PIM) credentials ───────────
+# Declared before /{cred_id} so "mine" isn't matched as a credential id.
+
+
+@router.get("/mine", response_class=HTMLResponse, include_in_schema=False)
+async def my_credentials(
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
+):
+    """Each user stores their own username + password for dynamic (per-user/PIM)
+    credentials here; DOSM uses it when *they* connect or transfer files."""
+    cfg = request.app.state.config
+    rows = []
+    for c in db.execute(visible_credentials_query(user, tid)).scalars():
+        if c.kind != "dynamic":
+            continue
+        material = get_user_material(cfg, c, user.id)
+        rows.append({"cred": c, "username": material[0] if material else "",
+                     "is_set": material is not None})
+    can_manage = user.role in ("tenant_admin", "platform_admin")
+    return _templates(request).TemplateResponse(
+        request, "credentials/mine.html",
+        {"rows": rows, "user": user, "can_manage": can_manage}
+    )
+
+
+@router.post("/mine/new", include_in_schema=False)
+async def my_credentials_new(
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int = Depends(require_active_tenant),
+):
+    """Create a new dynamic (per-user / PIM) credential profile (admin action)."""
+    name = name.strip()
+    if not name:
+        return RedirectResponse("/credentials/mine?error=name-required", status_code=303)
+    tenant = db.get(Tenant, tid)
+    tenant_slug = tenant.slug if tenant is not None else str(tid)
+    cred = Credential(
+        tenant_id=tid, name=name, kind="dynamic",
+        secret_ref=_auto_secret_ref(name, tenant_slug),
+        owner_id=user.id, visibility="shared",
+    )
+    db.add(cred)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse("/credentials/mine?error=name-taken", status_code=303)
+    db.add(AuditLog(tenant_id=tid, actor_id=user.id, action="credential.create",
+                    target=f"credential:{cred.id}", details="kind=dynamic via my-credentials"))
+    db.commit()
+    return RedirectResponse("/credentials/mine?created=1", status_code=303)
+
+
+@router.post("/{cred_id}/rename", include_in_schema=False)
+async def credentials_rename(
+    cred_id: int,
+    request: Request,
+    new_name: str = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_admin),
+    tid: int | None = Depends(active_tenant_id),
+):
+    """Rename a credential profile (admin action)."""
+    cred = _get_credential(db, cred_id, tid)
+    if cred is None or not can_see_credential(user, cred):
+        raise HTTPException(404)
+    new_name = new_name.strip()
+    if not new_name:
+        return RedirectResponse("/credentials/mine?error=name-required", status_code=303)
+    if new_name != cred.name:
+        old = cred.name
+        cred.name = new_name
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            return RedirectResponse("/credentials/mine?error=name-taken", status_code=303)
+        db.add(AuditLog(tenant_id=cred.tenant_id, actor_id=user.id, action="credential.rename",
+                        target=f"credential:{cred.id}", details=f"{old!r} to {new_name!r}"))
+        db.commit()
+    return RedirectResponse("/credentials/mine?renamed=1", status_code=303)
+
+
+@router.post("/mine/{cred_id}", include_in_schema=False)
+async def my_credentials_set(
+    cred_id: int,
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
+):
+    cfg = request.app.state.config
+    cred = _get_credential(db, cred_id, tid)
+    if cred is None or cred.kind != "dynamic" or not can_see_credential(user, cred):
+        raise HTTPException(404)
+    set_user_material(cfg, cred, user.id, username.strip(), password)
+    db.add(AuditLog(tenant_id=cred.tenant_id, actor_id=user.id,
+                    action="credential.user_secret.set", target=f"credential:{cred.id}",
+                    details=f"user={user.id}"))
+    db.commit()
+    return RedirectResponse("/credentials/mine?saved=1", status_code=303)
+
+
+@router.post("/mine/{cred_id}/clear", include_in_schema=False)
+async def my_credentials_clear(
+    cred_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_user),
+    tid: int | None = Depends(active_tenant_id),
+):
+    cfg = request.app.state.config
+    cred = _get_credential(db, cred_id, tid)
+    if cred is None or cred.kind != "dynamic" or not can_see_credential(user, cred):
+        raise HTTPException(404)
+    clear_user_material(cfg, cred, user.id)
+    db.add(AuditLog(tenant_id=cred.tenant_id, actor_id=user.id,
+                    action="credential.user_secret.clear", target=f"credential:{cred.id}",
+                    details=f"user={user.id}"))
+    db.commit()
+    return RedirectResponse("/credentials/mine?cleared=1", status_code=303)
+
+
 @router.get("/{cred_id}", response_class=HTMLResponse, include_in_schema=False)
 async def credentials_detail(
     cred_id: int,
@@ -272,14 +411,16 @@ async def credentials_detail(
     if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
     cfg = request.app.state.config
+    is_dynamic = cred.kind == "dynamic"
     secret_present = False
-    try:
-        get_backend(cfg).get(cred.secret_ref)
-        secret_present = True
-    except SecretNotFound:
-        secret_present = False
-    except Exception:
-        secret_present = False
+    if not is_dynamic:  # dynamic creds hold no shared secret - each user stores their own
+        try:
+            get_backend(cfg).get(cred.secret_ref)
+            secret_present = True
+        except SecretNotFound:
+            secret_present = False
+        except Exception:
+            secret_present = False
     hosts = list(
         db.execute(
             select(Host).where(Host.credential_id == cred.id).order_by(Host.name)
@@ -288,7 +429,8 @@ async def credentials_detail(
     return _templates(request).TemplateResponse(
         request,
         "credentials/detail.html",
-        {"cred": cred, "secret_present": secret_present, "hosts": hosts, "user": user},
+        {"cred": cred, "secret_present": secret_present, "is_dynamic": is_dynamic,
+         "hosts": hosts, "user": user},
     )
 
 
@@ -399,12 +541,17 @@ async def credentials_delete(
     cred = _get_credential(db, cred_id, tid)
     if cred is None or not can_see_credential(user, cred):
         raise HTTPException(404)
+    # Dynamic (per-user / PIM) profiles are an admin-only concern; regular
+    # credential deletion stays at operator level.
+    if cred.kind == "dynamic" and user.role not in ("tenant_admin", "platform_admin"):
+        raise HTTPException(403, "Only tenant admins can delete dynamic credential profiles.")
     if _hosts_using(db, cred.id) > 0:
         # Refuse rather than orphan host references silently.
         raise HTTPException(409, "credential is in use by one or more hosts")
     name = cred.name
+    kind = cred.kind
     audit_tid = cred.tenant_id
     db.delete(cred)
     db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="credential.delete", target=f"credential:{cred_id}", details=f"name={name}"))
     db.commit()
-    return RedirectResponse("/credentials", status_code=303)
+    return RedirectResponse("/credentials/mine" if kind == "dynamic" else "/credentials", status_code=303)

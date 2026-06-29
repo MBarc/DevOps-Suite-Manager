@@ -63,6 +63,13 @@ def credential_material(cfg: Config, cred: Credential | None) -> tuple[str, str 
 
     if cred is None:
         return "anonymous", None, None
+    if cred.kind == "dynamic":
+        from dosm.credentials.dynamic import DynamicCredentialError, resolve_dynamic
+        try:
+            username, password = resolve_dynamic(cfg, cred)
+        except DynamicCredentialError as e:
+            raise FileTransferError(str(e)) from e
+        return username, password, None
     try:
         secret = get_backend(cfg).get_str(cred.secret_ref)
     except SecretNotFound as e:

@@ -72,6 +72,7 @@
   <div class="hcard-top">
     <a class="hcard-name" href="/credentials/{{ c.id }}" draggable="false">{{ c.name }}</a>
     {% if c.visibility == 'private' %}<span class="hbadge">PRIVATE</span>{% endif %}
+    {% if c.kind == 'dynamic' %}<span class="hbadge" style="color:#fbbf24; border-color:color-mix(in srgb,#f59e0b 45%,var(--border))" title="Per-user (PIM) - each user stores their own secret in My Credentials">PER-USER</span>{% endif %}
     <span class="hbadge" style="color:#5eead4; border-color:color-mix(in srgb,#14b8a6 45%,var(--border))">CREDENTIAL</span>
   </div>
   <div class="hcard-sub">{{ kind_labels.get(c.kind, c.kind) }}{% if c.username %} · {{ c.username }}{% endif %}</div>

@@ -4,6 +4,7 @@ import json
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from dosm.applications import repo as org_repo
@@ -42,7 +43,10 @@ async def inventory(
     org tree. Everything is sent client-side; the type-filter pills + folder
     tree + search do the filtering."""
     hosts = hosts_repo.list_hosts(db, tid=tid)
-    creds = list(db.execute(visible_credentials_query(user, tid)).scalars())
+    # Dynamic (per-user / PIM) credentials are managed entirely under My Credentials,
+    # not here - they have no shared secret and are filled in per user.
+    creds = [c for c in db.execute(visible_credentials_query(user, tid)).scalars()
+             if c.kind != "dynamic"]
     pipelines = pipe_repo.list_pipelines(db, tid, user)
     pipe_rows = []
     for p in pipelines:
@@ -58,10 +62,14 @@ async def inventory(
 
     pv = visible_pipelines_filter(user)
     cv = visible_credentials_filter(user)
+    # Exclude dynamic creds from the folder counts too, so the tree matches the cards.
+    cred_extra = Credential.kind != "dynamic"
+    if cv is not True:
+        cred_extra = and_(cv, cred_extra)
     counts = _merge(
         org_repo.direct_counts(db, tid, Host),
         org_repo.direct_counts(db, tid, Pipeline, extra=None if pv is True else pv),
-        org_repo.direct_counts(db, tid, Credential, extra=None if cv is True else cv),
+        org_repo.direct_counts(db, tid, Credential, extra=cred_extra),
     )
     tree = org_repo.build_tree(db, tid, counts=counts)
 

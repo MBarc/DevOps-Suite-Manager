@@ -36,7 +36,11 @@ def _resolve_creds(cfg: Config, host: Host) -> HopCreds:
     username = (cred.username if cred and cred.username else None) or "root"
     password: str | None = None
     private_key: str | None = None
-    if cred is not None:
+    if cred is not None and cred.kind == "dynamic":
+        # Per-user (PIM): resolve the connecting user's own material.
+        from dosm.credentials.dynamic import resolve_dynamic
+        username, password = resolve_dynamic(cfg, cred)  # raises if unprovisioned
+    elif cred is not None:
         try:
             secret_text = get_backend(cfg).get_str(cred.secret_ref)
         except SecretNotFound as e:
