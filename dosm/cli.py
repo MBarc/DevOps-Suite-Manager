@@ -513,12 +513,22 @@ def secret_delete(path: str = typer.Argument(...)) -> None:
 @cred_app.command("add")
 def credential_add(
     name: str = typer.Argument(..., help="Unique friendly name, e.g. 'prod-admin'"),
-    kind: str = typer.Option(..., "--kind", help="ssh_password | ssh_key | rdp_password | api_token"),
+    kind: str = typer.Option(..., "--kind", help="login | ssh_key | pat | azure_sp | aws_keys | gcp_sa"),
     username: str | None = typer.Option(None, "--username"),
-    secret_ref: str = typer.Option(..., "--secret-ref", help="Path in the secrets backend."),
+    password: str | None = typer.Option(
+        None, "--password", help="Secret value (password / token / key) to store in the secrets backend."
+    ),
+    secret_ref: str | None = typer.Option(
+        None, "--secret-ref", help="Secrets-backend path (auto-generated from the name if omitted)."
+    ),
     tenant: str | None = _TENANT_OPT,
 ) -> None:
+    """Create a credential profile. With --password the secret value is stored in
+    the secrets backend; otherwise only the row + secret_ref path are recorded."""
+    import re as _re
+
     _load()
+    cfg = load_config()
     with session_scope() as s:
         tid = _resolve_tenant(s, tenant)
         if s.execute(
@@ -526,8 +536,24 @@ def credential_add(
         ).scalar_one_or_none():
             console.print(f"[red]Credential {name!r} already exists in this tenant.[/red]")
             raise typer.Exit(1)
-        s.add(Credential(tenant_id=tid, name=name, kind=kind, username=username, secret_ref=secret_ref))
-    console.print(f"[green]Created credential[/green] {name}")
+        tenant_obj = s.get(Tenant, tid)
+        tslug = tenant_obj.slug if tenant_obj else str(tid)
+        ref = (secret_ref or "").strip() or (
+            f"t/{tslug}/credentials/{_re.sub(r'[^a-z0-9]+', '-', name.lower().strip()).strip('-')}"
+        )
+        s.add(Credential(tenant_id=tid, name=name, kind=kind, username=username, secret_ref=ref))
+        s.add(AuditLog(tenant_id=tid, actor_id=None, action="credential.create",
+                       target=f"credential:{name}", details=f"cli kind={kind}"))
+    # Store the secret value AFTER the row commits (SQLite single-writer ordering).
+    if password:
+        from dosm.secrets import get_backend
+        get_backend(cfg).set_str(ref, password)
+        console.print(f"[green]Created credential[/green] {name} (secret stored at {ref})")
+    else:
+        console.print(
+            f"[green]Created credential[/green] {name} "
+            f"(no secret stored; set one later, secret_ref={ref})"
+        )
 
 
 @cred_app.command("list")
@@ -561,6 +587,66 @@ def _get_host_by_name(s, name: str, tid: int | None = None) -> Host:
         console.print(f"[red]No host named {name!r}.[/red]")
         raise typer.Exit(1)
     return host
+
+
+@hosts_app.command("add")
+def host_add(
+    name: str = typer.Argument(..., help="Inventory name (unique per tenant)."),
+    hostname: str = typer.Option(..., "--hostname", help="DNS name or IP, e.g. herupa.local"),
+    protocol: str = typer.Option("ssh", "--protocol", help="ssh | rdp | vnc"),
+    port: int | None = typer.Option(None, "--port", help="Defaults: ssh 22, rdp 3389, vnc 5900."),
+    credential: str | None = typer.Option(None, "--credential", help="Credential profile name to attach."),
+    org_unit: str | None = typer.Option(None, "--org-unit", help="Org node id or 'App/Env/Unit' path."),
+    ft_method: str | None = typer.Option(None, "--ft-method", help="sftp | ftp | ftps (enables file transfer)."),
+    ft_port: int | None = typer.Option(None, "--ft-port"),
+    ft_credential: str | None = typer.Option(
+        None, "--ft-credential", help="Credential name for file transfer (defaults to the host credential)."
+    ),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Add a host to the inventory, optionally with a credential, org placement,
+    and file-transfer settings. Audit-logged."""
+    _load()
+    from dosm.hosts import repo
+
+    default_ports = {"ssh": 22, "rdp": 3389, "vnc": 5900}
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+
+        def _cred_id(cname: str | None) -> int | None:
+            if not cname:
+                return None
+            c = s.execute(
+                select(Credential).where(Credential.name == cname, Credential.tenant_id == tid)
+            ).scalar_one_or_none()
+            if c is None:
+                console.print(f"[red]No credential named {cname!r} in this tenant.[/red]")
+                raise typer.Exit(1)
+            return c.id
+
+        org_id: int | None = None
+        if org_unit and org_unit.strip().lower() != "none":
+            u = _resolve_org_unit(s, org_unit, tid)
+            if u is None:
+                console.print(f"[red]Org node not found:[/red] {org_unit!r}")
+                raise typer.Exit(1)
+            org_id = u.id
+        try:
+            h = repo.create_host(
+                s, tenant_id=tid, name=name, hostname=hostname,
+                port=port or default_ports.get(protocol, 22), protocol=protocol,
+                description=None, credential_id=_cred_id(credential),
+                jump_host_id=None, tags_csv="",
+                ft_method=ft_method, ft_port=ft_port,
+                ft_credential_id=_cred_id(ft_credential), org_unit_id=org_id,
+            )
+        except repo.HostValidationError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        s.add(AuditLog(tenant_id=tid, actor_id=None, action="host.create",
+                       target=f"host:{h.id}", details=f"cli {protocol} {hostname}"))
+        hid = h.id
+    console.print(f"[green]Created host[/green] {name} (id={hid})")
 
 
 @hosts_app.command("list")
@@ -1166,6 +1252,59 @@ def application_assign(
 
 
 # ---- pipelines ------------------------------------------------------------
+
+
+@pipelines_app.command("add")
+def pipeline_add(
+    name: str = typer.Argument(..., help="Unique pipeline name (per tenant)."),
+    provider: str = typer.Option("github_actions", "--provider", help="Pipeline provider."),
+    config_json: str | None = typer.Option(
+        None, "--config",
+        help='Provider config as JSON, e.g. {"owner":"acme","repo":"app","workflow":"ci.yml","ref":"main"}',
+    ),
+    description: str | None = typer.Option(None, "--description"),
+    credential: str | None = typer.Option(None, "--credential", help="Credential profile name."),
+    org_unit: str | None = typer.Option(None, "--org-unit", help="Org node id or 'App/Env/Unit' path."),
+    visibility: str = typer.Option("shared", "--visibility", help="shared | private"),
+    tenant: str | None = _TENANT_OPT,
+) -> None:
+    """Register a pipeline, optionally filed into the org tree. Audit-logged."""
+    _load()
+    from dosm.pipelines import repo as pipe_repo
+
+    cfg_dict = json.loads(config_json) if config_json else {}
+    with session_scope() as s:
+        tid = _resolve_tenant(s, tenant)
+        cred_id: int | None = None
+        if credential:
+            c = s.execute(
+                select(Credential).where(Credential.name == credential, Credential.tenant_id == tid)
+            ).scalar_one_or_none()
+            if c is None:
+                console.print(f"[red]No credential named {credential!r} in this tenant.[/red]")
+                raise typer.Exit(1)
+            cred_id = c.id
+        org_id: int | None = None
+        if org_unit and org_unit.strip().lower() != "none":
+            u = _resolve_org_unit(s, org_unit, tid)
+            if u is None:
+                console.print(f"[red]Org node not found:[/red] {org_unit!r}")
+                raise typer.Exit(1)
+            org_id = u.id
+        try:
+            p = pipe_repo.create_pipeline(
+                s, tenant_id=tid, name=name, provider=provider,
+                description=description, config=cfg_dict, inputs_schema=None,
+                credential_id=cred_id, org_unit_id=org_id, owner_id=None,
+                visibility=visibility,
+            )
+        except Exception as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        s.add(AuditLog(tenant_id=tid, actor_id=None, action="pipeline.create",
+                       target=f"pipeline:{p.id}", details=f"cli provider={provider}"))
+        pid = p.id
+    console.print(f"[green]Created pipeline[/green] {name} (id={pid})")
 
 
 @pipelines_app.command("poll")
