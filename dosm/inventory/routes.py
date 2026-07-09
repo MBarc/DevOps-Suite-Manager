@@ -73,6 +73,11 @@ async def inventory(
     )
     tree = org_repo.build_tree(db, tid, counts=counts)
 
+    # Honour ?org_unit_id=<id> so deep links from the retired Hosts/Pipelines/
+    # Credentials pages (and the Applications page) pre-select that folder.
+    _ou = request.query_params.get("org_unit_id", "")
+    initial_org_unit_id = int(_ou) if _ou.strip().isdigit() else None
+
     n_total = len(hosts) + len(pipe_rows) + len(creds)
     n_unassigned = (
         sum(1 for h in hosts if h.org_unit_id is None)
@@ -83,6 +88,6 @@ async def inventory(
         request, "inventory/explorer.html", {
             "hosts": hosts, "pipelines": pipe_rows, "credentials": creds,
             "tree": tree, "n_total": n_total, "n_unassigned": n_unassigned,
-            "initial_org_unit_id": None, "user": user,
+            "initial_org_unit_id": initial_org_unit_id, "user": user,
             "guacamole_enabled": request.app.state.config.guacamole.enabled,
         })

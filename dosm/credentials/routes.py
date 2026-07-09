@@ -79,46 +79,18 @@ def _hosts_using(db: Session, cred_id: int) -> int:
     )
 
 
-@router.get("", response_class=HTMLResponse, include_in_schema=False)
+@router.get("", include_in_schema=False)
 async def credentials_list(
     request: Request,
-    db: Session = Depends(get_session),
+    org_unit_id: str = "",
     user: User = Depends(require_user),
-    tid: int | None = Depends(active_tenant_id),
 ):
-    ou_id = _parse_int_or_none(request.query_params.get("org_unit_id", ""))
-    view = request.query_params.get("view", "")
-    if view in ("explorer", "table"):
-        set_pref(db, user, "credentials_view", view)
-    else:
-        view = get_pref(user, "credentials_view", "explorer") or "explorer"
-    if view not in ("explorer", "table"):
-        view = "explorer"
-
-    rows = list(db.execute(visible_credentials_query(user, tid)).scalars())
-    enriched = []
-    for c in rows:
-        enriched.append(
-            {
-                "cred": c,
-                "host_count": _hosts_using(db, c.id),
-            }
-        )
-
-    if view == "explorer":
-        vclause = visible_credentials_filter(user)
-        extra = None if vclause is True else vclause
-        tree = org_repo.build_tree(
-            db, tid, counts=org_repo.direct_counts(db, tid, Credential, extra=extra))
-        n_unassigned = sum(1 for c in rows if c.org_unit_id is None)
-        return _templates(request).TemplateResponse(
-            request, "credentials/explorer.html", {
-                "rows": enriched, "tree": tree,
-                "n_total": len(rows), "n_unassigned": n_unassigned,
-                "initial_org_unit_id": ou_id, "user": user,
-            })
-    return _templates(request).TemplateResponse(
-        request, "credentials/list.html", {"rows": enriched, "user": user}
+    """Retired: standalone credential browsing now lives under the Inventory blade
+    (per-user dynamic creds under My Credentials). Redirect, keeping any folder
+    filter so deep links still work."""
+    return RedirectResponse(
+        "/inventory" + (f"?org_unit_id={org_unit_id}" if org_unit_id.strip() else ""),
+        status_code=303,
     )
 
 
@@ -554,4 +526,4 @@ async def credentials_delete(
     db.delete(cred)
     db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="credential.delete", target=f"credential:{cred_id}", details=f"name={name}"))
     db.commit()
-    return RedirectResponse("/credentials/mine" if kind == "dynamic" else "/credentials", status_code=303)
+    return RedirectResponse("/credentials/mine" if kind == "dynamic" else "/inventory", status_code=303)

@@ -123,53 +123,17 @@ def _parse_int_or_none(v: str) -> int | None:
     return int(v) if (v or "").strip() else None
 
 
-@router.get("", response_class=HTMLResponse, include_in_schema=False)
+@router.get("", include_in_schema=False)
 async def pipelines_list(
     request: Request,
-    db: Session = Depends(get_session),
+    org_unit_id: str = "",
     user: User = Depends(require_user),
-    tid: int | None = Depends(active_tenant_id),
 ):
-    ou_id = _parse_int_or_none(request.query_params.get("org_unit_id", ""))
-    # View mode (explorer tree, or the classic table) is a per-user pref.
-    view = request.query_params.get("view", "")
-    if view in ("explorer", "table"):
-        set_pref(db, user, "pipelines_view", view)
-    else:
-        view = get_pref(user, "pipelines_view", "explorer") or "explorer"
-    if view not in ("explorer", "table"):
-        view = "explorer"
-
-    pipelines = repo.list_pipelines(db, tid, user)
-    enriched = []
-    for p in pipelines:
-        latest = repo.list_runs(db, p.id, limit=1)
-        cfg = json.loads(p.config or "{}")
-        try:
-            adapter = get_adapter(p.provider)
-            summary = adapter.target_summary(cfg)
-            provider_name = adapter.display_name or p.provider
-        except Exception:
-            summary = ""
-            provider_name = p.provider
-        enriched.append({"p": p, "latest": latest[0] if latest else None,
-                         "cfg": cfg, "summary": summary, "provider_name": provider_name})
-
-    if view == "explorer":
-        from dosm.pipelines.access import visible_pipelines_filter
-        vclause = visible_pipelines_filter(user)
-        extra = None if vclause is True else vclause
-        tree = org_repo.build_tree(
-            db, tid, counts=org_repo.direct_counts(db, tid, Pipeline, extra=extra))
-        n_unassigned = sum(1 for p in pipelines if p.org_unit_id is None)
-        return _templates(request).TemplateResponse(
-            request, "pipelines/explorer.html", {
-                "rows": enriched, "tree": tree,
-                "n_total": len(pipelines), "n_unassigned": n_unassigned,
-                "initial_org_unit_id": ou_id, "user": user,
-            })
-    return _templates(request).TemplateResponse(
-        request, "pipelines/list.html", {"rows": enriched, "user": user}
+    """Retired: the standalone Pipelines page now lives under the Inventory blade.
+    Redirect to it, carrying any org-unit folder filter so deep links still work."""
+    return RedirectResponse(
+        "/inventory" + (f"?org_unit_id={org_unit_id}" if org_unit_id.strip() else ""),
+        status_code=303,
     )
 
 
@@ -381,7 +345,7 @@ async def pipelines_delete(
     repo.delete_pipeline(db, p)
     db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id, action="pipeline.delete", target=f"pipeline:{pid}"))
     db.commit()
-    return RedirectResponse("/pipelines", status_code=303)
+    return RedirectResponse("/inventory", status_code=303)
 
 
 @router.post("/{pid}/run", include_in_schema=False)

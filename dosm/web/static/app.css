@@ -476,9 +476,14 @@ select {
 .ex-modal-name { margin: 0 0 10px; font-weight: 600; color: var(--fg-strong); word-break: break-word; }
 .ex-modal-warn { margin: 0 0 16px; font-size: 13px; color: var(--fg-muted); }
 .ex-modal-check {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 18px;
+  /* flex-direction:row is explicit because the global `label` rule sets
+     column - without this the checkbox stacks above the text. */
+  display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center;
+  gap: 8px; margin-bottom: 18px;
   font-size: 13px; color: var(--fg-muted); cursor: pointer;
 }
+/* Keep the checkbox at its natural size on the left, text beside it. */
+.ex-modal-check input[type="checkbox"] { flex: none; width: auto; min-width: 0; margin: 0; }
 .ex-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Custom checkbox - used on scan builder and port library */
@@ -829,12 +834,13 @@ code {
 .tree-node.selected > .tree-row { background: var(--accent); color: var(--accent-fg); }
 .tree-node.selected > .tree-row .tree-count { background: rgba(11,13,18,0.18); color: var(--accent-fg); }
 .tree-node.selected > .tree-row .tree-ico { color: var(--accent-fg); }
+.tree-node.selected > .tree-row .tree-caret { color: var(--accent-fg); }
 .tree-caret {
   width: 16px; height: 16px; flex: none; border: none; background: none;
-  color: var(--fg-muted); cursor: pointer; padding: 0;
+  color: var(--fg); cursor: pointer; padding: 0;
   display: flex; align-items: center; justify-content: center;
 }
-.tree-caret::before { content: '▸'; font-size: 10px; transition: transform .12s ease; }
+.tree-caret::before { content: '▸'; font-size: 13px; transition: transform .12s ease; }
 .tree-node:not(.collapsed) > .tree-row .tree-caret::before { transform: rotate(90deg); }
 .tree-caret-sp { width: 16px; flex: none; display: inline-block; }
 .tree-ico { width: 15px; height: 15px; flex: none; color: var(--fg-muted); }

@@ -164,11 +164,15 @@ def create_app(config: Config | None = None) -> FastAPI:
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    # Cache-bust the stylesheet: templates append ?v=<asset_version> to /static
-    # links so a rebuilt app.css is fetched instead of a stale browser copy.
-    # Derived from app.css mtime, so it changes on every deploy/rebuild.
+    # Cache-bust static assets: templates append ?v=<asset_version> to /static
+    # links so rebuilt assets are fetched instead of a stale browser copy. Use
+    # the newest mtime across every versioned asset (app.css AND explorer.js),
+    # so changing *either* file busts the shared token - previously this tracked
+    # only app.css, so a JS-only change served a stale explorer.js.
     try:
-        app.state.asset_version = str(int((STATIC_DIR / "app.css").stat().st_mtime))
+        mtimes = [(STATIC_DIR / f).stat().st_mtime
+                  for f in ("app.css", "explorer.js") if (STATIC_DIR / f).exists()]
+        app.state.asset_version = str(int(max(mtimes))) if mtimes else __version__
     except OSError:
         app.state.asset_version = __version__
 

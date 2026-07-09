@@ -16,7 +16,7 @@
           onsubmit="return confirm('Delete {{ p.name }}?');">
       <button class="btn btn-danger" type="submit">Delete</button>
     </form>
-    <a class="btn btn-ghost" href="/pipelines">Back</a>
+    <a class="btn btn-ghost" href="/pipelines" onclick="if(window.history.length>1){history.back();return false;}">Back</a>
   </div>
 </header>
 

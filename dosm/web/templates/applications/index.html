@@ -37,7 +37,7 @@
     <div class="subtitle">Organise hosts by application &rarr; environment &rarr; unit</div>
   </div>
   <div class="actions">
-    <a class="btn btn-ghost" href="/hosts">All hosts</a>
+    <a class="btn btn-ghost" href="/inventory">All hosts</a>
   </div>
 </header>
 
@@ -69,7 +69,7 @@
 {% for app in tree %}
 <section class="card">
   <div class="org-node">
-    <span class="org-name"><a href="/hosts?org_unit_id={{ app.unit.id }}">{{ app.unit.name }}</a></span>
+    <span class="org-name"><a href="/inventory?org_unit_id={{ app.unit.id }}">{{ app.unit.name }}</a></span>
     <span class="org-count" title="hosts in this application (all environments)">{{ app.total }} host{{ '' if app.total == 1 else 's' }}</span>
     {% if can_edit %}
     <div class="org-actions">
@@ -94,7 +94,7 @@
     {% for env in app.children %}
     <div class="org-env">
       <div class="org-node">
-        <span class="org-name"><a href="/hosts?org_unit_id={{ env.unit.id }}">{{ env.unit.name }}</a></span>
+        <span class="org-name"><a href="/inventory?org_unit_id={{ env.unit.id }}">{{ env.unit.name }}</a></span>
         <span class="org-count">{{ env.total }} host{{ '' if env.total == 1 else 's' }}</span>
         {% if can_edit %}
         <div class="org-actions">
@@ -116,7 +116,7 @@
 
       {% for u in env.children %}
       <div class="org-unit org-node">
-        <span><a href="/hosts?org_unit_id={{ u.unit.id }}">{{ u.unit.name }}</a></span>
+        <span><a href="/inventory?org_unit_id={{ u.unit.id }}">{{ u.unit.name }}</a></span>
         <span class="org-count">{{ u.total }} host{{ '' if u.total == 1 else 's' }}</span>
         {% if can_edit %}
         <div class="org-actions">

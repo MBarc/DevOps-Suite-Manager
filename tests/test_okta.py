@@ -221,7 +221,7 @@ def test_okta_callback_provisions_user(
         )
         assert r2.status_code == 303, r2.text
         # Authenticated session now usable.
-        assert client.get("/hosts", follow_redirects=False).status_code == 200
+        assert client.get("/inventory", follow_redirects=False).status_code == 200
 
     with session_factory() as s:
         u = s.execute(select(User).where(User.okta_sub == "okta-sub-1")).scalar_one()
@@ -248,7 +248,7 @@ def test_okta_callback_denies_user_in_no_mapped_group(
         assert r.status_code == 403
         assert "group granted DOSM access" in r.text
         # No session was established.
-        assert client.get("/hosts", follow_redirects=False).status_code in (303, 401)
+        assert client.get("/inventory", follow_redirects=False).status_code in (303, 401)
 
     # And no user row was provisioned for the denied subject.
     with session_factory() as s:

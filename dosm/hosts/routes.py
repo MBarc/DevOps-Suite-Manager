@@ -93,86 +93,17 @@ def _form_context(db: Session, user: User, tid: int | None, host=None,
     }
 
 
-@router.get("", response_class=HTMLResponse, include_in_schema=False)
+@router.get("", include_in_schema=False)
 async def hosts_list(
     request: Request,
-    kind: str = "",
-    tag: str = "",
     org_unit_id: str = "",
-    db: Session = Depends(get_session),
     user: User = Depends(require_user),
-    tid: int | None = Depends(active_tenant_id),
 ):
-    ou_id = _parse_int_or_none(org_unit_id)
-    # View mode (explorer tree+detail, or the classic flat table) is a per-user
-    # pref; an explicit ?view= persists, a bare /hosts visit restores it.
-    view = request.query_params.get("view", "")
-    if view in ("explorer", "table"):
-        set_pref(db, user, "hosts_view", view)
-    else:
-        view = get_pref(user, "hosts_view", "explorer") or "explorer"
-    if view not in ("explorer", "table"):
-        view = "explorer"
-
-    if view == "explorer":
-        hosts = repo.list_hosts(db, tid=tid)  # all hosts; explorer filters client-side
-        tree = org_repo.build_tree(db, tid)
-        n_unassigned = sum(1 for h in hosts if h.org_unit_id is None)
-        return _templates(request).TemplateResponse(
-            request, "hosts/explorer.html", {
-                "hosts": hosts,
-                "tree": tree,
-                "n_total": len(hosts),
-                "n_unassigned": n_unassigned,
-                "initial_org_unit_id": ou_id,
-                "user": user,
-                "guacamole_enabled": request.app.state.config.guacamole.enabled,
-            }
-        )
-
-    # Remember the host-kind filter per user: an explicit ?kind= is persisted as
-    # a personal pref; a bare /hosts visit restores the last choice.
-    if "kind" in request.query_params:
-        if kind not in ("", "servers", "jumpboxes"):
-            kind = ""
-        set_pref(db, user, "hosts_kind", kind or None)
-    else:
-        kind = get_pref(user, "hosts_kind", "") or ""
-    if kind not in ("", "servers", "jumpboxes"):
-        kind = ""
-    hosts = repo.list_hosts(db, tid=tid, kind=kind or None, tag=tag or None, org_unit_id=ou_id)
-    org_filter_options = [
-        {"id": u.id, "label": u.path_str, "tier": u.tier}
-        for u in sorted(org_repo.list_units(db, tid), key=lambda u: u.path_str.lower())
-    ]
-    selected_org_unit = org_repo.get_unit(db, ou_id, tid) if ou_id else None
-    credentials = visible_credentials(db, user, tid)
-    jump_candidates = repo.list_jump_candidates(db, tid)
-    n_servers, n_jumpboxes = repo.count_by_kind(db, tid)
-    all_tags = repo.list_tags(db, tid)
-    port_opts = _port_options(db)
-    return _templates(request).TemplateResponse(
-        request, "hosts/list.html", {
-            "hosts": hosts,
-            "credentials": credentials,
-            "jump_candidates": jump_candidates,
-            "protocols": list(repo.SUPPORTED_PROTOCOLS),
-            "ft_methods": list(repo.FILE_TRANSFER_METHODS),
-            "ft_default_ports": FT_DEFAULT_PORTS,
-            "port_options": port_opts,
-            "port_numbers": [n for n, _ in port_opts],
-            "kind": kind,
-            "tag": tag,
-            "org_unit_id": ou_id,
-            "org_filter_options": org_filter_options,
-            "selected_org_unit": selected_org_unit,
-            "all_tags": all_tags,
-            "n_total": n_servers + n_jumpboxes,
-            "n_servers": n_servers,
-            "n_jumpboxes": n_jumpboxes,
-            "user": user,
-            "guacamole_enabled": request.app.state.config.guacamole.enabled,
-        }
+    """Retired: the standalone Hosts page now lives under the Inventory blade.
+    Redirect to it, carrying any org-unit folder filter so deep links still work."""
+    return RedirectResponse(
+        "/inventory" + (f"?org_unit_id={org_unit_id}" if org_unit_id.strip() else ""),
+        status_code=303,
     )
 
 
@@ -563,7 +494,7 @@ async def hosts_delete(
     db.add(AuditLog(tenant_id=audit_tid, actor_id=user.id,
                     action="host.delete", target=f"host:{host_id}"))
     db.commit()
-    return RedirectResponse("/hosts", status_code=303)
+    return RedirectResponse("/inventory", status_code=303)
 
 
 @router.post("/{host_id}/assign-org", include_in_schema=False)

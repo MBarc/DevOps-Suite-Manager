@@ -12,12 +12,12 @@
 </header>
 
 <div class="stat-grid">
-  <a class="stat" href="/hosts">
+  <a class="stat" href="/inventory">
     <div class="label">Hosts</div>
     <div class="value">{{ host_count }}</div>
     <div class="note">{{ jumpbox_count }} jump host{{ '' if jumpbox_count == 1 else 's' }}</div>
   </a>
-  <a class="stat" href="/pipelines">
+  <a class="stat" href="/inventory">
     <div class="label">Pipelines · last 24h</div>
     <div class="value">{{ pipeline_24h_total }}{% if pipeline_24h_failed %} <span class="badge badge-red" style="margin-left:6px; vertical-align:middle">{{ pipeline_24h_failed }} failed</span>{% endif %}</div>
     <div class="note">runs triggered</div>
@@ -72,7 +72,7 @@
       {% endfor %}
       </ul>
     {% else %}
-      <div class="empty-state">No host connections recorded yet. <a href="/hosts">Browse hosts</a>.</div>
+      <div class="empty-state">No host connections recorded yet. <a href="/inventory">Browse hosts</a>.</div>
     {% endif %}
   </section>
 </div>

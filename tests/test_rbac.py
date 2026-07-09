@@ -97,7 +97,7 @@ def test_host_mutation_requires_operator(viewer_client, operator_client):
 
 
 def test_viewer_can_read_hosts(viewer_client):
-    assert viewer_client.get("/hosts", follow_redirects=False).status_code == 200
+    assert viewer_client.get("/inventory", follow_redirects=False).status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -130,12 +130,12 @@ def test_private_credential_hidden_from_other_users(
     # A different operator cannot see it.
     other = _client_for(app, session_factory, "testop2", "operator")
     assert other.get(f"/credentials/{cid}", follow_redirects=False).status_code == 404
-    listing = other.get("/credentials", follow_redirects=False)
+    listing = other.get("/inventory", follow_redirects=False)
     assert f"cred-private-{op_id}" not in listing.text
 
     # The owner can see it.
     assert operator_client.get(f"/credentials/{cid}", follow_redirects=False).status_code == 200
-    assert f"cred-private-{op_id}" in operator_client.get("/credentials").text
+    assert f"cred-private-{op_id}" in operator_client.get("/inventory").text
 
     # An admin can see it (audit).
     assert auth_client.get(f"/credentials/{cid}", follow_redirects=False).status_code == 200
@@ -179,11 +179,11 @@ def test_private_pipeline_hidden_from_other_users(
     other = _client_for(app, session_factory, "testop2", "operator")
     assert other.get(f"/pipelines/{pid}", follow_redirects=False).status_code == 404
     assert other.post(f"/pipelines/{pid}/run", follow_redirects=False).status_code == 404
-    assert f"pipe-private-{op_id}" not in other.get("/pipelines").text
+    assert f"pipe-private-{op_id}" not in other.get("/inventory").text
 
     # The owner can see it; an admin can too.
     assert operator_client.get(f"/pipelines/{pid}", follow_redirects=False).status_code == 200
-    assert f"pipe-private-{op_id}" in operator_client.get("/pipelines").text
+    assert f"pipe-private-{op_id}" in operator_client.get("/inventory").text
     assert auth_client.get(f"/pipelines/{pid}", follow_redirects=False).status_code == 200
 
 
@@ -218,4 +218,4 @@ def test_conversation_private_to_owner(app, session_factory, operator_client):
 def test_local_login_still_works(auth_client):
     # auth_client logging in is the break-glass local path; confirm it reaches
     # an authenticated page.
-    assert auth_client.get("/hosts", follow_redirects=False).status_code == 200
+    assert auth_client.get("/inventory", follow_redirects=False).status_code == 200

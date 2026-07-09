@@ -12,7 +12,7 @@
           onsubmit="return confirm('Delete {{ host.name }}?');">
       <button class="btn btn-danger" type="submit">Delete</button>
     </form>
-    <a class="btn btn-ghost" href="/hosts">Back</a>
+    <a class="btn btn-ghost" href="/hosts" onclick="if(window.history.length>1){history.back();return false;}">Back</a>
   </div>
 </header>
 
@@ -45,7 +45,7 @@
     <dt>Application</dt>
     <dd>
       {% if host.org_unit %}
-        <a href="/hosts?org_unit_id={{ host.org_unit.id }}">{{ host.org_unit.path_str }}</a>
+        <a href="/inventory?org_unit_id={{ host.org_unit.id }}">{{ host.org_unit.path_str }}</a>
         <span class="muted">({{ host.org_unit.tier }})</span>
       {% else %}
         <em class="muted">unassigned</em>

@@ -147,7 +147,7 @@ def test_credentials_isolated_between_tenants(alice, bob, session_factory, two_t
         s.add(Credential(name="b-cred", kind="login", username="u",
                          secret_ref="y", tenant_id=two_tenants["b"]))
         s.commit()
-    a_page = alice.get("/credentials").text
+    a_page = alice.get("/inventory").text
     assert "a-cred" in a_page
     assert "b-cred" not in a_page
 
@@ -237,7 +237,7 @@ def test_inactive_tenant_blocks_login_and_access(app, two_tenants, session_facto
     # A user in tenant B (Acme) that we then deactivate.
     _make_user(session_factory, "evan", "tenant_admin", two_tenants["b"])
     client = _login(app, "evan")  # works while active
-    assert client.get("/hosts", follow_redirects=False).status_code == 200
+    assert client.get("/inventory", follow_redirects=False).status_code == 200
 
     # Deactivate the tenant.
     with session_factory() as s:
@@ -246,7 +246,7 @@ def test_inactive_tenant_blocks_login_and_access(app, two_tenants, session_facto
         s.commit()
 
     # The existing session is cut off on the next request (redirect to login).
-    assert client.get("/hosts", follow_redirects=False).status_code == 303
+    assert client.get("/inventory", follow_redirects=False).status_code == 303
     # And a fresh login is refused with a clear message.
     fresh = TestClient(app, raise_server_exceptions=True)
     r = fresh.post("/login", data={"username": "evan", "password": "testpass", "next": "/"},

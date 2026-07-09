@@ -8,6 +8,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/static/app.css?v={{ request.app.state.asset_version if request and request.app.state.asset_version is defined else '1' }}" />
+  <style>
+    /* Delete-confirm modal: keep the checkbox to the LEFT of the label. Inlined
+       here (this document is served no-store, so it is always fresh) with
+       !important so it holds even when a stale app.css is cached by the browser. */
+    .ex-modal-check { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; gap: 8px !important; text-align: left !important; }
+    .ex-modal-check input[type="checkbox"] { flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important; margin: 0 !important; display: inline-block !important; }
+  </style>
   {% block head_extra %}{% endblock %}
 </head>
 <body>
